@@ -2,32 +2,31 @@ import sqlite3
 import datetime
 from typing import Optional, List, Tuple, Dict
 from pathlib import Path
+import math
+# добавь рядом с остальными импортами
+import os, sys
+from pathlib import Path
+
+APP_NAME = "BudgetApp"
+
+def _user_data_dir() -> Path:
+    # macOS
+    if sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    # Windows
+    elif os.name == "nt":
+        base = Path(os.environ.get("APPDATA", str(Path.home() / "AppData" / "Roaming")))
+    # Linux/прочее
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share")))
+    path = base / APP_NAME
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+# Разрешаем переопределить путь через переменную окружения при необходимости
+DB_FILE = str(Path(os.environ.get("BUDGET_DB_PATH", str(_user_data_dir() / "budget.db"))).resolve())
 
 
-# Repo helpers for git automation (used by base.py)
-REPO_ROOT = Path(__file__).resolve().parent
-
-DB_FILE = str(Path(__file__).with_name("budget.db"))
-
-def repo_root() -> Path:
-    """Return repository/application root folder (folder of this bd.py)."""
-    return REPO_ROOT
-
-
-def db_path() -> Path:
-    """Return absolute Path to the SQLite DB file."""
-    return Path(DB_FILE).resolve()
-
-
-def db_relpath_within_repo(root: Path | None = None):
-    """Return DB path relative to repo root if inside it, else None.
-    This is convenient for `git add <relative-path>` from base.py.
-    """
-    try:
-        r = (root or REPO_ROOT).resolve()
-        return db_path().relative_to(r)
-    except Exception:
-        return None
 
 # Safer connection for sync via Git/GitHub: avoid WAL side-files, keep short transactions
 
@@ -39,7 +38,6 @@ def _conn():
     conn.execute("PRAGMA foreign_keys=ON;")
     return conn
 
-############################ git@github.com:Raptor48/budget_pet.git
 # Helpers
 ############################
 
@@ -63,6 +61,20 @@ def _prev_month(month_key: str) -> str:
 def _current_month() -> str:
     return _month_from_date(_today_iso())
 
+
+# Helper to validate numeric amounts
+def _validate_amount(value: float, what: str = "amount") -> float:
+    """Ensure numeric, finite, and non-negative. Returns float or raises ValueError."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{what} must be a number")
+    if not math.isfinite(v):
+        raise ValueError(f"{what} must be a finite number")
+    if v < 0:
+        raise ValueError(f"{what} must be non-negative")
+    return v
+
 ############################
 # DB init
 ############################
@@ -70,6 +82,7 @@ def _current_month() -> str:
 def init_db():
     with _conn() as conn:
         c = conn.cursor()
+
         # Основные расходы
         c.execute(
             """
@@ -81,6 +94,9 @@ def init_db():
             )
             """
         )
+        # Индексы для ускорения выборок
+        c.execute("CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_expenses_cat_date ON expenses(category, date)")
         # Таблица дефолтных лимитов по категориям (редактируемая из GUI)
         c.execute(
             """
@@ -121,6 +137,7 @@ def set_limit(category: str, amount: float) -> None:
     """Установить дефолтный месячный лимит по категории (используется при инициализации месяца).
     Если запись есть — обновит, если нет — создаст.
     """
+    amount = _validate_amount(amount, "limit")
     with _conn() as conn:
         c = conn.cursor()
         c.execute(
@@ -129,7 +146,7 @@ def set_limit(category: str, amount: float) -> None:
             VALUES(?, ?)
             ON CONFLICT(category) DO UPDATE SET default_limit=excluded.default_limit
             """,
-            (category, float(amount)),
+            (category, amount),
         )
         conn.commit()
 
@@ -213,6 +230,7 @@ def get_setting(key: str, default=None):
 APARTMENT_PAYMENT_KEY = "apartment_payment"
 
 def set_apartment_payment(amount: float) -> None:
+    amount = _validate_amount(amount, "apartment payment")
     set_setting(APARTMENT_PAYMENT_KEY, amount)
 
 
@@ -355,6 +373,7 @@ def add_expense(category: str, amount: float, date: Optional[str] = None) -> Tup
     - exceeded=True, если после добавления лимит на месяц ушёл в минус.
     - remaining_after — остаток по категории на месяц после добавления.
     """
+    amount = _validate_amount(amount, "amount")
     date = date or _today_iso()
     month = _month_from_date(date)
     with _conn() as conn:
@@ -362,7 +381,7 @@ def add_expense(category: str, amount: float, date: Optional[str] = None) -> Tup
         c = conn.cursor()
         c.execute(
             "INSERT INTO expenses(category, amount, date) VALUES(?, ?, ?)",
-            (category, float(amount), date),
+            (category, amount, date),
         )
         conn.commit()
         remaining = get_remaining(category, month)
@@ -371,10 +390,29 @@ def add_expense(category: str, amount: float, date: Optional[str] = None) -> Tup
 
 
 def update_expense(expense_id: int, category: str, amount: float) -> None:
+    amount = _validate_amount(amount, "amount")
     with _conn() as conn:
         c = conn.cursor()
-        c.execute("UPDATE expenses SET category=?, amount=? WHERE id=?", (category, float(amount), int(expense_id)))
+        c.execute("UPDATE expenses SET category=?, amount=? WHERE id=?", (category, amount, int(expense_id)))
         conn.commit()
+# last 10 expenses
+def get_recent_expenses(limit: int = 10):
+    with _conn() as conn:
+        c = conn.cursor()
+        c.execute(
+            "SELECT id, category, amount, date FROM expenses ORDER BY date DESC, id DESC LIMIT ?",
+            (int(limit),),
+        )
+        return [(int(r[0]), r[1], float(r[2]), r[3]) for r in c.fetchall()]
+# Расходы по конкретной категории и месяцу
+def get_expenses_by_category_month(category: str, month: str):
+    with _conn() as conn:
+        c = conn.cursor()
+        c.execute(
+            "SELECT id, category, amount, date FROM expenses WHERE category=? AND date LIKE ? ORDER BY date DESC, id DESC",
+            (category, month + "%"),
+        )
+        return [(int(r[0]), r[1], float(r[2]), r[3]) for r in c.fetchall()]
 
 ############################
 # Back-compat simple API used earlier
