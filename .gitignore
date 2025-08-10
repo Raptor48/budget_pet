@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Build
+build/
+dist/
+*.spec
