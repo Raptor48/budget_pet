@@ -6,11 +6,36 @@ import matplotlib.pyplot as plt
 import os, json, base64
 import requests
 import atexit
+import sys
 try:
-    from dotenv import load_dotenv
-    load_dotenv()
+    from dotenv import load_dotenv, find_dotenv
+    def _load_env_multi():
+        # 1) Текущая рабочая папка
+        load_dotenv()
+        # 2) Папка исполняемого файла (.exe/.app)
+        try:
+            if getattr(sys, "frozen", False):
+                exe_dir = Path(sys.executable).resolve().parent
+                load_dotenv(exe_dir / ".env")
+        except Exception:
+            pass
+        # 3) Папка рядом с локальной БД (AppData / Application Support)
+        try:
+            from bd import DB_FILE
+            load_dotenv(Path(DB_FILE).resolve().parent / ".env")
+        except Exception:
+            pass
+        # 4) Поиск «вверх»
+        try:
+            env_path = find_dotenv(usecwd=True)
+            if env_path:
+                load_dotenv(env_path)
+        except Exception:
+            pass
+    _load_env_multi()
 except Exception:
     pass
+
 from pathlib import Path
 
 from bd import DB_FILE
@@ -117,6 +142,7 @@ class BudgetApp(ctk.CTk):
         self.create_buttons()
         # Auto-push on close
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.after(120000, self._periodic_pull)  # каждые 2 минуты
         self._closed = False
         atexit.register(self._atexit_push)
 
@@ -148,15 +174,52 @@ class BudgetApp(ctk.CTk):
                 pass
             self.destroy()
 
-    def _push_db_best_effort(self, message: str):
+    def _periodic_pull(self):
         try:
             from bd import DB_FILE
-            new_sha = github_upload_db(Path(DB_FILE), getattr(self, "_github_sha", None), message)
+            new_sha = github_download_db(Path(DB_FILE))
+            if new_sha and new_sha != getattr(self, "_github_sha", None):
+                self._github_sha = new_sha
+                logger.info("Periodic pull: new sha=%s — refreshing UI", new_sha)
+                self.refresh_table()
+                self.update_remaining_indicator()
+                self.update_summary_indicator()
+        except Exception:
+            pass
+        finally:
+            try:
+                self.after(120000, self._periodic_pull)
+            except Exception:
+                pass
+
+    def _push_db_best_effort(self, message: str):
+        from bd import DB_FILE
+        dbp = Path(DB_FILE)
+        prev = getattr(self, "_github_sha", None)
+        try:
+            new_sha = github_upload_db(dbp, prev, message)
             if new_sha:
                 self._github_sha = new_sha
-                logger.info("Pushed DB best-effort, sha=%s", new_sha)
+                logger.info("GitHub push ok, sha=%s", new_sha)
+                return
+        except RuntimeError as e:
+            if "409" in str(e):
+                logger.warning("Push conflict (409). Pulling latest and retrying once...")
+                try:
+                    pulled = github_download_db(dbp)
+                    if pulled:
+                        self._github_sha = pulled
+                    new_sha = github_upload_db(dbp, self._github_sha, message + " (retry)")
+                    if new_sha:
+                        self._github_sha = new_sha
+                        logger.info("Retry push ok, sha=%s", new_sha)
+                        return
+                except Exception:
+                    logger.error("Retry push failed", exc_info=True)
+            else:
+                logger.error("Push failed: %s", e)
         except Exception:
-            logger.warning("Push DB failed (best-effort)", exc_info=True)
+            logger.error("Push failed (unexpected)", exc_info=True)
 
     def create_top_panel(self):
         self.category_var = tk.StringVar(value="Food")
