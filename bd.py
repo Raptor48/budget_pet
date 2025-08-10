@@ -395,6 +395,26 @@ def update_expense(expense_id: int, category: str, amount: float) -> None:
         c = conn.cursor()
         c.execute("UPDATE expenses SET category=?, amount=? WHERE id=?", (category, amount, int(expense_id)))
         conn.commit()
+def delete_category(category: str) -> None:
+    """Удалить категорию полностью: лимит, месячные бюджеты и все расходы."""
+    if not category:
+        return
+    with _conn() as conn:
+        c = conn.cursor()
+        # Удаляем расходы
+        c.execute("DELETE FROM expenses WHERE category=?", (category,))
+        # Удаляем бюджеты по месяцам
+        c.execute("DELETE FROM monthly_budgets WHERE category=?", (category,))
+        # Удаляем дефолтный лимит
+        c.execute("DELETE FROM category_limits WHERE category=?", (category,))
+        conn.commit()
+
+def delete_expense(expense_id: int) -> None:
+    with _conn() as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM expenses WHERE id=?", (int(expense_id),))
+        conn.commit()
+
 # last 10 expenses
 def get_recent_expenses(limit: int = 10):
     with _conn() as conn:
