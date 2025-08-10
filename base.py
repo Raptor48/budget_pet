@@ -1,46 +1,85 @@
 import customtkinter as ctk
 import tkinter as tk
-from tkinter import ttk, simpledialog, messagebox
-from bd import get_expenses, get_expenses_for_month, add_expense, update_expense, set_limit_and_apply, get_remaining, get_month_report, set_apartment_payment, get_apartment_payment, list_months, get_current_month, prev_month
+from tkinter import ttk, messagebox
+from bd import get_expenses_for_month, add_expense, update_expense, set_limit_and_apply, get_remaining, get_month_report, set_apartment_payment, get_apartment_payment, list_months, get_current_month, prev_month
 import matplotlib.pyplot as plt
-import subprocess
+import os, json, base64
+import requests
+import atexit
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
 from pathlib import Path
-from datetime import datetime
-from bd import DB_FILE, repo_root, db_relpath_within_repo
 
-# --- Git automation helpers ---
-REPO_ROOT = repo_root()
+from bd import DB_FILE
 
-def _git(*args):
-    """Run a git command in repo root and return (returncode, stdout, stderr)."""
-    proc = subprocess.run(["git", *args], cwd=REPO_ROOT, capture_output=True, text=True)
-    return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+# --- Logging setup (console + file) ---
+import logging
+LOG_FILE = Path(DB_FILE).with_name("app.log")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(LOG_FILE, encoding="utf-8")
+    ],
+)
+logger = logging.getLogger("budget")
 
-def git_pull_startup():
-    """Pull latest changes before opening the app UI (best-effort)."""
-    _git("fetch")
-    rc, out, err = _git("pull", "--rebase")
-    if rc != 0:
-        _git("pull")  # fallback
+# --- GitHub API sync helpers (works in exe/app) ---
+GITHUB_TOKEN  = os.getenv("GITHUB_TOKEN")
+GITHUB_OWNER  = os.getenv("GITHUB_OWNER")
+GITHUB_REPO   = os.getenv("GITHUB_REPO")
+GITHUB_DBPATH = os.getenv("GITHUB_DB_PATH", "budget.db")  # path in repo
+GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main")
 
-def git_add_commit_push(message: str | None = None):
-    """Stage DB and push changes (best-effort, no hard failures)."""
-    try:
-        db_rel = Path(DB_FILE)
-        if db_rel.is_absolute():
-            try:
-                db_rel = db_rel.relative_to(REPO_ROOT)
-            except ValueError:
-                # DB is outside repo; nothing to do
-                return
-        _git("add", str(db_rel))
-        if message is None:
-            message = f"Auto-update DB {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        _git("commit", "-m", message)  # может быть no-op — окей
-        _git("push")
-    except Exception:
-        # best-effort: не мешаем работе приложения
-        pass
+_GH_API = (
+    f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/contents/{GITHUB_DBPATH}"
+    if GITHUB_OWNER and GITHUB_REPO else None
+)
+
+def _gh_headers():
+    if not GITHUB_TOKEN:
+        raise RuntimeError("GITHUB_TOKEN is not set")
+    return {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json",
+    }
+
+def github_download_db(dest_path: Path) -> str | None:
+    """Download budget.db from GitHub to dest_path. Return SHA (or None if file not found)."""
+    logger.info("GitHub: downloading DB from %s", _GH_API)
+    if not _GH_API:
+        return None
+    r = requests.get(_GH_API, headers=_gh_headers(), params={"ref": GITHUB_BRANCH})
+    if r.status_code == 404:
+        logger.warning("GitHub: DB not found (404) at %s", _GH_API)
+        return None
+    r.raise_for_status()
+    data = r.json()
+    content = base64.b64decode(data["content"]) if isinstance(data.get("content"), str) else b""
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    dest_path.write_bytes(content)
+    logger.info("GitHub: downloaded DB, sha=%s, bytes=%d", data.get("sha"), len(content))
+    return data.get("sha")
+
+def github_upload_db(src_path: Path, sha: str | None, message: str = "Update budget.db") -> str | None:
+    """Upload DB to GitHub; returns new SHA. If 409 -> raise RuntimeError to be handled by caller."""
+    if not _GH_API:
+        return None
+    logger.info("GitHub: uploading DB, prev sha=%s", sha)
+    content_b64 = base64.b64encode(src_path.read_bytes()).decode()
+    payload = {"message": message, "content": content_b64, "branch": GITHUB_BRANCH}
+    if sha:
+        payload["sha"] = sha
+    r = requests.put(_GH_API, headers=_gh_headers(), data=json.dumps(payload))
+    if r.status_code == 409:
+        raise RuntimeError("Remote has changed (409). Pull latest and retry.")
+    r.raise_for_status()
+    logger.info("GitHub: uploaded DB, new sha=%s", r.json()["content"]["sha"])
+    return r.json()["content"]["sha"]
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
@@ -78,11 +117,46 @@ class BudgetApp(ctk.CTk):
         self.create_buttons()
         # Auto-push on close
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+        self._closed = False
+        atexit.register(self._atexit_push)
+
+
+    def _atexit_push(self):
+        # Fallback in case the window/process exits without WM_DELETE_WINDOW (e.g., Cmd+Q, IDE stop)
+        if getattr(self, "_closed", False):
+            return
+        logger.info("Atexit: pushing DB...")
+        try:
+            self._push_db_best_effort("Atexit: update budget.db")
+        except Exception:
+            logger.warning("Atexit push failed", exc_info=True)
 
     def on_close(self):
-        # Commit and push DB changes on exit (best-effort)
-        git_add_commit_push()
-        self.destroy()
+        self._closed = True
+        logger.info("Closing app: pushing DB...")
+        try:
+            self._push_db_best_effort("GUI close: update budget.db")
+            logger.info("Closed app")
+        finally:
+            try:
+                for h in logger.handlers:
+                    try:
+                        h.flush()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            self.destroy()
+
+    def _push_db_best_effort(self, message: str):
+        try:
+            from bd import DB_FILE
+            new_sha = github_upload_db(Path(DB_FILE), getattr(self, "_github_sha", None), message)
+            if new_sha:
+                self._github_sha = new_sha
+                logger.info("Pushed DB best-effort, sha=%s", new_sha)
+        except Exception:
+            logger.warning("Push DB failed (best-effort)", exc_info=True)
 
     def create_top_panel(self):
         self.category_var = tk.StringVar(value="Food")
@@ -95,7 +169,7 @@ class BudgetApp(ctk.CTk):
         self.amount_entry = ctk.CTkEntry(self.top_frame, placeholder_text="amount")
         self.amount_entry.grid(row=0, column=1, padx=10, pady=10)
 
-        self.add_btn = ctk.CTkButton(self.top_frame, text="Add expanses", command=self.add_expense_btn)
+        self.add_btn = ctk.CTkButton(self.top_frame, text="Add expenses", command=self.add_expense_btn)
         self.add_btn.grid(row=0, column=2, padx=10, pady=10)
 
         # Выбор месяца и месяца для сравнения
@@ -145,7 +219,7 @@ class BudgetApp(ctk.CTk):
         self.visual_frame.grid(row=3, column=0, columnspan=3, pady=10)
         pie_btn = ctk.CTkButton(self.visual_frame, text="Circle Chart", command=self.show_pie_chart)
         pie_btn.grid(row=0, column=0, padx=10)
-        bar_btn = ctk.CTkButton(self.visual_frame, text="Line Chart", command=self.show_bar_chart)
+        bar_btn = ctk.CTkButton(self.visual_frame, text="Bar Chart", command=self.show_bar_chart)
         bar_btn.grid(row=0, column=1, padx=10)
 
     def create_table(self):
@@ -297,6 +371,7 @@ class BudgetApp(ctk.CTk):
         amount = self.amount_entry.get()
         try:
             amount = float(amount)
+            logger.info("Add expense: %s %.2f", category, amount)
             exceeded, remaining = add_expense(category, amount)
             if exceeded:
                 messagebox.showwarning(
@@ -308,8 +383,9 @@ class BudgetApp(ctk.CTk):
             self.update_remaining_indicator()
             self.update_summary_indicator()
             self.update_month_menus()
-            git_add_commit_push("Add expense")
+            self._push_db_best_effort("Add expense")
         except ValueError:
+            logger.error("Add expense failed: not a number: %r", self.amount_entry.get())
             messagebox.showerror("error", "numbers only")
             self.amount_entry.delete(0, tk.END)
 
@@ -318,6 +394,7 @@ class BudgetApp(ctk.CTk):
         raw = self.limit_entry.get().strip()
         try:
             amount = float(raw)
+            logger.info("Set limit: %s -> %.2f", category, amount)
         except ValueError:
             messagebox.showerror("error", "numbers only")
             self.limit_entry.delete(0, tk.END)
@@ -329,14 +406,16 @@ class BudgetApp(ctk.CTk):
             self.update_remaining_indicator()
             self.update_summary_indicator()
             self.update_month_menus()
-            git_add_commit_push("Update limit")
+            self._push_db_best_effort("Update limit")
         except Exception as e:
+            logger.error("Set limit failed: %s", e)
             messagebox.showerror("Error", f"Cant save the limit: {e}")
 
     def save_apart_btn_click(self):
         raw = self.apart_entry.get().strip()
         try:
             amount = float(raw)
+            logger.info("Set apartment payment: %.2f", amount)
         except ValueError:
             messagebox.showerror("error", "numbers only")
             self.apart_entry.delete(0, tk.END)
@@ -345,8 +424,9 @@ class BudgetApp(ctk.CTk):
             set_apartment_payment(amount)
             messagebox.showinfo("ok", f"Apartment payment saved: {amount:.2f}")
             self.apart_entry.delete(0, tk.END)
-            git_add_commit_push("Update apartment payment")
+            self._push_db_best_effort("Update apartment payment")
         except Exception as e:
+            logger.error("Set apartment payment failed: %s", e)
             messagebox.showerror("error", f"cannot save: {e}")
 
     def on_category_change(self, value):
@@ -424,12 +504,14 @@ class BudgetApp(ctk.CTk):
 
     def edit_callback(self, expense_id, new_category, new_amount):
         try:
+            logger.info("Edit expense id=%s -> (%s, %.2f)", expense_id, new_category, float(new_amount))
             update_expense(expense_id, new_category, float(new_amount))
             self.refresh_table()
             self.update_remaining_indicator()
             self.update_summary_indicator()
-            git_add_commit_push("Edit expense")
+            self._push_db_best_effort("Edit expense")
         except Exception as e:
+            logger.error("Edit expense failed: %s", e)
             messagebox.showerror("Error", f"Failed to update: {e}")
 
     # ----- Простые заглушки визуализации -----
@@ -498,7 +580,16 @@ class EditDialog(ctk.CTkToplevel):
         self.destroy()
 
 if __name__ == "__main__":
-    # Pull latest DB on start (best-effort)
-    git_pull_startup()
+    # Pull latest DB from GitHub before opening UI (best-effort)
+    from bd import DB_FILE
+    db_path = Path(DB_FILE)
+    logger.info("Startup: downloading DB from GitHub to %s", db_path)
+    try:
+        _initial_sha = github_download_db(db_path)
+    except Exception:
+        _initial_sha = None
+        logger.error("Startup: GitHub download failed", exc_info=True)
     app = BudgetApp()
+    app._github_sha = _initial_sha
+    logger.info("Startup: DB sha=%s", _initial_sha)
     app.mainloop()
