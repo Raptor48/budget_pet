@@ -934,6 +934,29 @@ class EditDialog(ctk.CTkToplevel):
 
 # --- Settings dialog ---
 class SettingsDialog(ctk.CTkToplevel):
+    def _apply_log_level(self):
+        lvl = self.log_var.get()
+        try:
+            level = getattr(logging, lvl, logging.INFO)
+            logger.setLevel(level)
+            for h in logger.handlers:
+                h.setLevel(level)
+            messagebox.showinfo("Logging", f"Level set to {lvl}")
+        except Exception as e:
+            messagebox.showerror("Logging", f"Failed: {e}")
+
+    def _open_log_file(self):
+        try:
+            from bd import DB_FILE
+            log_file = Path(DB_FILE).with_name("app.log")
+            if sys.platform.startswith('darwin'):
+                os.system(f'open "{log_file}"')
+            elif os.name == 'nt':
+                os.startfile(str(log_file))
+            else:
+                os.system(f'xdg-open "{log_file}"')
+        except Exception as e:
+            messagebox.showerror("Open log", f"Failed: {e}")
     def __init__(self, parent: "BudgetApp"):
         super().__init__(parent)
         self.parent = parent
@@ -1219,26 +1242,3 @@ if __name__ == "__main__":
     app._set_status(f"Pulled: {datetime.now().strftime('%H:%M:%S')} / Sha: {app._github_sha}")
     logger.info("Startup: DB sha=%s", _initial_sha)
     app.mainloop()
-    def _apply_log_level(self):
-        lvl = self.log_var.get()
-        try:
-            level = getattr(logging, lvl, logging.INFO)
-            logger.setLevel(level)
-            for h in logger.handlers:
-                h.setLevel(level)
-            messagebox.showinfo("Logging", f"Level set to {lvl}")
-        except Exception as e:
-            messagebox.showerror("Logging", f"Failed: {e}")
-
-    def _open_log_file(self):
-        try:
-            from bd import DB_FILE
-            log_file = Path(DB_FILE).with_name("app.log")
-            if sys.platform.startswith('darwin'):
-                os.system(f'open "{log_file}"')
-            elif os.name == 'nt':
-                os.startfile(str(log_file))
-            else:
-                os.system(f'xdg-open "{log_file}"')
-        except Exception as e:
-            messagebox.showerror("Open log", f"Failed: {e}")
