@@ -291,6 +291,11 @@ async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 FREE_TEXT_RE = re.compile(r"^(?P<cat>[A-Za-zА-Яа-яЁё][\w &\\-]+)\s+(?P<amt>\d+(?:[.,]\d+)?)$")
 
 async def text_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # гарантируем свежую БД перед проверкой категории
+    try:
+        github_pull_set_db()
+    except Exception as e:
+        log.warning("github pull before text_add failed: %s", e)
     if not _allowed(update.effective_user.id):
         return
     text = (update.message.text or "").strip()
@@ -339,4 +344,10 @@ if __name__ == "__main__":
 
     log.info("Starting bot, DB: %s", DB_FILE)
     log.info("GH owner/repo: %s/%s, token_present=%s", os.getenv("GITHUB_OWNER"), os.getenv("GITHUB_REPO"), bool(os.getenv("GITHUB_TOKEN")))
+    # один раз подтянем БД при старте
+    try:
+        github_pull_set_db()
+        log.info("Initial GitHub DB pull: OK")
+    except Exception as e:
+        log.warning("Initial GitHub DB pull failed: %s", e)
     app.run_polling(allowed_updates=Update.ALL_TYPES)
