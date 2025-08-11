@@ -224,7 +224,7 @@ class BudgetApp(ctk.CTk):
                 self.refresh_table()
                 self.update_remaining_indicator()
                 self.update_summary_indicator()
-                self._set_status(f"Pulled: {datetime.now().strftime('%H:%M:%S')} / Sha: {self._github_sha}")
+                self._set_status(f"Pulled: {datetime.now().strftime('%I:%M:%S %p')} / Sha: {self._github_sha}")
         except Exception:
             self._inc_error("Periodic pull failed")
             pass
@@ -263,7 +263,7 @@ class BudgetApp(ctk.CTk):
             if new_sha:
                 self._github_sha = new_sha
                 logger.info("GitHub push ok, sha=%s", new_sha)
-                self._set_status(f"Pushed: {datetime.now().strftime('%H:%M:%S')} / Sha: {self._github_sha}")
+                self._set_status(f"Pushed: {datetime.now().strftime('%I:%M:%S %p')} / Sha: {self._github_sha}")
                 return
         except RuntimeError as e:
             if "409" in str(e):
@@ -655,7 +655,7 @@ class BudgetApp(ctk.CTk):
                 self.refresh_table()
                 self.update_remaining_indicator()
                 self.update_summary_indicator()
-                self._set_status(f"Pulled (manual): {datetime.now().strftime('%H:%M:%S')} / Sha: {self._github_sha}")
+                self._set_status(f"Pulled (manual): {datetime.now().strftime('%I:%M:%S %p')} / Sha: {self._github_sha}")
         except Exception:
             self._inc_error("Manual sync failed")
 
@@ -924,12 +924,37 @@ class EditDialog(ctk.CTkToplevel):
         self.amount_entry.insert(0, amount)
         self.amount_entry.pack()
 
-        ctk.CTkButton(self, text="Save", command=self.save).pack(pady=10)
-        ctk.CTkButton(self, text="Cancel", command=self.destroy).pack()
+        ctk.CTkButton(self, text="Save", command=self.save).pack(pady=(10, 4))
+        ctk.CTkButton(self, text="Cancel", command=self.destroy).pack(pady=(0, 6))
+        ctk.CTkButton(
+            self,
+            text="Delete",
+            fg_color="#b72b2b",
+            hover_color="#8f1f1f",
+            command=self.delete_record
+        ).pack()
 
     def save(self):
         self.on_save(self.expense_id, self.category_var.get(), self.amount_entry.get())
         self.destroy()
+
+    def delete_record(self):
+        if not messagebox.askyesno("Delete", f"Delete record #{self.expense_id}?"):
+            return
+        try:
+            delete_expense(int(self.expense_id))
+            logger.info("Deleted expense id=%s (from EditDialog)", self.expense_id)
+            # обновить родителя
+            try:
+                self.master.refresh_table()
+                self.master.update_remaining_indicator()
+                self.master.update_summary_indicator()
+                self.master._push_db_best_effort("Delete expense (from edit)")
+            except Exception:
+                pass
+            self.destroy()
+        except Exception as e:
+            messagebox.showerror("Error", f"Cannot delete: {e}")
 
 
 # --- Settings dialog ---
@@ -1130,7 +1155,7 @@ class SettingsDialog(ctk.CTkToplevel):
             return
 
         try:
-            set_limit(name, amount)
+            set_limit_and_apply(name, amount, self.parent.month_var.get())
             # refresh parent category dropdown & select new category
             try:
                 self.parent.reload_categories(prefer=name)
@@ -1189,7 +1214,7 @@ class SettingsDialog(ctk.CTkToplevel):
             return
         try:
             amount = float(raw)
-            set_limit(name, amount)
+            set_limit_and_apply(name, amount, self.parent.month_var.get())
             try:
                 self.parent.reload_categories()
             except Exception:
@@ -1239,6 +1264,6 @@ if __name__ == "__main__":
         logger.error("Startup: GitHub download failed", exc_info=True)
     app = BudgetApp()
     app._github_sha = _initial_sha
-    app._set_status(f"Pulled: {datetime.now().strftime('%H:%M:%S')} / Sha: {app._github_sha}")
+    app._set_status(f"Pulled: {datetime.now().strftime('%I:%M:%S %p')} / Sha: {app._github_sha}")
     logger.info("Startup: DB sha=%s", _initial_sha)
     app.mainloop()

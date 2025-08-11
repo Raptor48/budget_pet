@@ -24,7 +24,21 @@ def _user_data_dir() -> Path:
     return path
 
 # Разрешаем переопределить путь через переменную окружения при необходимости
-DB_FILE = str(Path(os.environ.get("BUDGET_DB_PATH", str(_user_data_dir() / "budget.db"))).resolve())
+# поддержим оба имени переменной окружения
+_env_db = os.getenv("BUDGET_DB_FILE") or os.getenv("BUDGET_DB_PATH")
+DB_FILE = str(Path(_env_db if _env_db else (_user_data_dir() / "budget.db")).resolve())
+
+def set_db_path(new_path: str) -> str:
+    """Переключить файл БД во время работы (бот скачал в /tmp и т.п.)."""
+    global DB_FILE
+    p = Path(new_path).expanduser().resolve()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    DB_FILE = str(p)
+    init_db()  # idempotent: создаст таблицы при необходимости
+    return DB_FILE
+
+def get_db_path() -> str:
+    return DB_FILE
 
 
 
