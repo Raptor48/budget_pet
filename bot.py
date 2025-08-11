@@ -3,8 +3,8 @@ load_dotenv(find_dotenv(), override=True)
 import os, re, logging
 from datetime import datetime
 # --- telegram imports
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
 
 # --- GitHub I/O (standalone for bot.py) --------------------------------------
 import json, base64, time
@@ -132,11 +132,15 @@ from bd import (
 
 # --- конфиг
 TOKEN = os.getenv("TG_BOT_TOKEN") or ""
-ALLOWED = {
-    int(x) for x in (os.getenv("TG_ALLOWED_USER_IDS", "").replace(" ", "").split(",") if os.getenv("TG_ALLOWED_USER_IDS") else [])
-}
-
+_raw_allowed = os.getenv("TG_ALLOWED_USER_IDS", "")
+try:
+    _ids = re.findall(r"\d+", _raw_allowed)
+    ALLOWED = {int(x) for x in _ids}
+except Exception:
+    ALLOWED = set()
 log = logging.getLogger("tg-bot")
+log.info("Allowed users raw: %r", _raw_allowed)
+log.info("Allowed users parsed: %s", sorted(ALLOWED))
 
 def _allowed(user_id: int) -> bool:
     # если список пустой — пускаем всех; если не пустой — только перечисленных
@@ -155,18 +159,68 @@ def _find_category(user_input: str) -> str | None:
     lower_map = {c.lower(): c for c in cats}
     return lower_map.get(user_input.strip().lower())
 
+def _build_main_keyboard() -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton("Отчёт (месяц)", callback_data="report")],
+        [InlineKeyboardButton("Лимиты", callback_data="limits")],
+        [InlineKeyboardButton("➕ Добавить расход", callback_data="menu:add:0")],
+    ]
+    return InlineKeyboardMarkup(rows)
+
+# --- categories menu with pagination ---
+def _build_categories_keyboard(page: int = 0, per_page: int = 8) -> InlineKeyboardMarkup:
+    """Inline-клавиатура для выбора категории с пагинацией. per_page = кол-во кнопок категорий."""
+    try:
+        cats = [name for name, _ in (list_limits() or [])]
+    except Exception:
+        cats = []
+    total = len(cats)
+    start = max(0, page * per_page)
+    end = min(total, start + per_page)
+    page_cats = cats[start:end]
+
+    rows = []
+    # кладём по 2 кнопки в ряд
+    for i in range(0, len(page_cats), 2):
+        chunk = page_cats[i:i+2]
+        rows.append([InlineKeyboardButton(c, callback_data=f"ask:{c}") for c in chunk])
+
+    # навигация
+    nav = []
+    if start > 0:
+        nav.append(InlineKeyboardButton("◀️", callback_data=f"menu:add:{page-1}"))
+    if end < total:
+        nav.append(InlineKeyboardButton("▶️", callback_data=f"menu:add:{page+1}"))
+    if nav:
+        rows.append(nav)
+
+    # назад в главное меню
+    rows.append([InlineKeyboardButton("⬅️ Назад", callback_data="back:main")])
+
+    # если категорий нет – сообщим об этом
+    if not cats:
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ Назад", callback_data="back:main")]
+        ])
+
+    return InlineKeyboardMarkup(rows)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user:
         return
     uid = update.effective_user.id
+    # Всегда покажем user_id, чтобы человек мог прислать его администратору
+    await update.message.reply_text(
+        "Привет! Я бюджет-бот.\n"
+        f"Твой user_id: {uid}\n\n"
+        "Если доступ не выдан, сообщи свой user_id владельцу бота."
+    )
     if not _allowed(uid):
         return
     context.user_data["month"] = get_current_month()
     await update.message.reply_text(
-        "Привет! Я бюджет-бот.\n"
-        f"Твой user_id: {uid}\n\n"
-        "Формат: `food 50`\n"
-        "Команды: /help, /report, /report <cat>, /setlimit <cat> <amt>, /limits, /month [YYYY-MM]",
+        "Выбери действие:",
+        reply_markup=_build_main_keyboard(),
     )
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -288,6 +342,108 @@ async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lines.append(f"ИТОГО: spent {total_s:.2f} / budget {total_b:.2f}")
     await update.message.reply_text("\n".join(lines))
 
+async def on_btn(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user:
+        return
+    if not _allowed(update.effective_user.id):
+        return
+    q = update.callback_query
+    await q.answer()
+    data = q.data or ""
+
+    if data.startswith("menu:add"):
+        # форматы: "menu:add" или "menu:add:<page>"
+        try:
+            parts = data.split(":")
+            page = int(parts[2]) if len(parts) > 2 else 0
+        except Exception:
+            page = 0
+        try:
+            github_pull_set_db()
+        except Exception as e:
+            log.warning("github pull before menu(add) failed: %s", e)
+        await q.edit_message_text("Выберите категорию:", reply_markup=_build_categories_keyboard(page))
+        return
+
+    if data == "back:main":
+        await q.edit_message_text("Выбери действие:", reply_markup=_build_main_keyboard())
+        return
+
+    if data == "report":
+        try:
+            github_pull_set_db()
+        except Exception as e:
+            log.warning("github pull before report(btn) failed: %s", e)
+        month = _current_month_for_user(context)
+        report = get_month_report(month) or {}
+        if not report:
+            await q.edit_message_text(f"[{month}] данных нет.")
+            return
+        lines = [f"[{month}] Отчёт:"]
+        total_b, total_s = 0.0, 0.0
+        for cat, d in sorted(report.items()):
+            b = float(d.get("budget", 0.0))
+            s = float(d.get("spent", 0.0))
+            r = float(d.get("remaining", 0.0))
+            lines.append(f"• {cat}: spent {s:.2f} / budget {b:.2f} → rem {r:.2f}")
+            total_b += b; total_s += s
+        lines.append(f"ИТОГО: spent {total_s:.2f} / budget {total_b:.2f}")
+        await q.edit_message_text("\n".join(lines), reply_markup=_build_main_keyboard())
+        return
+
+    if data == "limits":
+        try:
+            github_pull_set_db()
+        except Exception as e:
+            log.warning("github pull before limits(btn) failed: %s", e)
+        pairs = list_limits() or []
+        txt = "Лимиты не заданы." if not pairs else "Лимиты:\n" + "\n".join(f"{c}: {float(v):.2f}" for c, v in pairs)
+        await q.edit_message_text(txt, reply_markup=_build_main_keyboard())
+        return
+
+    if data.startswith("ask:"):
+        cat = data.split(":", 1)[1]
+        # запоминаем, что ждём сумму для этой категории
+        context.user_data["await_amount_for"] = cat
+        await q.edit_message_text(
+            f"Введите сумму для категории '{cat}' (например, 123.45).",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Отмена", callback_data="cancel")]
+            ])
+        )
+        return
+
+    if data == "cancel":
+        # сбрасываем ожидание суммы
+        context.user_data.pop("await_amount_for", None)
+        await q.edit_message_text("Выбери действие:", reply_markup=_build_main_keyboard())
+        return
+
+    if data.startswith("add:"):
+        try:
+            _, cat, amt = data.split(":", 2)
+            amount = float(amt)
+        except Exception:
+            await q.edit_message_text("Неверные данные кнопки.", reply_markup=_build_main_keyboard())
+            return
+        try:
+            @with_github_db(f"bot: add {cat} {amount:.2f}")
+            def _op():
+                from bd import add_expense
+                return add_expense(cat, amount)
+            exceeded, remaining = _op()
+            msg = f"OK: {cat} +{amount:.2f}"
+            if exceeded:
+                msg += f" — лимит превышен, остаток {remaining:.2f}"
+            await q.edit_message_text(msg, reply_markup=_build_main_keyboard())
+        except Exception as e:
+            log.error("add via button failed: %s", e)
+            await q.edit_message_text(f"Ошибка: {e}", reply_markup=_build_main_keyboard())
+        return
+
+    # по умолчанию — просто восстановим клавиатуру
+    await q.edit_message_text("Выбери действие:", reply_markup=_build_main_keyboard())
+
 FREE_TEXT_RE = re.compile(r"^(?P<cat>[A-Za-zА-Яа-яЁё][\w &\\-]+)\s+(?P<amt>\d+(?:[.,]\d+)?)$")
 
 async def text_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -299,6 +455,31 @@ async def text_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not _allowed(update.effective_user.id):
         return
     text = (update.message.text or "").strip()
+    # режим ввода только суммы после нажатия кнопки "…"
+    pending_cat = context.user_data.get("await_amount_for")
+    if pending_cat:
+        amt_txt = text.replace(",", ".")
+        try:
+            amount = float(amt_txt)
+        except ValueError:
+            await update.message.reply_text("Введите число, например 123.45 или 123,45. Или нажмите Отмена.")
+            return
+        try:
+            @with_github_db(f"bot: add {pending_cat} {amount:.2f}")
+            def _op():
+                from bd import add_expense
+                return add_expense(pending_cat, amount)
+            exceeded, remaining = _op()
+            context.user_data.pop("await_amount_for", None)
+            msg = f"OK: {pending_cat} +{amount:.2f}"
+            if exceeded:
+                msg += f" — ВНИМАНИЕ: лимит превышен. Остаток: {remaining:.2f}"
+            await update.message.reply_text(msg, reply_markup=_build_main_keyboard())
+        except Exception as e:
+            log.error("add_expense (custom amount) failed: %s", e)
+            await update.message.reply_text(f"Ошибка: {e}")
+        return
+
     m = FREE_TEXT_RE.match(text)
     if not m:
         await update.message.reply_text("Формат: <category> <amount> (например, food 50)")
@@ -340,6 +521,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("limits", limits_cmd))
     app.add_handler(CommandHandler("setlimit", setlimit_cmd))
     app.add_handler(CommandHandler("report", report_cmd))
+    app.add_handler(CallbackQueryHandler(on_btn))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_add))
 
     log.info("Starting bot, DB: %s", DB_FILE)
@@ -350,4 +532,4 @@ if __name__ == "__main__":
         log.info("Initial GitHub DB pull: OK")
     except Exception as e:
         log.warning("Initial GitHub DB pull failed: %s", e)
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)

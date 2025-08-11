@@ -28,7 +28,7 @@ def _user_data_dir() -> Path:
 _env_db = os.getenv("BUDGET_DB_FILE") or os.getenv("BUDGET_DB_PATH")
 DB_FILE = str(Path(_env_db if _env_db else (_user_data_dir() / "budget.db")).resolve())
 
-def set_db_path(new_path: str) -> str:
+def (new_path: str) -> str:
     """Переключить файл БД во время работы (бот скачал в /tmp и т.п.)."""
     global DB_FILE
     p = Path(new_path).expanduser().resolve()
