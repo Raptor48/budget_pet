@@ -7,9 +7,60 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
 
 # --- GitHub I/O (standalone for bot.py) --------------------------------------
-import json, base64, time
+import json, base64, time, sqlite3
 from pathlib import Path
 import requests
+BOT_CURRENCY_SYMBOL = os.getenv("BOT_CURRENCY_SYMBOL", "$")
+
+def _format_report_html(report, month):
+    lines = [f"<b>Отчёт за {month}</b>", ""]
+    max_cat_len = max(len(r[0]) for r in report)
+    for category, spent, limit, remaining in report:
+        limit_str = f"${limit:.2f}" if limit is not None else "—"
+        lines.append(f"{category.ljust(max_cat_len)}  ${spent:.2f} / {limit_str}  Остаток: ${remaining:.2f}")
+    return "<pre>" + "\n".join(lines) + "</pre>"
+
+def _ensure_peers_table(db_path):
+    """Ensure the peers table exists in the specified database."""
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS peers (
+                    id INTEGER PRIMARY KEY,
+                    username TEXT
+                );
+                """
+            )
+    except Exception as e:
+        log.warning("Failed to ensure peers table: %s", e)
+
+def _add_peer_if_new(db_path, user_id, username):
+    """Add user to peers table if not already present."""
+    _ensure_peers_table(db_path)
+    try:
+        with sqlite3.connect(db_path) as conn:
+            cur = conn.execute("SELECT 1 FROM peers WHERE id=?", (user_id,))
+            if cur.fetchone() is None:
+                conn.execute("INSERT INTO peers(id, username) VALUES (?, ?)", (user_id, username))
+    except Exception as e:
+        log.warning("Failed to add peer: %s", e)
+
+def _get_peer_ids(db_path, exclude_id=None, allowed_ids=None):
+    """Return list of peer ids, optionally excluding one and filtering by allowed_ids."""
+    _ensure_peers_table(db_path)
+    try:
+        with sqlite3.connect(db_path) as conn:
+            rows = conn.execute("SELECT id FROM peers").fetchall()
+            ids = [row[0] for row in rows]
+        if exclude_id is not None:
+            ids = [i for i in ids if i != exclude_id]
+        if allowed_ids is not None and len(allowed_ids) > 0:
+            ids = [i for i in ids if i in allowed_ids]
+        return ids
+    except Exception as e:
+        log.warning("Failed to get peer ids: %s", e)
+        return []
 
 # --- logging config (early, before any log.info) ---
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -108,6 +159,7 @@ def with_github_db(commit_message: str):
 
 # -------------------------------------------------------------------------------
 
+
 def github_pull_set_db():
     """Pull the latest DB from GitHub to a temp path and switch bd.py to use it.
     Returns the sha of the pulled file (or None if not found).
@@ -118,6 +170,163 @@ def github_pull_set_db():
     set_db_path(str(tmp))
     init_db()
     return sha
+
+
+# --- category usage (MRU/most-used sorting) ----------------------------------
+
+def _current_db_path() -> str | None:
+    try:
+        from bd import get_db_path
+        return get_db_path()
+    except Exception:
+        try:
+            from bd import DB_FILE
+            return DB_FILE
+        except Exception:
+            return None
+
+
+def _record_category_use(cat: str):
+    """Increment usage counter and update last_used_ts for a category in the current DB."""
+    dbp = _current_db_path()
+    if not dbp:
+        return
+    ts = int(time.time())
+    try:
+        with sqlite3.connect(dbp) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS category_usage (
+                    category     TEXT PRIMARY KEY COLLATE NOCASE,
+                    use_count    INTEGER NOT NULL DEFAULT 0,
+                    last_used_ts INTEGER NOT NULL DEFAULT 0
+                );
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO category_usage(category, use_count, last_used_ts)
+                VALUES(?, 1, ?)
+                ON CONFLICT(category) DO UPDATE SET
+                    use_count    = use_count + 1,
+                    last_used_ts = excluded.last_used_ts
+                ;
+                """,
+                (cat, ts),
+            )
+    except Exception as e:
+        log.warning("record_category_use failed: %s", e)
+
+
+def _sort_categories_by_usage(cats: list[str]) -> list[str]:
+    """Sort categories by last_used_ts DESC, then use_count DESC, then name ASC.
+    If usage table absent/empty, returns input sorted alphabetically.
+    """
+    if not cats:
+        return []
+    dbp = _current_db_path()
+    if not dbp:
+        return sorted(cats, key=lambda x: x.lower())
+    ranks = {}
+    try:
+        with sqlite3.connect(dbp) as conn:
+            for c, cnt, ts in conn.execute(
+                "SELECT category, use_count, last_used_ts FROM category_usage"
+            ):
+                ranks[c.lower()] = (int(ts or 0), int(cnt or 0))
+    except Exception:
+        return sorted(cats, key=lambda x: x.lower())
+
+    def _key(name: str):
+        ts, cnt = ranks.get(name.lower(), (0, 0))
+        return (-ts, -cnt, name.lower())
+
+    return sorted(cats, key=_key)
+
+
+# --- budget threshold notifications (50% / 90%) ------------------------------
+
+THRESHOLDS = (50, 90)
+
+
+def _alerts_db_path() -> str | None:
+    return _current_db_path()
+
+
+def _ensure_alerts_table(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS budget_alerts (
+            category     TEXT COLLATE NOCASE,
+            month        TEXT,
+            threshold    INTEGER,
+            notified_ts  INTEGER NOT NULL,
+            PRIMARY KEY (category, month, threshold)
+        );
+        """
+    )
+
+
+def _was_notified(cat: str, month: str, threshold: int) -> bool:
+    dbp = _alerts_db_path()
+    if not dbp:
+        return False
+    try:
+        with sqlite3.connect(dbp) as conn:
+            _ensure_alerts_table(conn)   # ← было _ensure_alerts_ta...ble(conn)
+            cur = conn.execute(
+                "SELECT 1 FROM budget_alerts WHERE category=? AND month=? AND threshold=?",
+                (cat, month, threshold),
+            )
+            return cur.fetchone() is not None
+    except Exception as e:
+        log.warning("was_notified check failed: %s", e)
+        return False
+
+
+def _mark_notified(cat: str, month: str, threshold: int):
+    dbp = _alerts_db_path()
+    if not dbp:
+        return
+    ts = int(time.time())
+    try:
+        with sqlite3.connect(dbp) as conn:
+            _ensure_alerts_table(conn)
+            conn.execute(
+                "INSERT OR REPLACE INTO budget_alerts(category, month, threshold, notified_ts) VALUES(?,?,?,?)",
+                (cat, month, threshold, ts),
+            )
+    except Exception as e:
+        log.warning("mark_notified failed: %s", e)
+
+
+async def _maybe_notify_thresholds(update: Update, context: ContextTypes.DEFAULT_TYPE, cat: str):
+    """Send a notice if cat has crossed 50% or 90% of its monthly budget and wasn't notified yet."""
+    try:
+        month = _current_month_for_user(context)
+        report = get_month_report(month) or {}
+        d = report.get(cat) or {}
+        budget = float(d.get("budget", 0.0))
+        spent = float(d.get("spent", 0.0))
+        if budget <= 0:
+            return  # нет лимита — нечего уведомлять
+        ratio = spent / budget
+        for th in THRESHOLDS:
+            if ratio >= th / 100 and not _was_notified(cat, month, th):
+                if th == 50:
+                    txt = f"⚠️ {cat}: spend ⩾50% of limit!. Spent {spent:.2f} / {budget:.2f}."
+                else:
+                    txt = f"🔴 {cat}: spend ⩾90% of limit!!! Spent {spent:.2f} / {budget:.2f}."
+                try:
+                    await update.message.reply_text(txt)
+                except Exception:
+                    # fallback на chat_id
+                    chat_id = update.effective_chat.id if update.effective_chat else None
+                    if chat_id:
+                        await context.bot.send_message(chat_id=chat_id, text=txt)
+                _mark_notified(cat, month, th)
+    except Exception as e:
+        log.warning("maybe_notify failed: %s", e)
 
 
 # --- импортируем твои функции из БД-модуля
@@ -161,9 +370,9 @@ def _find_category(user_input: str) -> str | None:
 
 def _build_main_keyboard() -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton("Отчёт (месяц)", callback_data="report")],
-        [InlineKeyboardButton("Лимиты", callback_data="limits")],
-        [InlineKeyboardButton("➕ Добавить расход", callback_data="menu:add:0")],
+        [InlineKeyboardButton("Report (month)", callback_data="report")],
+
+        [InlineKeyboardButton("➕ add expenses", callback_data="menu:add:0")],
     ]
     return InlineKeyboardMarkup(rows)
 
@@ -171,9 +380,10 @@ def _build_main_keyboard() -> InlineKeyboardMarkup:
 def _build_categories_keyboard(page: int = 0, per_page: int = 8) -> InlineKeyboardMarkup:
     """Inline-клавиатура для выбора категории с пагинацией. per_page = кол-во кнопок категорий."""
     try:
-        cats = [name for name, _ in (list_limits() or [])]
+        cats_raw = [name for name, _ in (list_limits() or [])]
     except Exception:
-        cats = []
+        cats_raw = []
+    cats = _sort_categories_by_usage(cats_raw)
     total = len(cats)
     start = max(0, page * per_page)
     end = min(total, start + per_page)
@@ -195,12 +405,12 @@ def _build_categories_keyboard(page: int = 0, per_page: int = 8) -> InlineKeyboa
         rows.append(nav)
 
     # назад в главное меню
-    rows.append([InlineKeyboardButton("⬅️ Назад", callback_data="back:main")])
+    rows.append([InlineKeyboardButton("⬅️ back", callback_data="back:main")])
 
     # если категорий нет – сообщим об этом
     if not cats:
         return InlineKeyboardMarkup([
-            [InlineKeyboardButton("⬅️ Назад", callback_data="back:main")]
+            [InlineKeyboardButton("⬅️ back", callback_data="back:main")]
         ])
 
     return InlineKeyboardMarkup(rows)
@@ -209,17 +419,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_user:
         return
     uid = update.effective_user.id
+    uname = update.effective_user.full_name or ""
     # Всегда покажем user_id, чтобы человек мог прислать его администратору
     await update.message.reply_text(
-        "Привет! Я бюджет-бот.\n"
-        f"Твой user_id: {uid}\n\n"
-        "Если доступ не выдан, сообщи свой user_id владельцу бота."
+        "Woof-Woof.\n"
+        f"Your ID: {uid}\n\n"
+        "type: /help, /report, /report <cat>, /setlimit <cat> <amt>, /limits, /month [YYYY-MM]"
     )
+    # Добавить пользователя в peers, если нет
+    dbp = _current_db_path()
+    if dbp:
+        _add_peer_if_new(dbp, uid, uname)
     if not _allowed(uid):
         return
     context.user_data["month"] = get_current_month()
     await update.message.reply_text(
-        "Выбери действие:",
+        "Choose action:",
         reply_markup=_build_main_keyboard(),
     )
 
@@ -280,7 +495,7 @@ async def setlimit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     amt_in = context.args[1].replace(",", ".")
     cat = _find_category(cat_in)
     if not cat:
-        await update.message.reply_text(f"Категория '{cat_in}' не найдена. Добавь её в приложении (Settings → Add Category).")
+        await update.message.reply_text(f"Category '{cat_in}' not found. You can add it in desktop app (Settings → Add Category).")
         return
     try:
         amount = float(amt_in)
@@ -292,7 +507,7 @@ async def setlimit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _op()
         await update.message.reply_text(f"Лимит для '{cat}' установлен: {amount:.2f}")
     except ValueError:
-        await update.message.reply_text("Сумма должна быть числом.")
+        await update.message.reply_text("Numbers only.")
     except Exception as e:
         log.error("set_limit failed: %s", e)
         await update.message.reply_text(f"Ошибка: {e}")
@@ -311,7 +526,7 @@ async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cat_in = " ".join(context.args)
         cat = _find_category(cat_in)
         if not cat:
-            await update.message.reply_text(f"Категория '{cat_in}' не найдена.")
+            await update.message.reply_text(f"Category '{cat_in}' not found. You can add it in desktop app (Settings → Add Category).")
             return
         d = report.get(cat) or {}
         budget = float(d.get("budget", 0.0))
@@ -331,7 +546,7 @@ async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not report:
         await update.message.reply_text(f"[{month}] данных нет.")
         return
-    lines = [f"[{month}] Отчёт:"]
+    lines = [f"[{month}] Summary:"]
     total_b, total_s = 0.0, 0.0
     for cat, d in sorted(report.items()):
         b = float(d.get("budget", 0.0))
@@ -339,7 +554,7 @@ async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         r = float(d.get("remaining", 0.0))
         lines.append(f"• {cat}: spent {s:.2f} / budget {b:.2f} → rem {r:.2f}")
         total_b += b; total_s += s
-    lines.append(f"ИТОГО: spent {total_s:.2f} / budget {total_b:.2f}")
+    lines.append(f"Final: spent {total_s:.2f} / budget {total_b:.2f}")
     await update.message.reply_text("\n".join(lines))
 
 async def on_btn(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -408,7 +623,7 @@ async def on_btn(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text(
             f"Введите сумму для категории '{cat}' (например, 123.45).",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Отмена", callback_data="cancel")]
+                [InlineKeyboardButton("Cancel", callback_data="cancel")]
             ])
         )
         return
@@ -419,27 +634,7 @@ async def on_btn(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.edit_message_text("Выбери действие:", reply_markup=_build_main_keyboard())
         return
 
-    if data.startswith("add:"):
-        try:
-            _, cat, amt = data.split(":", 2)
-            amount = float(amt)
-        except Exception:
-            await q.edit_message_text("Неверные данные кнопки.", reply_markup=_build_main_keyboard())
-            return
-        try:
-            @with_github_db(f"bot: add {cat} {amount:.2f}")
-            def _op():
-                from bd import add_expense
-                return add_expense(cat, amount)
-            exceeded, remaining = _op()
-            msg = f"OK: {cat} +{amount:.2f}"
-            if exceeded:
-                msg += f" — лимит превышен, остаток {remaining:.2f}"
-            await q.edit_message_text(msg, reply_markup=_build_main_keyboard())
-        except Exception as e:
-            log.error("add via button failed: %s", e)
-            await q.edit_message_text(f"Ошибка: {e}", reply_markup=_build_main_keyboard())
-        return
+
 
     # по умолчанию — просто восстановим клавиатуру
     await q.edit_message_text("Выбери действие:", reply_markup=_build_main_keyboard())
@@ -457,6 +652,11 @@ async def text_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (update.message.text or "").strip()
     # режим ввода только суммы после нажатия кнопки "…"
     pending_cat = context.user_data.get("await_amount_for")
+    dbp = _current_db_path()
+    sender_id = update.effective_user.id if update.effective_user else None
+    sender_name = update.effective_user.full_name if update.effective_user else "Someone"
+    currency_symbol = BOT_CURRENCY_SYMBOL
+    allowed_ids = ALLOWED if len(ALLOWED) > 0 else None
     if pending_cat:
         amt_txt = text.replace(",", ".")
         try:
@@ -468,13 +668,31 @@ async def text_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
             @with_github_db(f"bot: add {pending_cat} {amount:.2f}")
             def _op():
                 from bd import add_expense
-                return add_expense(pending_cat, amount)
+                res = add_expense(pending_cat, amount)
+                _record_category_use(pending_cat)
+                return res
             exceeded, remaining = _op()
             context.user_data.pop("await_amount_for", None)
             msg = f"OK: {pending_cat} +{amount:.2f}"
             if exceeded:
-                msg += f" — ВНИМАНИЕ: лимит превышен. Остаток: {remaining:.2f}"
+                msg += f" — Warning: off limit. Remaining: {remaining:.2f}"
+            # уведомления о порогах 50%/90%
+            await _maybe_notify_thresholds(update, context, pending_cat)
             await update.message.reply_text(msg, reply_markup=_build_main_keyboard())
+            # Рассылка другим пользователям
+            if dbp and sender_id is not None:
+                # Добавить отправителя в peers (на всякий случай)
+                _add_peer_if_new(dbp, sender_id, sender_name)
+                peer_ids = _get_peer_ids(dbp, exclude_id=sender_id, allowed_ids=allowed_ids)
+                # Fallback: если peers пуст, но ALLOWED задан — шлём всем из ALLOWED, кроме отправителя
+                if not peer_ids and allowed_ids:
+                    peer_ids = [i for i in allowed_ids if i != sender_id]
+                notify_msg = f"{sender_name} added {pending_cat} {currency_symbol}{amount:.2f}"
+                for peer_id in peer_ids:
+                    try:
+                        await context.bot.send_message(chat_id=peer_id, text=notify_msg)
+                    except Exception as e:
+                        log.warning("Failed to send notify to %s: %s", peer_id, e)
         except Exception as e:
             log.error("add_expense (custom amount) failed: %s", e)
             await update.message.reply_text(f"Ошибка: {e}")
@@ -488,24 +706,39 @@ async def text_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     amt_in = m.group("amt").replace(",", ".")
     cat = _find_category(cat_in)
     if not cat:
-        await update.message.reply_text(f"Категория '{cat_in}' не найдена. Добавь её в приложении (Settings → Add Category).")
+        await update.message.reply_text(f"Category '{cat_in}' not found. You can add it in desktop app (Settings → Add Category).")
         return
     try:
         amount = float(amt_in)
     except ValueError:
-        await update.message.reply_text("Сумма должна быть числом.")
+        await update.message.reply_text("Numbers only.")
         return
 
     try:
         @with_github_db(f"bot: add {cat} {amount:.2f}")
         def _op():
             from bd import add_expense
-            return add_expense(cat, amount)
+            res = add_expense(cat, amount)
+            _record_category_use(cat)
+            return res
         exceeded, remaining = _op()
         msg = f"OK: {cat} +{amount:.2f}"
         if exceeded:
-            msg += f" — ВНИМАНИЕ: лимит превышен. Остаток: {remaining:.2f}"
+            msg += f" — Warning: off limit. Remaining: {remaining:.2f}"
+        # уведомления о порогах 50%/90%
+        await _maybe_notify_thresholds(update, context, cat)
         await update.message.reply_text(msg)
+        # Рассылка другим пользователям
+        if dbp and sender_id is not None:
+            # Добавить отправителя в peers (на всякий случай)
+            _add_peer_if_new(dbp, sender_id, sender_name)
+            peer_ids = _get_peer_ids(dbp, exclude_id=sender_id, allowed_ids=allowed_ids)
+            notify_msg = f"{sender_name} added {cat} {currency_symbol}{amount:.2f}"
+            for peer_id in peer_ids:
+                try:
+                    await context.bot.send_message(chat_id=peer_id, text=notify_msg)
+                except Exception as e:
+                    log.warning("Failed to send notify to %s: %s", peer_id, e)
     except Exception as e:
         log.error("add_expense via GitHub failed: %s", e)
         await update.message.reply_text(f"Ошибка: {e}")
@@ -532,4 +765,9 @@ if __name__ == "__main__":
         log.info("Initial GitHub DB pull: OK")
     except Exception as e:
         log.warning("Initial GitHub DB pull failed: %s", e)
-    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    app.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True,
+        poll_interval=0,  # без паузы между циклами
+        timeout=200  # long-poll: держим соединение до 60с
+    )
