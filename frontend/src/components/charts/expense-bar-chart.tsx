@@ -46,7 +46,7 @@ export function ExpenseBarChart({ data }: ExpenseBarChartProps) {
   };
 
   return (
-    <div className="h-96 w-full">
+    <div className="h-96 w-full bg-transparent">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart
           data={chartData}
@@ -65,8 +65,8 @@ export function ExpenseBarChart({ data }: ExpenseBarChartProps) {
             height={80}
             fontSize={12}
             fontWeight="bold"
-            className="text-foreground font-bold"
-            tick={{ fill: 'hsl(var(--foreground))', fontWeight: 'bold' }}
+            className="text-white font-bold"
+            tick={{ fill: 'white', fontWeight: 'bold' }}
           />
           <YAxis 
             fontSize={12}
@@ -76,7 +76,7 @@ export function ExpenseBarChart({ data }: ExpenseBarChartProps) {
           <Tooltip content={<CustomTooltip />} />
           <Bar 
             dataKey="spent" 
-            fill="hsl(var(--background))" 
+            fill="white" 
             stroke="hsl(var(--foreground))"
             strokeWidth={1}
             radius={[4, 4, 0, 0]}
