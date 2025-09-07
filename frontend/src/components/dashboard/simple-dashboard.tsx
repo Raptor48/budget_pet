@@ -19,13 +19,19 @@ export function SimpleDashboard() {
   // Формируем selectedMonth в формате YYYY-MM для API
   const selectedMonthFormatted = `${selectedYear}-${selectedMonth.toString().padStart(2, '0')}`;
 
-  // Генерируем список лет (текущий + 2 года назад + 2 года вперед)
+  // Генерируем список лет (от 2020 до текущий + 5 лет)
+  // Эта система автоматически адаптируется к любому году:
+  // - В 2025: диапазон 2020-2030
+  // - В 2028: диапазон 2020-2033  
+  // - В 2030: диапазон 2020-2035
+  // - И так далее...
   const generateYearOptions = () => {
     const options = [];
     const currentYear = new Date().getFullYear();
+    const startYear = 2020; // Минимальный год для проекта
+    const endYear = currentYear + 5; // Текущий + 5 лет вперед
     
-    for (let i = -2; i <= 2; i++) {
-      const year = currentYear + i;
+    for (let year = startYear; year <= endYear; year++) {
       options.push({ value: year, label: year.toString() });
     }
     
