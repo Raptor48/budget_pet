@@ -19,6 +19,10 @@ def get_db_connection():
     if not database_url:
         raise RuntimeError("DATABASE_URL not set")
     
+    # Log the connection URL (without password for security)
+    safe_url = database_url.split('@')[1] if '@' in database_url else database_url
+    logger.info(f"Connecting to PostgreSQL: postgresql://***@{safe_url}")
+    
     return psycopg2.connect(database_url)
 
 def _today_iso() -> str:
@@ -52,12 +56,14 @@ def get_expenses_for_month(month: str) -> List[Tuple[int, str, float, str]]:
     """Get expenses for a specific month."""
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
+            # month format: YYYY-MM, need to find dates like MM-DD-YYYY
+            year, month_num = month.split('-')
             cursor.execute("""
                 SELECT id, category, amount, date 
                 FROM expenses 
                 WHERE date LIKE %s 
                 ORDER BY date DESC, id DESC
-            """, (f"{month}%",))
+            """, (f"{month_num.zfill(2)}-%{year}",))
             rows = cursor.fetchall()
             return [(int(r[0]), r[1], float(r[2]), r[3]) for r in rows]
 
@@ -154,12 +160,14 @@ def get_month_report(month: Optional[str] = None) -> Dict[str, Dict[str, float]]
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
             # Get expenses for the month
+            # month format: YYYY-MM, need to find dates like MM-DD-YYYY
+            year, month_num = month.split('-')
             cursor.execute("""
                 SELECT category, SUM(amount) as spent 
                 FROM expenses 
                 WHERE date LIKE %s 
                 GROUP BY category
-            """, (f"{month}%",))
+            """, (f"{month_num.zfill(2)}-%{year}",))
             expenses = {row[0]: float(row[1]) for row in cursor.fetchall()}
             
             # Get budget limits for the month
