@@ -126,9 +126,6 @@ export function SimpleDashboard() {
         <Card>
           <CardHeader>
             <CardTitle>Recent Expenses</CardTitle>
-            <CardDescription>
-              Last 10 transactions
-            </CardDescription>
           </CardHeader>
           <CardContent>
             <RecentExpenses month={currentMonth} />
