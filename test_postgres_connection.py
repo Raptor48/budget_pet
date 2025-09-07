@@ -23,7 +23,11 @@ def test_connection(name, database_url):
         cursor.execute('SELECT version()')
         version = cursor.fetchone()
 
-        print("✅ Подключение успешно!"        print(f"📊 PostgreSQL версия: {version[0][:50]}...")
+        print("✅ Подключение успешно!")
+        if version and version[0]:
+            print(f"📊 PostgreSQL версия: {version[0][:50]}...")
+        else:
+            print("📊 PostgreSQL версия: Не удалось определить")
 
         # Проверить таблицы
         cursor.execute("""
@@ -63,8 +67,7 @@ def main():
     # Тестируем публичное подключение
     public_ok = test_connection("ПУБЛИЧНОЕ подключение", public_url)
 
-    print("
-📊 РЕЗУЛЬТАТЫ:"    print(f"🔒 Приватное подключение: {'✅ Работает' if private_ok else '❌ Не работает'}")
+    print("\n📊 РЕЗУЛЬТАТЫ:")    print(f"🔒 Приватное подключение: {'✅ Работает' if private_ok else '❌ Не работает'}")
     print(f"🌐 Публичное подключение: {'✅ Работает' if public_ok else '❌ Не работает'}")
 
     if private_ok and public_ok:
