@@ -99,12 +99,7 @@ async def create_expense(expense: ExpenseCreate):
     try:
         exceeded, remaining = add_expense(expense.category, expense.amount)
 
-        # Push to GitHub if available
-        if github_sync:
-            try:
-                github_sync.push_best_effort(f"API: add {expense.category} {expense.amount:.2f}")
-            except Exception as e:
-                logger.warning("GitHub push failed: %s", e)
+        # GitHub sync disabled to prevent unnecessary redeploys
 
         return ExpenseResponse(exceeded=exceeded, remaining=remaining)
     except Exception as e:
@@ -131,12 +126,7 @@ async def update_expense_endpoint(expense_id: int, expense_update: ExpenseUpdate
         # Calculate remaining after update
         remaining = get_remaining(expense_update.category or current_expense[1], get_current_month())
 
-        # Push to GitHub if available
-        if github_sync:
-            try:
-                github_sync.push_best_effort(f"API: update expense {expense_id}")
-            except Exception as e:
-                logger.warning("GitHub push failed: %s", e)
+        # GitHub sync disabled to prevent unnecessary redeploys
 
         return ExpenseResponse(exceeded=remaining < 0, remaining=remaining)
     except HTTPException:
@@ -151,12 +141,7 @@ async def delete_expense_endpoint(expense_id: int):
     try:
         delete_expense(expense_id)
 
-        # Push to GitHub if available
-        if github_sync:
-            try:
-                github_sync.push_best_effort(f"API: delete expense {expense_id}")
-            except Exception as e:
-                logger.warning("GitHub push failed: %s", e)
+        # GitHub sync disabled to prevent unnecessary redeploys
 
         return {"message": "Expense deleted successfully"}
     except Exception as e:
@@ -203,12 +188,7 @@ async def create_or_update_limit(limit: LimitCreate):
     try:
         set_limit_and_apply(limit.category, limit.default_limit, get_current_month())
 
-        # Push to GitHub if available
-        if github_sync:
-            try:
-                github_sync.push_best_effort(f"API: set limit {limit.category} {limit.default_limit:.2f}")
-            except Exception as e:
-                logger.warning("GitHub push failed: %s", e)
+        # GitHub sync disabled to prevent unnecessary redeploys
 
         return Limit(category=limit.category, default_limit=limit.default_limit)
     except Exception as e:
@@ -221,12 +201,7 @@ async def delete_category_endpoint(category_name: str):
     try:
         delete_category(category_name)
 
-        # Push to GitHub if available
-        if github_sync:
-            try:
-                github_sync.push_best_effort(f"API: delete category {category_name}")
-            except Exception as e:
-                logger.warning("GitHub push failed: %s", e)
+        # GitHub sync disabled to prevent unnecessary redeploys
 
         return {"message": f"Category '{category_name}' deleted successfully"}
     except Exception as e:
