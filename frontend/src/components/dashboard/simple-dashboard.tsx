@@ -219,6 +219,15 @@ export function SimpleDashboard() {
                 const usage = data.budget > 0 ? (data.spent / data.budget) * 100 : 0;
                 const isOver = data.remaining < 0;
                 
+                // Debug logging
+                console.log(`Category ${category}:`, {
+                  spent: data.spent,
+                  budget: data.budget,
+                  remaining: data.remaining,
+                  usage: usage,
+                  isOver: isOver
+                });
+                
                 // Определяем цвет столбца
                 let barColor = 'bg-primary'; // по умолчанию синий
                 if (usage > 90 || isOver) {
@@ -263,6 +272,10 @@ export function SimpleDashboard() {
                       <span className="text-muted-foreground ml-1">
                         ({usage.toFixed(0)}%)
                       </span>
+                      {/* Debug info */}
+                      <div className="text-xs text-gray-500 mt-1">
+                        {isOver ? 'OVER' : usage > 70 ? 'HIGH' : 'OK'}
+                      </div>
                     </div>
                   </div>
                 );
