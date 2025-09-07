@@ -58,7 +58,7 @@ async def get_remaining(category: str, month: str) -> float:
 async def list_limits() -> List[Tuple[str, float]]:
     """Get all category limits. Returns list of tuples: (category, limit)"""
     limits_list = await get_async_api_client().list_limits()
-    return [(limit['category'], limit['amount']) for limit in limits_list]
+    return [(limit['category'], limit['default_limit']) for limit in limits_list]
 
 async def set_limit(category: str, amount: float) -> None:
     """Set category limit."""
