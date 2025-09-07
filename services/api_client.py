@@ -16,7 +16,9 @@ class BudgetApiClient:
     """Synchronous API client for Desktop GUI."""
     
     def __init__(self, base_url: str = None):
-        self.base_url = base_url or os.getenv("API_BASE_URL", "https://fastapi-production-eadf.up.railway.app")
+        # Use internal Railway URL if available, otherwise external
+        default_url = os.getenv("FASTAPI_INTERNAL_URL", "https://fastapi-production-eadf.up.railway.app")
+        self.base_url = base_url or os.getenv("API_BASE_URL", default_url)
         self.session = requests.Session()
         self.session.timeout = 30
         
@@ -115,7 +117,9 @@ class AsyncBudgetApiClient:
     """Asynchronous API client for Telegram Bot."""
     
     def __init__(self, base_url: str = None):
-        self.base_url = base_url or os.getenv("API_BASE_URL", "https://fastapi-production-eadf.up.railway.app")
+        # Use internal Railway URL if available, otherwise external
+        default_url = os.getenv("FASTAPI_INTERNAL_URL", "https://fastapi-production-eadf.up.railway.app")
+        self.base_url = base_url or os.getenv("API_BASE_URL", default_url)
         
     async def _request(self, method: str, endpoint: str, **kwargs) -> Any:
         """Make async HTTP request with error handling."""
