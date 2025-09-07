@@ -53,7 +53,7 @@ export function ComparisonTable({ data, currentMonthName, previousMonthName }: C
 
       {/* Data rows */}
       <div className="space-y-3">
-        {data.map((item, index) => (
+        {data.map((item) => (
           <div key={item.category} className="grid grid-cols-4 gap-4 items-center py-3 px-4 rounded-lg hover:bg-muted/50 transition-colors">
             {/* Category name */}
             <div className="font-medium">{item.category}</div>
