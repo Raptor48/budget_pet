@@ -162,12 +162,16 @@ export function SimpleDashboard() {
                     
                     {/* Компактный прогресс-бар с названием категории внутри */}
                     <div className="relative w-12 h-32 bg-gray-100 rounded-2xl flex items-center justify-center border border-gray-300">
+                      {/* Прогресс-бар с прозрачным фоном */}
                       <div
                         className={`absolute bottom-0 left-0 right-0 rounded-2xl transition-all duration-300 ${barColor}`}
                         style={{ height: `${Math.min(usage, 100)}%` }}
                       />
+                      {/* Текст с условным цветом в зависимости от заполнения */}
                       <span 
-                        className="relative z-10 text-xs font-medium text-center text-gray-900 drop-shadow-sm"
+                        className={`relative z-10 text-xs font-medium text-center drop-shadow-sm ${
+                          usage > 50 ? 'text-white' : 'text-gray-900'
+                        }`}
                         style={{ 
                           writingMode: 'vertical-rl',
                           textOrientation: 'mixed'
