@@ -11,7 +11,7 @@ def import_to_postgres():
     # database_url = "postgresql://postgres:qLyWBUAaVUsEIaQtfQmtMlsAWFyNJBIw@postgres.railway.internal:5432/railway"
 
     # ДЛЯ ЛОКАЛЬНОГО ИМПОРТА ИСПОЛЬЗУЙТЕ ПУБЛИЧНЫЙ URL:
-    database_url = "postgresql://postgres:qLyWBUAaVUsEIaQtfQmtMlsAWFyNJBIw@roundhouse.proxy.rlwy.net:44861/railway"
+    database_url = "postgresql://postgres:qLyWBUAaVUsEIaQtfQmtMlsAWFyNJBIw@ballast.proxy.rlwy.net:41763/railway"
 
     # Получите публичный URL из Railway dashboard → PostgreSQL → Variables → DATABASE_PUBLIC_URL
     # Приватный URL используйте только в Railway сервисах (FastAPI, Next.js)
