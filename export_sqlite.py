@@ -7,11 +7,11 @@ from pathlib import Path
 def export_sqlite_data():
     """Экспортирует данные из SQLite в JSON"""
 
-    # УКАЖИТЕ ПУТЬ К ВАШЕЙ БАЗЕ ДАННЫХ ЗДЕСЬ:
-    db_path = Path.home() / "budget.db"  # Попробуйте этот путь
+    # # УКАЖИТЕ ПУТЬ К ВАШЕЙ БАЗЕ ДАННЫХ ЗДЕСЬ:
+    # db_path = Path.home() / "budget.db"  # Попробуйте этот путь
 
-    # Если база не там, замените на правильный путь:
-    # db_path = Path("/Users/ВАШЕ_ИМЯ/папка/budget.db")
+
+    db_path = Path("/Users/denisstolpovskii/PycharmProjects/budget_pet/budget.db")
 
     if not db_path.exists():
         print(f"❌ База данных не найдена: {db_path}")
@@ -30,13 +30,19 @@ def export_sqlite_data():
         cursor.execute('SELECT id, category, amount, date FROM expenses ORDER BY date DESC')
         expenses = cursor.fetchall()
 
-        # Получаем все бюджеты
+        # Получаем все бюджеты (из category_limits)
         print("💰 Получаем бюджеты...")
-        cursor.execute('SELECT category, amount FROM limits')
-        limits = cursor.fetchall()
+        cursor.execute('SELECT category, default_limit FROM category_limits')
+        category_limits = cursor.fetchall()
+
+        # Получаем месячные бюджеты
+        print("📅 Получаем месячные бюджеты...")
+        cursor.execute('SELECT month, category, budget_limit FROM monthly_budgets ORDER BY month DESC')
+        monthly_budgets = cursor.fetchall()
 
         print(f"📊 Найдено расходов: {len(expenses)}")
-        print(f"💰 Найдено бюджетов: {len(limits)}")
+        print(f"💰 Найдено лимитов категорий: {len(category_limits)}")
+        print(f"📅 Найдено месячных бюджетов: {len(monthly_budgets)}")
 
         # Создаем данные для экспорта
         data = {
@@ -48,11 +54,18 @@ def export_sqlite_data():
                     'date': exp[3]
                 } for exp in expenses
             ],
-            'limits': [
+            'category_limits': [
                 {
                     'category': lim[0],
-                    'amount': lim[1]
-                } for lim in limits
+                    'default_limit': lim[1]
+                } for lim in category_limits
+            ],
+            'monthly_budgets': [
+                {
+                    'month': budg[0],
+                    'category': budg[1],
+                    'budget_limit': budg[2]
+                } for budg in monthly_budgets
             ]
         }
 
@@ -71,6 +84,19 @@ def export_sqlite_data():
             print(f"  Категория: {last_expense['category']}")
             print(f"  Сумма: ${last_expense['amount']}")
             print(f"  Дата: {last_expense['date']}")
+
+        if category_limits:
+            print("\n💰 Пример лимита категории:")
+            first_limit = data['category_limits'][0]
+            print(f"  Категория: {first_limit['category']}")
+            print(f"  Лимит: ${first_limit['default_limit']}")
+
+        if monthly_budgets:
+            print("\n📅 Пример месячного бюджета:")
+            first_budget = data['monthly_budgets'][0]
+            print(f"  Месяц: {first_budget['month']}")
+            print(f"  Категория: {first_budget['category']}")
+            print(f"  Бюджет: ${first_budget['budget_limit']}")
 
         conn.close()
 

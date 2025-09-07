@@ -1,0 +1,398 @@
+{
+  "expenses": [
+    {
+      "id": 59,
+      "category": "Food",
+      "amount": 37.0,
+      "date": "2025-08-22"
+    },
+    {
+      "id": 58,
+      "category": "Beer and Snacks",
+      "amount": 8.0,
+      "date": "2025-08-22"
+    },
+    {
+      "id": 57,
+      "category": "Taxi",
+      "amount": 13.0,
+      "date": "2025-08-22"
+    },
+    {
+      "id": 56,
+      "category": "Beer and Snacks",
+      "amount": 7.0,
+      "date": "2025-08-21"
+    },
+    {
+      "id": 55,
+      "category": "Food",
+      "amount": 8.0,
+      "date": "2025-08-21"
+    },
+    {
+      "id": 54,
+      "category": "Yummy",
+      "amount": 8.0,
+      "date": "2025-08-21"
+    },
+    {
+      "id": 53,
+      "category": "Yummy",
+      "amount": 7.0,
+      "date": "2025-08-20"
+    },
+    {
+      "id": 52,
+      "category": "Yummy",
+      "amount": 7.0,
+      "date": "2025-08-20"
+    },
+    {
+      "id": 51,
+      "category": "Food",
+      "amount": 13.0,
+      "date": "2025-08-19"
+    },
+    {
+      "id": 50,
+      "category": "Beer and Snacks",
+      "amount": 8.0,
+      "date": "2025-08-18"
+    },
+    {
+      "id": 49,
+      "category": "Food",
+      "amount": 26.0,
+      "date": "2025-08-18"
+    },
+    {
+      "id": 48,
+      "category": "Beer and Snacks",
+      "amount": 29.0,
+      "date": "2025-08-17"
+    },
+    {
+      "id": 47,
+      "category": "Food",
+      "amount": 8.0,
+      "date": "2025-08-17"
+    },
+    {
+      "id": 46,
+      "category": "Smoking",
+      "amount": 16.0,
+      "date": "2025-08-17"
+    },
+    {
+      "id": 45,
+      "category": "Transport",
+      "amount": 16.0,
+      "date": "2025-08-17"
+    },
+    {
+      "id": 44,
+      "category": "Food",
+      "amount": 5.0,
+      "date": "2025-08-17"
+    },
+    {
+      "id": 43,
+      "category": "Beer and Snacks",
+      "amount": 16.0,
+      "date": "2025-08-17"
+    },
+    {
+      "id": 42,
+      "category": "Subscriptions",
+      "amount": 21.0,
+      "date": "2025-08-16"
+    },
+    {
+      "id": 41,
+      "category": "Food",
+      "amount": 5.0,
+      "date": "2025-08-16"
+    },
+    {
+      "id": 40,
+      "category": "Transport",
+      "amount": 5.0,
+      "date": "2025-08-16"
+    },
+    {
+      "id": 39,
+      "category": "Yummy",
+      "amount": 9.0,
+      "date": "2025-08-16"
+    },
+    {
+      "id": 38,
+      "category": "Beer and Snacks",
+      "amount": 13.0,
+      "date": "2025-08-16"
+    },
+    {
+      "id": 37,
+      "category": "Subscriptions",
+      "amount": 7.0,
+      "date": "2025-08-16"
+    },
+    {
+      "id": 36,
+      "category": "Transport",
+      "amount": 6.5,
+      "date": "2025-08-15"
+    },
+    {
+      "id": 35,
+      "category": "Food",
+      "amount": 6.24,
+      "date": "2025-08-15"
+    },
+    {
+      "id": 34,
+      "category": "Transport",
+      "amount": 3.0,
+      "date": "2025-08-15"
+    },
+    {
+      "id": 33,
+      "category": "Transport",
+      "amount": 7.0,
+      "date": "2025-08-15"
+    },
+    {
+      "id": 32,
+      "category": "Food",
+      "amount": 42.0,
+      "date": "2025-08-13"
+    },
+    {
+      "id": 31,
+      "category": "Beer and Snacks",
+      "amount": 15.0,
+      "date": "2025-08-13"
+    },
+    {
+      "id": 30,
+      "category": "Food",
+      "amount": 6.5,
+      "date": "2025-08-13"
+    },
+    {
+      "id": 29,
+      "category": "Yummy",
+      "amount": 28.0,
+      "date": "2025-08-12"
+    },
+    {
+      "id": 28,
+      "category": "Loan & Credit Cards",
+      "amount": 25.0,
+      "date": "2025-08-12"
+    },
+    {
+      "id": 27,
+      "category": "Internet, Mobile",
+      "amount": 165.0,
+      "date": "2025-08-12"
+    },
+    {
+      "id": 26,
+      "category": "Beer and Snacks",
+      "amount": 28.0,
+      "date": "2025-08-12"
+    }
+  ],
+  "category_limits": [
+    {
+      "category": "Food",
+      "default_limit": 400.0
+    },
+    {
+      "category": "Beer and Snacks",
+      "default_limit": 200.0
+    },
+    {
+      "category": "Utilities",
+      "default_limit": 150.0
+    },
+    {
+      "category": "Loan & Credit Cards",
+      "default_limit": 400.0
+    },
+    {
+      "category": "Pharmacy",
+      "default_limit": 999.0
+    },
+    {
+      "category": "Travel",
+      "default_limit": 100.0
+    },
+    {
+      "category": "Smoking",
+      "default_limit": 50.0
+    },
+    {
+      "category": "Yummy",
+      "default_limit": 250.0
+    },
+    {
+      "category": "Cloth",
+      "default_limit": 100.0
+    },
+    {
+      "category": "Subscriptions",
+      "default_limit": 100.0
+    },
+    {
+      "category": "Internet, Mobile",
+      "default_limit": 200.0
+    },
+    {
+      "category": "Fun",
+      "default_limit": 150.0
+    },
+    {
+      "category": "Taxi",
+      "default_limit": 100.0
+    },
+    {
+      "category": "Transport",
+      "default_limit": 150.0
+    }
+  ],
+  "monthly_budgets": [
+    {
+      "month": "2025-08",
+      "category": "Yummy",
+      "budget_limit": 250.0
+    },
+    {
+      "month": "2025-08",
+      "category": "Utilities",
+      "budget_limit": 150.0
+    },
+    {
+      "month": "2025-08",
+      "category": "Travel",
+      "budget_limit": 100.0
+    },
+    {
+      "month": "2025-08",
+      "category": "Transport",
+      "budget_limit": 150.0
+    },
+    {
+      "month": "2025-08",
+      "category": "Taxi",
+      "budget_limit": 100.0
+    },
+    {
+      "month": "2025-08",
+      "category": "Subscriptions",
+      "budget_limit": 100.0
+    },
+    {
+      "month": "2025-08",
+      "category": "Smoking",
+      "budget_limit": 50.0
+    },
+    {
+      "month": "2025-08",
+      "category": "Pharmacy",
+      "budget_limit": 999.0
+    },
+    {
+      "month": "2025-08",
+      "category": "Loan & Credit Cards",
+      "budget_limit": 400.0
+    },
+    {
+      "month": "2025-08",
+      "category": "Internet, Mobile",
+      "budget_limit": 200.0
+    },
+    {
+      "month": "2025-08",
+      "category": "Fun",
+      "budget_limit": 150.0
+    },
+    {
+      "month": "2025-08",
+      "category": "Food",
+      "budget_limit": 400.0
+    },
+    {
+      "month": "2025-08",
+      "category": "Cloth",
+      "budget_limit": 100.0
+    },
+    {
+      "month": "2025-08",
+      "category": "Beer and Snacks",
+      "budget_limit": 200.0
+    },
+    {
+      "month": "2025-07",
+      "category": "Yummy",
+      "budget_limit": 250.0
+    },
+    {
+      "month": "2025-07",
+      "category": "Utilities",
+      "budget_limit": 150.0
+    },
+    {
+      "month": "2025-07",
+      "category": "Travel",
+      "budget_limit": 100.0
+    },
+    {
+      "month": "2025-07",
+      "category": "Subscriptions",
+      "budget_limit": 100.0
+    },
+    {
+      "month": "2025-07",
+      "category": "Smoking",
+      "budget_limit": 250.0
+    },
+    {
+      "month": "2025-07",
+      "category": "Pharmacy",
+      "budget_limit": 250.0
+    },
+    {
+      "month": "2025-07",
+      "category": "Loan & Credit Cards",
+      "budget_limit": 400.0
+    },
+    {
+      "month": "2025-07",
+      "category": "Internet, Mobile",
+      "budget_limit": 200.0
+    },
+    {
+      "month": "2025-07",
+      "category": "Fun",
+      "budget_limit": 150.0
+    },
+    {
+      "month": "2025-07",
+      "category": "Food",
+      "budget_limit": 560.0
+    },
+    {
+      "month": "2025-07",
+      "category": "Cloth",
+      "budget_limit": 100.0
+    },
+    {
+      "month": "2025-07",
+      "category": "Beer and Snacks",
+      "budget_limit": 250.0
+    }
+  ]
+}
