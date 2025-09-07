@@ -9,7 +9,8 @@ import {
   Receipt,
   PieChart,
   Settings,
-  Wallet
+  Wallet,
+  Database
 } from "lucide-react";
 
 const navigation = [
@@ -37,6 +38,11 @@ const navigation = [
     name: "Settings",
     href: "/settings",
     icon: Settings,
+  },
+  {
+    name: "DB Settings",
+    href: "/db-settings",
+    icon: Database,
   },
 ];
 

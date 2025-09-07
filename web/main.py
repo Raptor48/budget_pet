@@ -3,6 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 import os
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 from web.postgres_db import (
     get_expenses_for_month, add_expense, update_expense, delete_expense,
@@ -215,6 +219,32 @@ async def create_or_update_limit(limit: LimitCreate):
         return Limit(category=limit.category, default_limit=limit.default_limit)
     except Exception as e:
         logger.error("Create/update limit failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.patch("/limits/{category_name}", response_model=Limit)
+async def update_limit_endpoint(category_name: str, limit_update: LimitCreate):
+    """Update a category limit."""
+    try:
+        set_limit_and_apply(category_name, limit_update.default_limit, get_current_month())
+
+        # GitHub sync disabled to prevent unnecessary redeploys
+
+        return Limit(category=category_name, default_limit=limit_update.default_limit)
+    except Exception as e:
+        logger.error("Update limit failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/limits/{category_name}")
+async def delete_limit_endpoint(category_name: str):
+    """Delete a category limit."""
+    try:
+        delete_category(category_name)
+
+        # GitHub sync disabled to prevent unnecessary redeploys
+
+        return {"message": f"Category '{category_name}' deleted successfully"}
+    except Exception as e:
+        logger.error("Delete limit failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/categories/{category_name}")

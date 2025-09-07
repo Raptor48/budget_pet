@@ -10,7 +10,7 @@ import {
   HealthResponse
 } from '@/types/api';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://fastapi-production-eadf.up.railway.app';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -79,6 +79,17 @@ export const limitsApi = {
     apiRequest('/limits', {
       method: 'POST',
       body: JSON.stringify(limit),
+    }),
+
+  update: (category: string, limit: { default_limit: number }): Promise<Limit> =>
+    apiRequest(`/limits/${encodeURIComponent(category)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(limit),
+    }),
+
+  delete: (category: string): Promise<void> =>
+    apiRequest(`/limits/${encodeURIComponent(category)}`, {
+      method: 'DELETE',
     }),
 };
 
