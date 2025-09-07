@@ -56,12 +56,19 @@ def _conn():
 ############################
 
 def _today_iso() -> str:
-    return datetime.date.today().isoformat()
+    today = datetime.date.today()
+    return f"{today.month:02d}-{today.day:02d}-{today.year}"
 
 
 def _month_from_date(date_str: str) -> str:
-    # date_str = YYYY-MM-DD -> YYYY-MM
-    return date_str[:7]
+    # date_str = MM-DD-YYYY -> YYYY-MM
+    try:
+        # Parse MM-DD-YYYY format
+        month, day, year = date_str.split('-')
+        return f"{year}-{month.zfill(2)}"
+    except:
+        # Fallback for YYYY-MM-DD format
+        return date_str[:7]
 
 
 def _prev_month(month_key: str) -> str:
