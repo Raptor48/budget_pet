@@ -45,16 +45,28 @@ budget_pet/
 - GitHub account (for sync)
 
 ### Setup
+
+#### Option 1: Virtual Environment (Recommended)
 1. Clone the repository:
    ```bash
    git clone <repository-url>
    cd budget_pet
    ```
 
-2. Install dependencies:
+2. Create and activate virtual environment:
    ```bash
+   # Using Python 3.13 (recommended)
+   python3.13 -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+   # Install dependencies
    pip install -r requirements.txt
    ```
+
+#### Option 2: System Python
+```bash
+pip install -r requirements.txt
+```
 
 3. Configure environment variables (create `.env` file):
    ```bash
@@ -83,12 +95,20 @@ python -m budget_pet.app
 
 ### Web API
 ```bash
+# Activate virtual environment (if using)
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
 # Run the web service locally
 uvicorn web.main:app --host 0.0.0.0 --port 8000
 
 # Or use the PORT environment variable
 PORT=8000 uvicorn web.main:app --host 0.0.0.0 --port $PORT
+
+# Alternative with python -m
+python -m uvicorn web.main:app --host 0.0.0.0 --port 8000
 ```
+
+API Documentation: `http://localhost:8000/docs` (FastAPI automatic docs)
 
 ### Telegram Bot
 ```bash
@@ -204,6 +224,28 @@ The application uses SQLite with the following tables:
 - `settings` - Application settings
 - `peers` - Telegram bot users
 - `budget_alerts` - Notification tracking
+
+## Version History
+
+### v3.0.1 (Current)
+- Fixed FastAPI dependencies for Python 3.13
+- Improved virtual environment setup
+- Enhanced Docker configuration
+- Updated documentation for local development
+- Verified API endpoints functionality
+
+### v3.0.0
+- Complete refactor from monolithic GUI to clean architecture
+- Added FastAPI web backend with full REST API
+- Prepared for Railway deployment
+- Maintained 100% backward compatibility
+- Added comprehensive documentation
+
+### v2.x
+- Desktop GUI with CustomTkinter
+- Telegram bot integration
+- GitHub sync for database
+- Category limits and budget tracking
 
 ## Contributing
 
