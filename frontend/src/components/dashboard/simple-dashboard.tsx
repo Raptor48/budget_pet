@@ -161,16 +161,16 @@ export function SimpleDashboard() {
                     </div>
                     
                     {/* Компактный прогресс-бар с названием категории внутри */}
-                    <div className="relative w-12 h-32 bg-gray-100 rounded-2xl flex items-center justify-center border border-gray-300">
-                      {/* Прогресс-бар с прозрачным фоном */}
+                    <div className="relative w-12 h-32 bg-slate-200 rounded-2xl flex items-center justify-center border-2 border-slate-400">
+                      {/* Прогресс-бар */}
                       <div
                         className={`absolute bottom-0 left-0 right-0 rounded-2xl transition-all duration-300 ${barColor}`}
                         style={{ height: `${Math.min(usage, 100)}%` }}
                       />
-                      {/* Текст с условным цветом в зависимости от заполнения */}
+                      {/* Текст с условным цветом */}
                       <span 
-                        className={`relative z-10 text-xs font-medium text-center drop-shadow-sm ${
-                          usage > 50 ? 'text-white' : 'text-gray-900'
+                        className={`relative z-10 text-xs font-bold text-center ${
+                          usage > 50 ? 'text-white' : 'text-slate-800'
                         }`}
                         style={{ 
                           writingMode: 'vertical-rl',
