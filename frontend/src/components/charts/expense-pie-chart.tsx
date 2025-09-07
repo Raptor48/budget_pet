@@ -31,7 +31,7 @@ export function ExpensePieChart({ data }: ExpensePieChartProps) {
     );
   }
 
-  const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: any[] }) => {
+  const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: Array<{ name: string; value: number }> }) => {
     if (active && payload && payload.length) {
       const data = payload[0];
       const percentage = ((data.value / chartData.reduce((sum, item) => sum + item.value, 0)) * 100).toFixed(1);
@@ -47,10 +47,10 @@ export function ExpensePieChart({ data }: ExpensePieChartProps) {
     return null;
   };
 
-  const CustomLegend = ({ payload }: { payload?: any[] }) => {
+  const CustomLegend = ({ payload }: { payload?: Array<{ value: string; color: string; name: string }> }) => {
     return (
       <div className="flex flex-wrap gap-4 justify-center mt-4">
-        {payload?.map((entry: any) => (
+        {payload?.map((entry) => (
           <div
             key={entry.value}
             className={`flex items-center gap-2 cursor-pointer transition-all duration-200 ${

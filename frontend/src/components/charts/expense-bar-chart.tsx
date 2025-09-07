@@ -19,7 +19,7 @@ export function ExpenseBarChart({ data }: ExpenseBarChartProps) {
   // Сортируем по потраченной сумме (по убыванию)
   chartData.sort((a, b) => b.spent - a.spent);
 
-  const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: any[]; label?: string }) => {
+  const CustomTooltip = ({ active, payload, label }: { active?: boolean; payload?: Array<{ payload: { category: string; spent: number; budget: number; remaining: number; usage: number } }>; label?: string }) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload;
       return (
