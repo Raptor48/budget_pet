@@ -33,14 +33,24 @@ def import_to_postgres():
         with open('migration_data.json', 'r', encoding='utf-8') as f:
             data = json.load(f)
 
-        # Импортируем бюджеты
-        if data.get('limits'):
-            print("💰 Импортируем бюджеты...")
-            limits_data = [(lim['category'], lim['amount']) for lim in data['limits']]
+        # Импортируем лимиты категорий
+        if data.get('category_limits'):
+            print("💰 Импортируем лимиты категорий...")
+            limits_data = [(lim['category'], lim['default_limit']) for lim in data['category_limits']]
             execute_values(
                 cursor,
-                "INSERT INTO limits (category, amount) VALUES %s ON CONFLICT (category) DO UPDATE SET amount = EXCLUDED.amount",
+                "INSERT INTO category_limits (category, default_limit) VALUES %s ON CONFLICT (category) DO UPDATE SET default_limit = EXCLUDED.default_limit",
                 limits_data
+            )
+
+        # Импортируем месячные бюджеты
+        if data.get('monthly_budgets'):
+            print("📅 Импортируем месячные бюджеты...")
+            budgets_data = [(budg['month'], budg['category'], budg['budget_limit']) for budg in data['monthly_budgets']]
+            execute_values(
+                cursor,
+                "INSERT INTO monthly_budgets (month, category, budget_limit) VALUES %s ON CONFLICT (month, category) DO UPDATE SET budget_limit = EXCLUDED.budget_limit",
+                budgets_data
             )
 
         # Импортируем расходы
@@ -61,7 +71,8 @@ def import_to_postgres():
 
         print("✅ Импорт завершен!")
         print(f"📊 Импортировано расходов: {len(data.get('expenses', []))}")
-        print(f"💰 Импортировано бюджетов: {len(data.get('limits', []))}")
+        print(f"💰 Импортировано лимитов категорий: {len(data.get('category_limits', []))}")
+        print(f"📅 Импортировано месячных бюджетов: {len(data.get('monthly_budgets', []))}")
 
         cursor.close()
         conn.close()
