@@ -20,7 +20,6 @@ import {
   Database,
   Shield,
   Bell,
-  RefreshCw,
   Download,
   Upload,
   AlertCircle,

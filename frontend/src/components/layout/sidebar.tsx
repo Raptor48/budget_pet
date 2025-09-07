@@ -9,8 +9,7 @@ import {
   Receipt,
   PieChart,
   Settings,
-  Wallet,
-  TrendingUp
+  Wallet
 } from "lucide-react";
 
 const navigation = [
