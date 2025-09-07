@@ -26,19 +26,23 @@ def get_db_connection():
     return psycopg2.connect(database_url)
 
 def _today_iso() -> str:
-    """Get today's date in MM-DD-YYYY format."""
+    """Get today's date in YYYY-MM-DD format."""
     today = date.today()
-    return f"{today.month:02d}-{today.day:02d}-{today.year}"
+    return f"{today.year}-{today.month:02d}-{today.day:02d}"
 
 def _month_from_date(date_str: str) -> str:
-    """Convert MM-DD-YYYY to YYYY-MM format."""
+    """Convert YYYY-MM-DD to YYYY-MM format."""
     try:
-        # Parse MM-DD-YYYY format
-        month, day, year = date_str.split('-')
+        # Parse YYYY-MM-DD format
+        year, month, day = date_str.split('-')
         return f"{year}-{month.zfill(2)}"
     except:
-        # Fallback for YYYY-MM-DD format
-        return date_str[:7]
+        # Fallback for MM-DD-YYYY format (legacy)
+        try:
+            month, day, year = date_str.split('-')
+            return f"{year}-{month.zfill(2)}"
+        except:
+            return date_str[:7]
 
 def _validate_amount(value: float, what: str = "amount") -> float:
     """Validate and return amount."""
@@ -56,14 +60,14 @@ def get_expenses_for_month(month: str) -> List[Tuple[int, str, float, str]]:
     """Get expenses for a specific month."""
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
-            # month format: YYYY-MM, need to find dates like MM-DD-YYYY
+            # month format: YYYY-MM, find dates like YYYY-MM-DD or MM-DD-YYYY
             year, month_num = month.split('-')
             cursor.execute("""
                 SELECT id, category, amount, date 
                 FROM expenses 
-                WHERE date LIKE %s 
+                WHERE date LIKE %s OR date LIKE %s
                 ORDER BY date DESC, id DESC
-            """, (f"{month_num.zfill(2)}-%{year}",))
+            """, (f"{year}-{month_num.zfill(2)}-%", f"{month_num.zfill(2)}-%{year}"))
             rows = cursor.fetchall()
             return [(int(r[0]), r[1], float(r[2]), r[3]) for r in rows]
 
@@ -160,12 +164,14 @@ def get_month_report(month: Optional[str] = None) -> Dict[str, Dict[str, float]]
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
             # Get expenses for the month
+            # month format: YYYY-MM, find dates like YYYY-MM-DD or MM-DD-YYYY
+            year, month_num = month.split('-')
             cursor.execute("""
                 SELECT category, SUM(amount) as spent 
                 FROM expenses 
-                WHERE date LIKE %s 
+                WHERE date LIKE %s OR date LIKE %s
                 GROUP BY category
-            """, (f"{month}%",))
+            """, (f"{year}-{month_num.zfill(2)}-%", f"{month_num.zfill(2)}-%{year}"))
             expenses = {row[0]: float(row[1]) for row in cursor.fetchall()}
             
             # Get budget limits for the month
