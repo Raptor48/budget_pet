@@ -3,11 +3,11 @@ import tkinter as tk
 from pathlib import Path
 from datetime import datetime
 import atexit
-from bd import (
+from services.api_client import BudgetApiClient
+from services.bd_adapter import (
     get_current_month, get_remaining, add_expense, get_month_report,
     list_months, get_expenses_for_month, delete_expense, update_expense
 )
-from services.github_sync import GithubSync
 from services.status import StatusManager
 from services.logging_config import get_logger
 from ui.top_panel import TopPanel
@@ -22,15 +22,15 @@ logger = get_logger("budget-main")
 class BudgetApp(ctk.CTk):
     """Main application window coordinating all UI components."""
 
-    def __init__(self, github_sync=None, initial_sha=None, logger=None):
+    def __init__(self, api_client=None, logger=None):
         super().__init__()
 
-        self.github_sync = github_sync
+        self.api_client = api_client or BudgetApiClient()
         self.logger = logger or get_logger("budget")
         self.status_manager = StatusManager()
 
         # Initialize window
-        self.title("Family Budget")
+        self.title("Family Budget (API Mode)")
         self.geometry("750x720")
         self.resizable(True, True)
 
@@ -41,7 +41,6 @@ class BudgetApp(ctk.CTk):
 
         # State
         self._closed = False
-        self._github_sha = initial_sha
 
         # Create UI
         self.create_layout()
@@ -133,8 +132,7 @@ class BudgetApp(ctk.CTk):
         # Connect top panel buttons
         self.top_panel.add_btn.configure(command=self.add_expense_btn)
 
-        # Setup periodic sync
-        self.after(120000, self._periodic_pull)
+        # API mode - no periodic sync needed
 
     def on_category_change(self, value):
         """Handle category selection change."""
@@ -208,7 +206,7 @@ class BudgetApp(ctk.CTk):
             except Exception:
                 pass
 
-            self._push_db_best_effort("Add expense")
+            # Data automatically saved via API
 
         except ValueError:
             self.logger.error("Add expense failed: not a number: %r", amount_text)
@@ -223,12 +221,11 @@ class BudgetApp(ctk.CTk):
         """Handle expense edit from dialog."""
         try:
             self.logger.info("Edit expense id=%s -> (%s, %.2f)", expense_id, new_category, float(new_amount))
-            from bd import update_expense
             update_expense(expense_id, new_category, float(new_amount))
             self.refresh_table()
             self.update_remaining_indicator()
             self.update_summary_indicator()
-            self._push_db_best_effort("Edit expense")
+            # Data automatically saved via API
         except Exception as e:
             self.logger.error("Edit expense failed: %s", e)
             tk.messagebox.showerror("Error", f"Failed to update: {e}")
@@ -324,43 +321,7 @@ class BudgetApp(ctk.CTk):
         compare_month = self.top_panel.get_compare_month()
         self.summary_panel.update_summary(category, month, compare_month)
 
-    def _periodic_pull(self):
-        """Periodic GitHub pull."""
-        try:
-            if self.github_sync:
-                def on_pulled(sha):
-                    if sha and sha != self._github_sha:
-                        self._github_sha = sha
-                        self.logger.info("Periodic pull: refreshing UI")
-                        self.refresh_all()
-                        self._set_status(f"Pulled: {datetime.now().strftime('%I:%M:%S %p')} / Sha: {self._github_sha}")
-
-                self.github_sync.periodic_pull(on_pulled)
-        except Exception as e:
-            self.status_manager.inc_error("Periodic pull failed")
-            self.logger.warning("Periodic pull failed: %s", e)
-        finally:
-            try:
-                if not self._closed:
-                    self.after(120000, self._periodic_pull)
-            except Exception:
-                pass
-
-    def _push_db_best_effort(self, message: str):
-        """Push database with best effort."""
-        if not self.github_sync:
-            return
-
-        def on_merge():
-            # Soft merge logic would go here
-            pass
-
-        try:
-            self.github_sync.push_best_effort(message, on_merge)
-            self._set_status(f"Pushed: {datetime.now().strftime('%I:%M:%S %p')} / Sha: {self._github_sha}")
-        except Exception as e:
-            self.status_manager.inc_error("Push failed")
-            self.logger.error("Push failed: %s", e)
+    # GitHub sync methods removed - using API mode
 
     def _set_status(self, text: str):
         """Update status display."""
@@ -370,9 +331,8 @@ class BudgetApp(ctk.CTk):
     def on_close(self):
         """Handle window close."""
         self._closed = True
-        self.logger.info("Closing app: pushing DB...")
+        self.logger.info("Closing app...")
         try:
-            self._push_db_best_effort("GUI close: update budget.db")
             self.logger.info("Closed app")
         finally:
             try:
@@ -386,11 +346,5 @@ class BudgetApp(ctk.CTk):
             self.destroy()
 
     def _atexit_push(self):
-        """Push on exit fallback."""
-        if self._closed:
-            return
-        self.logger.info("Atexit: pushing DB...")
-        try:
-            self._push_db_best_effort("Atexit: update budget.db")
-        except Exception:
-            self.logger.warning("Atexit push failed", exc_info=True)
+        """No-op in API mode."""
+        pass
