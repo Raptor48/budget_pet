@@ -28,24 +28,15 @@ async def get_month_report(month: str) -> Dict[str, Dict[str, float]]:
         # Get raw API data
         api_data = await get_async_api_client().get_month_report(month)
         
+        # FastAPI returns: {"report": {"category": {"spent": X, "budget": Y, "remaining": Z}}}
+        report_data = api_data.get('report', {})
+        
         # Convert to the format expected by bot: {category: {'spent': X, 'budget': Y}}
-        spending = api_data.get('spending_by_category', {})
-        remaining = api_data.get('remaining_by_category', {})
-        
-        # Get limits
-        limits_list = await get_async_api_client().list_limits()
-        limits = {limit['category']: limit['amount'] for limit in limits_list}
-        
-        # Build result
         result = {}
-        all_categories = set(spending.keys()) | set(remaining.keys()) | set(limits.keys())
-        
-        for category in all_categories:
-            spent = spending.get(category, 0.0)
-            budget = limits.get(category, 0.0)
+        for category, data in report_data.items():
             result[category] = {
-                'spent': spent,
-                'budget': budget
+                'spent': data.get('spent', 0.0),
+                'budget': data.get('budget', 0.0)
             }
         
         return result
@@ -55,8 +46,14 @@ async def get_month_report(month: str) -> Dict[str, Dict[str, float]]:
 
 async def get_remaining(category: str, month: str) -> float:
     """Get remaining budget for a specific category in a month."""
-    remaining_dict = await get_async_api_client().get_remaining(month)
-    return remaining_dict.get(category, 0.0)
+    try:
+        # Get full report data
+        api_data = await get_async_api_client().get_month_report(month)
+        report_data = api_data.get('report', {})
+        category_data = report_data.get(category, {})
+        return category_data.get('remaining', 0.0)
+    except Exception:
+        return 0.0
 
 async def list_limits() -> List[Tuple[str, float]]:
     """Get all category limits. Returns list of tuples: (category, limit)"""

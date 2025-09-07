@@ -1,6 +1,18 @@
 {
   "expenses": [
     {
+      "id": 61,
+      "category": "3D",
+      "amount": 39.0,
+      "date": "2025-08-23"
+    },
+    {
+      "id": 60,
+      "category": "3D",
+      "amount": 5.0,
+      "date": "2025-08-23"
+    },
+    {
       "id": 59,
       "category": "Food",
       "amount": 37.0,
@@ -261,6 +273,10 @@
     {
       "category": "Transport",
       "default_limit": 150.0
+    },
+    {
+      "category": "3D",
+      "default_limit": 150.0
     }
   ],
   "monthly_budgets": [
@@ -333,6 +349,11 @@
       "month": "2025-08",
       "category": "Beer and Snacks",
       "budget_limit": 200.0
+    },
+    {
+      "month": "2025-08",
+      "category": "3D",
+      "budget_limit": 150.0
     },
     {
       "month": "2025-07",
