@@ -56,12 +56,14 @@ def get_expenses_for_month(month: str) -> List[Tuple[int, str, float, str]]:
     """Get expenses for a specific month."""
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
+            # month format: YYYY-MM, need to find dates like MM-DD-YYYY
+            year, month_num = month.split('-')
             cursor.execute("""
                 SELECT id, category, amount, date 
                 FROM expenses 
                 WHERE date LIKE %s 
                 ORDER BY date DESC, id DESC
-            """, (f"{month}%",))
+            """, (f"{month_num.zfill(2)}-%{year}",))
             rows = cursor.fetchall()
             return [(int(r[0]), r[1], float(r[2]), r[3]) for r in rows]
 
