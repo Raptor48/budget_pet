@@ -73,43 +73,44 @@ def _get_categories():
         log.error("Failed to get categories: %s", e)
         return ["Food", "Transport", "Entertainment"]  # fallback
 
-def _build_categories_keyboard(page=0, per_page=12):
+def _build_categories_keyboard(page=0, per_page=8):
+    """Inline-клавиатура для выбора категории с пагинацией."""
     cats = _get_categories()
-    start = page * per_page
-    end = start + per_page
+    total = len(cats)
+    start = max(0, page * per_page)
+    end = min(total, start + per_page)
     page_cats = cats[start:end]
-    
-    buttons = []
-    for i in range(0, len(page_cats), 3):
-        row = []
-        for j in range(3):
-            if i + j < len(page_cats):
-                cat = page_cats[i + j]
-                row.append(InlineKeyboardButton(cat, callback_data=f"cat:{cat}"))
-        buttons.append(row)
-    
-    # Navigation
-    nav_row = []
-    if page > 0:
-        nav_row.append(InlineKeyboardButton("← Prev", callback_data=f"page:{page-1}"))
-    if end < len(cats):
-        nav_row.append(InlineKeyboardButton("Next →", callback_data=f"page:{page+1}"))
-    if nav_row:
-        buttons.append(nav_row)
-    
-    # Other options
-    buttons.append([
-        InlineKeyboardButton("📊 Отчёт", callback_data="report"),
-        InlineKeyboardButton("💰 Лимиты", callback_data="limits")
-    ])
-    
-    return InlineKeyboardMarkup(buttons)
+
+    rows = []
+    # кладём по 2 кнопки в ряд
+    for i in range(0, len(page_cats), 2):
+        chunk = page_cats[i:i+2]
+        rows.append([InlineKeyboardButton(c, callback_data=f"cat:{c}") for c in chunk])
+
+    # навигация
+    nav = []
+    if start > 0:
+        nav.append(InlineKeyboardButton("◀️", callback_data=f"page:{page-1}"))
+    if end < total:
+        nav.append(InlineKeyboardButton("▶️", callback_data=f"page:{page+1}"))
+    if nav:
+        rows.append(nav)
+
+    # назад в главное меню
+    rows.append([InlineKeyboardButton("⬅️ back", callback_data="back:main")])
+
+    # если категорий нет – сообщим об этом
+    if not cats:
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("⬅️ back", callback_data="back:main")]
+        ])
+
+    return InlineKeyboardMarkup(rows)
 
 def _build_main_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("➕ Добавить расход", callback_data="add")],
-        [InlineKeyboardButton("📊 Отчёт", callback_data="report")],
-        [InlineKeyboardButton("💰 Лимиты", callback_data="limits")]
+        [InlineKeyboardButton("📊 Report (month)", callback_data="report")],
+        [InlineKeyboardButton("➕ add expenses", callback_data="add")]
     ])
 
 # --- Commands ---
@@ -288,6 +289,9 @@ async def on_btn(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             log.error("Limits button failed: %s", e)
             await q.edit_message_text(f"Ошибка: {e}")
+    
+    elif data == "back:main":
+        await q.edit_message_text("🤖 Бот для семейного бюджета\n\nВыберите действие:", reply_markup=_build_main_keyboard())
 
 # --- Text handler ---
 
