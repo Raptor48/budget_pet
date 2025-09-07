@@ -14,12 +14,13 @@ import { useState } from "react";
 export function SimpleDashboard() {
   const [selectedMonth, setSelectedMonth] = useState(format(new Date(), "yyyy-MM"));
 
-  // Генерируем список месяцев (текущий + 6 месяцев назад + 6 месяцев вперед)
+  // Генерируем список месяцев (текущий + 12 месяцев назад + 12 месяцев вперед)
   const generateMonthOptions = () => {
     const options = [];
     const currentDate = new Date();
     
-    for (let i = -6; i <= 6; i++) {
+    // Начинаем с 12 месяцев назад, заканчиваем 12 месяцами вперед
+    for (let i = -12; i <= 12; i++) {
       const date = addMonths(currentDate, i);
       const value = format(date, "yyyy-MM");
       const label = format(date, "MMMM yyyy");
@@ -75,7 +76,7 @@ export function SimpleDashboard() {
           <h1 className="text-3xl font-bold">Dashboard</h1>
           <div className="flex items-center gap-4">
             <p className="text-muted-foreground">
-              Overview for {format(new Date(selectedMonth + "-01"), "MMMM yyyy")}
+              Overview for {format(new Date(selectedMonth + "-15"), "MMMM yyyy")}
             </p>
             <Select value={selectedMonth} onValueChange={setSelectedMonth}>
               <SelectTrigger className="w-40">
