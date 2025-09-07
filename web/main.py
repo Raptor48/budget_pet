@@ -63,6 +63,30 @@ async def health_check():
     """Health check endpoint."""
     return HealthResponse(ok=True)
 
+@app.get("/debug/env")
+async def debug_env():
+    """Debug endpoint to check environment variables."""
+    return {
+        "DATABASE_URL": os.getenv("DATABASE_URL", "NOT_SET"),
+        "DATABASE_PUBLIC_URL": os.getenv("DATABASE_PUBLIC_URL", "NOT_SET"),
+        "FASTAPI_INTERNAL_URL": os.getenv("FASTAPI_INTERNAL_URL", "NOT_SET"),
+        "API_BASE_URL": os.getenv("API_BASE_URL", "NOT_SET")
+    }
+
+@app.get("/debug/db")
+async def debug_db():
+    """Debug endpoint to test database connection."""
+    try:
+        from web.postgres_db import get_db_connection
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM expenses")
+        count = cursor.fetchone()[0]
+        conn.close()
+        return {"status": "success", "expense_count": count}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
 @app.get("/expenses", response_model=List[Expense])
 async def get_expenses(
     month: str = Query(..., description="Month in YYYY-MM format"),
