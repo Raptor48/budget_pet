@@ -200,7 +200,7 @@ export function ExpensesPage() {
       <Card>
         <CardHeader>
           <CardTitle>
-            Expenses for {format(new Date(selectedMonth + "-01"), "MMMM yyyy")}
+            Expenses for {format(new Date(selectedMonth + "-15"), "MMMM yyyy")}
           </CardTitle>
           <CardDescription>
             {expenses?.length || 0} expenses found
