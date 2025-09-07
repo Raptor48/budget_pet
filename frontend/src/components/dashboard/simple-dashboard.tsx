@@ -140,7 +140,7 @@ export function SimpleDashboard() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="flex gap-3 max-h-64 overflow-x-auto overflow-y-hidden">
+            <div className="flex gap-2 justify-center flex-wrap">
               {Object.entries(report?.report || {}).map(([category, data]) => {
                 const usage = data.budget > 0 ? (data.spent / data.budget) * 100 : 0;
                 const isOver = data.remaining < 0;
@@ -154,14 +154,14 @@ export function SimpleDashboard() {
                 }
 
                 return (
-                  <div key={category} className="flex flex-col items-center min-w-[80px]">
+                  <div key={category} className="flex flex-col items-center min-w-[60px]">
                     {/* Лимит сверху */}
                     <div className="text-xs text-muted-foreground text-center mb-2">
                       ${data.budget.toFixed(0)}
                     </div>
                     
                     {/* Компактный прогресс-бар с названием категории внутри */}
-                    <div className="relative w-16 h-20 bg-secondary rounded-2xl flex items-center justify-center">
+                    <div className="relative w-12 h-32 bg-secondary rounded-2xl flex items-center justify-center">
                       <div
                         className={`absolute bottom-0 left-0 right-0 rounded-2xl transition-all duration-300 ${barColor}`}
                         style={{ height: `${Math.min(usage, 100)}%` }}
