@@ -13,6 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { expensesApi, limitsApi } from "@/lib/api";
 import { Plus, Trash2, Search } from "lucide-react";
 import { format } from "date-fns";
+import { safeFormatDate } from "@/lib/date-utils";
 import { Expense } from "@/types/api";
 
 export function ExpensesPage() {
@@ -224,7 +225,7 @@ export function ExpensesPage() {
                 {expenses.map((expense: Expense) => (
                   <TableRow key={expense.id}>
                     <TableCell>
-                      {format(new Date(expense.date), "MMM dd, yyyy")}
+                      {safeFormatDate(expense.date, "MMM dd, yyyy")}
                     </TableCell>
                     <TableCell>
                       <Badge variant="secondary">{expense.category}</Badge>

@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { expensesApi } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
+import { safeFormatDate } from "@/lib/date-utils";
 
 interface RecentExpensesProps {
   month: string;
@@ -52,7 +53,7 @@ export function RecentExpenses({ month }: RecentExpensesProps) {
             <div>
               <p className="font-medium text-sm">{expense.category}</p>
               <p className="text-xs text-muted-foreground">
-                {format(new Date(expense.date), "MMM dd, yyyy")}
+                {safeFormatDate(expense.date, "MMM dd, yyyy")}
               </p>
             </div>
           </div>
