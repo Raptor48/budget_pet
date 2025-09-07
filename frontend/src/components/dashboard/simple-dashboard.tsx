@@ -182,15 +182,57 @@ export function SimpleDashboard() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Categories</CardTitle>
+            <CardTitle className="text-sm font-medium">High Usage Categories</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              {Object.keys(report?.report || {}).length}
+            <div className="max-h-32 overflow-y-auto space-y-2">
+              {Object.entries(report?.report || {})
+                .filter(([_, data]) => {
+                  const usage = data.budget > 0 ? (data.spent / data.budget) * 100 : 0;
+                  return usage >= 80;
+                })
+                .sort(([_, a], [__, b]) => {
+                  const usageA = a.budget > 0 ? (a.spent / a.budget) * 100 : 0;
+                  const usageB = b.budget > 0 ? (b.spent / b.budget) * 100 : 0;
+                  return usageB - usageA; // Сортируем по убыванию использования
+                })
+                .map(([category, data]) => {
+                  const usage = data.budget > 0 ? (data.spent / data.budget) * 100 : 0;
+                  const isOver = data.remaining < 0;
+                  
+                  return (
+                    <div key={category} className="flex items-center justify-between p-2 rounded-lg bg-muted/50">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{category}</p>
+                        <p className="text-xs text-muted-foreground">
+                          ${data.spent.toFixed(0)} / ${data.budget.toFixed(0)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="text-right">
+                          <p className={`text-sm font-bold ${isOver ? 'text-red-600' : 'text-orange-600'}`}>
+                            {usage.toFixed(0)}%
+                          </p>
+                        </div>
+                        <div className={`w-2 h-2 rounded-full ${
+                          isOver ? 'bg-red-500' : 'bg-orange-500'
+                        }`} />
+                      </div>
+                    </div>
+                  );
+                })}
+              
+              {Object.entries(report?.report || {})
+                .filter(([_, data]) => {
+                  const usage = data.budget > 0 ? (data.spent / data.budget) * 100 : 0;
+                  return usage >= 80;
+                }).length === 0 && (
+                <div className="text-center py-4 text-muted-foreground">
+                  <p className="text-sm">No categories with high usage</p>
+                  <p className="text-xs">All categories are under 80%</p>
+                </div>
+              )}
             </div>
-            <p className="text-xs text-muted-foreground">
-              Active categories
-            </p>
           </CardContent>
         </Card>
       </div>
