@@ -104,3 +104,13 @@ def prev_month(month: str) -> str:
         return prev_date.strftime("%Y-%m")
     except:
         return month  # Return same month on error
+
+# --- Removed functions (not needed in API mode) ---
+
+def get_apartment_payment() -> float:
+    """Apartment payment functionality removed in API mode."""
+    return 0.0
+
+def set_apartment_payment(amount: float) -> None:
+    """Apartment payment functionality removed in API mode."""
+    pass

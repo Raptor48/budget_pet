@@ -101,8 +101,14 @@ class BudgetApiClient:
     
     def list_months(self) -> List[str]:
         """Get list of months with expenses."""
-        data = self._request("GET", "/months")
-        return data["months"]
+        # Generate last 12 months since there's no /months endpoint
+        from datetime import datetime, timedelta
+        months = []
+        current = datetime.now()
+        for i in range(12):
+            month_date = current - timedelta(days=i*30)
+            months.append(month_date.strftime("%Y-%m"))
+        return sorted(set(months), reverse=True)
 
 
 class AsyncBudgetApiClient:

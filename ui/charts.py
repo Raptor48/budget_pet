@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
 import customtkinter as ctk
-from bd import get_expenses_for_month, get_apartment_payment
+from services.bd_adapter import get_expenses_for_month
 
 def show_pie_chart(parent, month_var):
     """Show pie chart for current month expenses."""
@@ -9,12 +9,7 @@ def show_pie_chart(parent, month_var):
     for _, category, amount, _ in expenses:
         totals[category] = totals.get(category, 0) + float(amount)
 
-    try:
-        ap = get_apartment_payment()
-        if ap is not None and float(ap) > 0:
-            totals["Apartment payment"] = totals.get("Apartment payment", 0) + float(ap)
-    except Exception:
-        pass
+    # Apartment payment functionality removed in API mode
 
     fig, ax = plt.subplots()
     if not totals:
@@ -32,12 +27,7 @@ def show_bar_chart(parent, month_var):
     for _, category, amount, _ in expenses:
         totals[category] = totals.get(category, 0) + float(amount)
 
-    try:
-        ap = get_apartment_payment()
-        if ap is not None and float(ap) > 0:
-            totals["Apartment payment"] = totals.get("Apartment payment", 0) + float(ap)
-    except Exception:
-        pass
+    # Apartment payment functionality removed in API mode
 
     fig, ax = plt.subplots()
     if not totals:

@@ -1,6 +1,6 @@
 import customtkinter as ctk
 import tkinter as tk
-from bd import get_current_month, prev_month, list_limits, list_months
+from services.bd_adapter import get_current_month, prev_month, list_limits, list_months
 from services.logging_config import get_logger
 
 logger = get_logger("budget-top-panel")

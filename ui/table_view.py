@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import csv
 import customtkinter as ctk
-from bd import get_expenses_for_month, delete_expense
+from services.bd_adapter import get_expenses_for_month, delete_expense
 from services.search_filter import matches
 from ui.widgets import ToolTip
 from services.logging_config import get_logger
