@@ -38,7 +38,7 @@ export function SettingsPage() {
   // Получаем статус здоровья API
   const { data: health, isLoading: healthLoading } = useQuery({
     queryKey: ["health"],
-    queryFn: healthApi.checkHealth,
+    queryFn: healthApi.check,
     refetchInterval: 30000, // Обновлять каждые 30 секунд
   });
 
