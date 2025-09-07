@@ -81,7 +81,7 @@ export const limitsApi = {
       body: JSON.stringify(limit),
     }),
 
-  update: (category: string, limit: { default_limit: number }): Promise<Limit> =>
+  update: (category: string, limit: { default_limit: number } | { category: string }): Promise<Limit> =>
     apiRequest(`/limits/${encodeURIComponent(category)}`, {
       method: 'PATCH',
       body: JSON.stringify(limit),
