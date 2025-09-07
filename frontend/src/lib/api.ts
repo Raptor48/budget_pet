@@ -7,8 +7,7 @@ import {
   LimitCreate,
   ReportResponse,
   SyncStatus,
-  HealthResponse,
-  ApiError
+  HealthResponse
 } from '@/types/api';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -35,8 +34,8 @@ async function apiRequest<T>(
   });
 
   if (!response.ok) {
-    const error: ApiError = await response.json().catch(() => ({ detail: 'Unknown error' }));
-    throw new ApiError(response.status, error.detail);
+    const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new ApiError(response.status, errorData.detail || 'Unknown error');
   }
 
   return response.json();
