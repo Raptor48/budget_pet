@@ -159,7 +159,7 @@ export function SimpleDashboard() {
             <CardTitle>Recent Expenses</CardTitle>
           </CardHeader>
           <CardContent>
-            <RecentExpenses month={currentMonth} />
+            <RecentExpenses month={selectedMonth} />
           </CardContent>
         </Card>
 
