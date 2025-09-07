@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { reportsApi } from "@/lib/api";
 import { ExpensePieChart } from "@/components/charts/expense-pie-chart";
 import { ExpenseBarChart } from "@/components/charts/expense-bar-chart";
+import { DivergingBarChart } from "@/components/charts/diverging-bar-chart";
 import { format } from "date-fns";
 import { PieChart, BarChart3, TrendingUp, Calendar } from "lucide-react";
 
@@ -202,18 +203,22 @@ export function ReportsPage() {
             </CardHeader>
             <CardContent>
               {compareMonth && compareMonth !== "" && compareMonth !== "none" && report?.comparison ? (
-                <div className="space-y-4">
-                  {Object.entries(report.comparison).map(([category, change]) => (
-                    <div key={category} className="flex items-center justify-between">
-                      <span className="font-medium">{category}</span>
-                      <Badge
-                        variant={change > 0 ? "destructive" : change < 0 ? "default" : "secondary"}
-                      >
-                        {change > 0 ? "+" : ""}{change.toFixed(1)}%
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
+                <DivergingBarChart
+                  data={Object.entries(report.comparison).map(([category, change]) => {
+                    // Получаем данные для текущего и предыдущего месяца
+                    const currentData = report.report[category];
+                    const previousData = report.comparison[category];
+                    
+                    return {
+                      category,
+                      currentMonth: currentData?.spent || 0,
+                      previousMonth: previousData || 0,
+                      change: change || 0,
+                    };
+                  })}
+                  currentMonthName={format(new Date(selectedMonth + "-15"), "MMMM yyyy")}
+                  previousMonthName={format(new Date(compareMonth + "-15"), "MMMM yyyy")}
+                />
               ) : (
                 <div className="text-center py-8 text-muted-foreground">
                   Select a comparison month to view changes
