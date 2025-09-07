@@ -83,9 +83,13 @@ class BudgetApp(ctk.CTk):
         self.right_summary_frame = ctk.CTkFrame(self.main_container)
         self.right_summary_frame.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
 
+        # Create container for top panel and table inside left frame
+        self.left_content_frame = ctk.CTkFrame(self.left_table_frame)
+        self.left_content_frame.pack(fill='both', expand=True)
+
         # Create panels
         self.top_panel = TopPanel(
-            self.left_table_frame,
+            self.left_content_frame,
             on_category_change=self.on_category_change,
             on_month_change=self.on_month_change,
             on_compare_month_change=self.on_compare_month_change,
@@ -93,7 +97,7 @@ class BudgetApp(ctk.CTk):
         )
 
         self.table_view = TableView(
-            self.left_table_frame,
+            self.left_content_frame,
             on_selection_change=self.on_table_selection_change,
             on_double_click=self.on_table_double_click
         )

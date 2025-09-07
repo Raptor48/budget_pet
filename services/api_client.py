@@ -123,7 +123,14 @@ class AsyncBudgetApiClient:
         timeout = aiohttp.ClientTimeout(total=30)
         
         try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
+            # Create SSL context that doesn't verify certificates for Railway.app
+            import ssl
+            ssl_context = ssl.create_default_context()
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE
+            
+            connector = aiohttp.TCPConnector(ssl=ssl_context)
+            async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
                 async with session.request(method, url, **kwargs) as response:
                     response.raise_for_status()
                     return await response.json()
@@ -149,12 +156,12 @@ class AsyncBudgetApiClient:
     
     async def get_month_report(self, month: str) -> Dict[str, Any]:
         """Get spending report for a month."""
-        return await self._request("GET", f"/reports/{month}")
+        return await self._request("GET", "/report", params={"month": month})
     
     async def get_remaining(self, month: str) -> Dict[str, float]:
         """Get remaining budget for each category."""
-        data = await self._request("GET", f"/reports/{month}")
-        return data["remaining_by_category"]
+        data = await self._request("GET", "/report", params={"month": month})
+        return data["report"]
     
     # --- Limits ---
     

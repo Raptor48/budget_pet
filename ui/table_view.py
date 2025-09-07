@@ -20,9 +20,8 @@ class TableView:
         self.sort_reverse = False
         self.search_var = None
 
-        # Create table frame
-        self.left_table_frame = ctk.CTkFrame(parent)
-        self.left_table_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        # Use parent frame directly
+        self.left_table_frame = parent
 
         self.create_table()
         self.create_toolbar()
