@@ -7,10 +7,11 @@ from psycopg2.extras import execute_values
 def import_to_postgres():
     """Импортирует данные в PostgreSQL"""
 
-    # ВСТАВЬТЕ СВОЮ СТРОКУ ПОДКЛЮЧЕНИЯ ИЗ RAILWAY ЗДЕСЬ:
-    database_url = "postgresql://username:password@host:port/database"
+    # ДЛЯ ЛОКАЛЬНОГО ИМПОРТА ИСПОЛЬЗУЙТЕ ПУБЛИЧНЫЙ URL:
+    database_url = "postgresql://postgres:qLyWBUAaVUsEIaQtfQmtMlsAWFyNJBIw@roundhouse.proxy.rlwy.net:44861/railway"
 
-    # Получите эту строку из Railway dashboard → PostgreSQL → Variables → DATABASE_URL
+    # Получите публичный URL из Railway dashboard → PostgreSQL → Variables → DATABASE_PUBLIC_URL
+    # Приватный URL используйте только в Railway сервисах (FastAPI, Next.js)
 
     print("🔗 Подключение к PostgreSQL...")
 
