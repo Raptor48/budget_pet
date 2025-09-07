@@ -204,18 +204,25 @@ export function ReportsPage() {
             <CardContent>
               {compareMonth && compareMonth !== "" && compareMonth !== "none" && report?.comparison ? (
                 <DivergingBarChart
-                  data={Object.entries(report.comparison).map(([category, change]) => {
-                    // Получаем данные для текущего и предыдущего месяца
-                    const currentData = report.report[category];
-                    const previousData = report.comparison[category];
+                  data={Object.entries(report.report || {}).map(([category, currentData]) => {
+                    // Получаем данные для текущего месяца
+                    const currentSpent = currentData?.spent || 0;
+                    
+                    // Получаем данные для предыдущего месяца из comparison
+                    const previousSpent = report.comparison?.[category] || 0;
+                    
+                    // Вычисляем изменение в процентах
+                    const change = previousSpent > 0 
+                      ? ((currentSpent - previousSpent) / previousSpent) * 100 
+                      : currentSpent > 0 ? 100 : 0;
                     
                     return {
                       category,
-                      currentMonth: currentData?.spent || 0,
-                      previousMonth: previousData || 0,
-                      change: change || 0,
+                      currentMonth: currentSpent,
+                      previousMonth: previousSpent,
+                      change: change,
                     };
-                  })}
+                  }).filter(item => item.currentMonth > 0 || item.previousMonth > 0)} // Показываем только категории с тратами
                   currentMonthName={format(new Date(selectedMonth + "-15"), "MMMM yyyy")}
                   previousMonthName={format(new Date(compareMonth + "-15"), "MMMM yyyy")}
                 />

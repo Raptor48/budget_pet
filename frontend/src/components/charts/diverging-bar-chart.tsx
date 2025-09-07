@@ -27,22 +27,27 @@ export function DivergingBarChart({ data, currentMonthName, previousMonthName }:
     category: item.category,
     // Для diverging chart: отрицательные значения идут влево, положительные вправо
     currentValue: item.currentMonth,
-    previousValue: -item.previousMonth, // Отрицательное значение для левой стороны
+    previousValue: -Math.abs(item.previousMonth), // Отрицательное значение для левой стороны
     change: item.change,
   }));
+
+  console.log('DivergingBarChart data:', { data, chartData }); // Debug log
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload;
+      const currentAmount = Math.abs(data.currentValue);
+      const previousAmount = Math.abs(data.previousValue);
+      
       return (
         <div className="bg-background border border-border rounded-lg p-3 shadow-lg">
           <p className="font-medium mb-2">{label}</p>
           <div className="space-y-1 text-sm">
             <p className="text-blue-600">
-              {currentMonthName}: ${Math.abs(data.currentValue).toFixed(2)}
+              {currentMonthName}: ${currentAmount.toFixed(2)}
             </p>
             <p className="text-orange-600">
-              {previousMonthName}: ${Math.abs(data.previousValue).toFixed(2)}
+              {previousMonthName}: ${previousAmount.toFixed(2)}
             </p>
             <p className={`font-medium ${data.change > 0 ? 'text-green-600' : data.change < 0 ? 'text-red-600' : 'text-gray-600'}`}>
               Change: {data.change > 0 ? '+' : ''}{data.change.toFixed(1)}%
