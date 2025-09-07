@@ -76,7 +76,7 @@ export function ExpenseBarChart({ data }: ExpenseBarChartProps) {
           <Tooltip content={<CustomTooltip />} />
           <Bar 
             dataKey="spent" 
-            fill="white" 
+            fill="#374151" 
             stroke="hsl(var(--foreground))"
             strokeWidth={1}
             radius={[4, 4, 0, 0]}
