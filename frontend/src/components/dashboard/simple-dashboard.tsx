@@ -3,19 +3,36 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { reportsApi, healthApi } from "@/lib/api";
 import { ExpenseBarChart } from "@/components/charts/expense-bar-chart";
 import { RecentExpenses } from "@/components/dashboard/recent-expenses";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
-import { format } from "date-fns";
+import { format, addMonths, subMonths } from "date-fns";
+import { useState } from "react";
 
 export function SimpleDashboard() {
-  const currentMonth = format(new Date(), "yyyy-MM");
+  const [selectedMonth, setSelectedMonth] = useState(format(new Date(), "yyyy-MM"));
 
-  // Получаем отчет за текущий месяц
+  // Генерируем список месяцев (текущий + 6 месяцев назад + 6 месяцев вперед)
+  const generateMonthOptions = () => {
+    const options = [];
+    const currentDate = new Date();
+    
+    for (let i = -6; i <= 6; i++) {
+      const date = addMonths(currentDate, i);
+      const value = format(date, "yyyy-MM");
+      const label = format(date, "MMMM yyyy");
+      options.push({ value, label });
+    }
+    
+    return options;
+  };
+
+  // Получаем отчет за выбранный месяц
   const { data: report, isLoading } = useQuery({
-    queryKey: ["report", currentMonth],
-    queryFn: () => reportsApi.getReport(currentMonth),
+    queryKey: ["report", selectedMonth],
+    queryFn: () => reportsApi.getReport(selectedMonth),
   });
 
   // Проверяем здоровье API
@@ -56,9 +73,23 @@ export function SimpleDashboard() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Dashboard</h1>
-          <p className="text-muted-foreground">
-            Overview for {format(new Date(), "MMMM yyyy")}
-          </p>
+          <div className="flex items-center gap-4">
+            <p className="text-muted-foreground">
+              Overview for {format(new Date(selectedMonth + "-01"), "MMMM yyyy")}
+            </p>
+            <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+              <SelectTrigger className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {generateMonthOptions().map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <ThemeToggle />
