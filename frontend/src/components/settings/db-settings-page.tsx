@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { limitsApi } from "@/lib/api";
 import {
   Database,
@@ -28,10 +29,11 @@ interface Limit {
 
 export function DBSettingsPage() {
   const [newCategory, setNewCategory] = useState("");
-  const [editingCategory, setEditingCategory] = useState<string | null>(null);
-  const [editingLimit, setEditingLimit] = useState<string | null>(null);
-  const [newLimit, setNewLimit] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("");
+  const [editingCategoryName, setEditingCategoryName] = useState("");
+  const [editingLimit, setEditingLimit] = useState("");
   const [isAddingCategory, setIsAddingCategory] = useState(false);
+  const [isEditingCategory, setIsEditingCategory] = useState(false);
 
   const queryClient = useQueryClient();
 
@@ -58,8 +60,19 @@ export function DBSettingsPage() {
       limitsApi.update(category, { default_limit: limit }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["limits"] });
-      setEditingLimit(null);
-      setNewLimit("");
+      setEditingLimit("");
+      setIsEditingCategory(false);
+    },
+  });
+
+  // Мутация для обновления названия категории
+  const updateCategoryNameMutation = useMutation({
+    mutationFn: ({ oldName, newName }: { oldName: string; newName: string }) =>
+      limitsApi.update(oldName, { category: newName }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["limits"] });
+      setEditingCategoryName("");
+      setIsEditingCategory(false);
     },
   });
 
@@ -74,37 +87,58 @@ export function DBSettingsPage() {
   const handleAddCategory = () => {
     if (!newCategory.trim()) return;
     
-    const limit = parseFloat(newLimit) || 0;
+    const limit = parseFloat(editingLimit) || 0;
     createCategoryMutation.mutate({
       category: newCategory.trim(),
       default_limit: limit,
     });
   };
 
-  const handleUpdateLimit = (category: string) => {
-    const limit = parseFloat(newLimit);
+  const handleSelectCategory = (category: string) => {
+    setSelectedCategory(category);
+    const limit = limits?.find(l => l.category === category);
+    if (limit) {
+      setEditingCategoryName(limit.category);
+      setEditingLimit(limit.default_limit.toString());
+    }
+    setIsEditingCategory(true);
+  };
+
+  const handleUpdateCategory = () => {
+    if (!selectedCategory || !editingCategoryName.trim() || !editingLimit) return;
+    
+    const limit = parseFloat(editingLimit);
     if (isNaN(limit) || limit < 0) return;
     
+    // Обновляем название категории
+    if (editingCategoryName !== selectedCategory) {
+      updateCategoryNameMutation.mutate({
+        oldName: selectedCategory,
+        newName: editingCategoryName.trim(),
+      });
+    }
+    
+    // Обновляем лимит
     updateLimitMutation.mutate({
-      category,
+      category: editingCategoryName.trim(),
       limit,
     });
   };
 
-  const handleDeleteCategory = (category: string) => {
-    if (confirm(`Удалить категорию "${category}"?`)) {
-      deleteCategoryMutation.mutate(category);
+  const handleDeleteCategory = () => {
+    if (!selectedCategory) return;
+    if (confirm(`Удалить категорию "${selectedCategory}"?`)) {
+      deleteCategoryMutation.mutate(selectedCategory);
+      setSelectedCategory("");
+      setIsEditingCategory(false);
     }
   };
 
-  const startEditingLimit = (category: string, currentLimit: number) => {
-    setEditingLimit(category);
-    setNewLimit(currentLimit.toString());
-  };
-
   const cancelEditing = () => {
-    setEditingLimit(null);
-    setNewLimit("");
+    setSelectedCategory("");
+    setIsEditingCategory(false);
+    setEditingCategoryName("");
+    setEditingLimit("");
   };
 
   return (
@@ -166,8 +200,8 @@ export function DBSettingsPage() {
                     id="new-limit"
                     type="number"
                     placeholder="0.00"
-                    value={newLimit}
-                    onChange={(e) => setNewLimit(e.target.value)}
+                    value={editingLimit}
+                    onChange={(e) => setEditingLimit(e.target.value)}
                   />
                 </div>
                 <div className="flex items-end">
@@ -220,68 +254,87 @@ export function DBSettingsPage() {
             )}
 
             {limits && limits.length > 0 && (
-              <div className="space-y-3">
-                {limits.map((limit) => (
-                  <div
-                    key={limit.category}
-                    className="flex items-center justify-between p-4 border rounded-lg"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div>
-                        <h4 className="font-medium">{limit.category}</h4>
-                        <p className="text-sm text-muted-foreground">
-                          Current limit: ${limit.default_limit.toFixed(2)}
-                        </p>
+              <div className="space-y-4">
+                {/* Category Selection */}
+                <div className="space-y-2">
+                  <Label htmlFor="category-select">Select Category to Edit</Label>
+                  <Select value={selectedCategory} onValueChange={handleSelectCategory}>
+                    <SelectTrigger id="category-select">
+                      <SelectValue placeholder="Choose a category to edit..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {limits.map((limit) => (
+                        <SelectItem key={limit.category} value={limit.category}>
+                          {limit.category} (${limit.default_limit.toFixed(2)})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Category Editing Form */}
+                {isEditingCategory && selectedCategory && (
+                  <div className="p-4 border rounded-lg bg-muted/50 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-medium">Edit Category: {selectedCategory}</h4>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={cancelEditing}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-category-name">Category Name</Label>
+                        <Input
+                          id="edit-category-name"
+                          placeholder="Enter category name"
+                          value={editingCategoryName}
+                          onChange={(e) => setEditingCategoryName(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="edit-limit">Limit</Label>
+                        <Input
+                          id="edit-limit"
+                          type="number"
+                          placeholder="0.00"
+                          value={editingLimit}
+                          onChange={(e) => setEditingLimit(e.target.value)}
+                        />
                       </div>
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {editingLimit === limit.category ? (
-                        <div className="flex items-center gap-2">
-                          <Input
-                            type="number"
-                            placeholder="New limit"
-                            value={newLimit}
-                            onChange={(e) => setNewLimit(e.target.value)}
-                            className="w-24"
-                          />
-                          <Button
-                            size="sm"
-                            onClick={() => handleUpdateLimit(limit.category)}
-                            disabled={updateLimitMutation.isPending}
-                          >
-                            <CheckCircle className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={cancelEditing}
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                      ) : (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => startEditingLimit(limit.category, limit.default_limit)}
-                          >
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => handleDeleteCategory(limit.category)}
-                            disabled={deleteCategoryMutation.isPending}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </>
-                      )}
+                      <Button
+                        onClick={handleUpdateCategory}
+                        disabled={updateLimitMutation.isPending || updateCategoryNameMutation.isPending}
+                      >
+                        {updateLimitMutation.isPending || updateCategoryNameMutation.isPending ? "Saving..." : "Save Changes"}
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        onClick={handleDeleteCategory}
+                        disabled={deleteCategoryMutation.isPending}
+                      >
+                        <Trash2 className="h-4 w-4 mr-2" />
+                        Delete Category
+                      </Button>
                     </div>
+
+                    {(updateLimitMutation.isError || updateCategoryNameMutation.isError) && (
+                      <Alert variant="destructive">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertDescription>
+                          Failed to update category: {updateLimitMutation.error?.message || updateCategoryNameMutation.error?.message}
+                        </AlertDescription>
+                      </Alert>
+                    )}
                   </div>
-                ))}
+                )}
               </div>
             )}
           </div>

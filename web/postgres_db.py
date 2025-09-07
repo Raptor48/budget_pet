@@ -231,3 +231,30 @@ def prev_month(month: str) -> str:
         return f"{year}-{month_num-1:02d}"
     except:
         return month
+
+def rename_category(old_name: str, new_name: str) -> None:
+    """Rename a category in all tables."""
+    with get_db_connection() as conn:
+        with conn.cursor() as cursor:
+            # Update category_limits table
+            cursor.execute("""
+                UPDATE category_limits 
+                SET category = %s 
+                WHERE category = %s
+            """, (new_name, old_name))
+            
+            # Update monthly_budgets table
+            cursor.execute("""
+                UPDATE monthly_budgets 
+                SET category = %s 
+                WHERE category = %s
+            """, (new_name, old_name))
+            
+            # Update expenses table
+            cursor.execute("""
+                UPDATE expenses 
+                SET category = %s 
+                WHERE category = %s
+            """, (new_name, old_name))
+            
+            conn.commit()

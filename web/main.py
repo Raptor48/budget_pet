@@ -11,7 +11,7 @@ load_dotenv()
 from web.postgres_db import (
     get_expenses_for_month, add_expense, update_expense, delete_expense,
     get_month_report, list_limits, set_limit_and_apply, delete_category,
-    get_current_month, get_remaining
+    get_current_month, get_remaining, rename_category
 )
 from services.search_filter import matches
 from services.logging_config import get_logger
@@ -222,14 +222,25 @@ async def create_or_update_limit(limit: LimitCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.patch("/limits/{category_name}", response_model=Limit)
-async def update_limit_endpoint(category_name: str, limit_update: LimitCreate):
-    """Update a category limit."""
+async def update_limit_endpoint(category_name: str, limit_update: dict):
+    """Update a category limit or name."""
     try:
-        set_limit_and_apply(category_name, limit_update.default_limit, get_current_month())
+        # Check if updating category name
+        if "category" in limit_update:
+            new_name = limit_update["category"]
+            # Rename category in limits table
+            rename_category(category_name, new_name)
+            # Update limit if provided
+            if "default_limit" in limit_update:
+                set_limit_and_apply(new_name, limit_update["default_limit"], get_current_month())
+            return Limit(category=new_name, default_limit=limit_update.get("default_limit", 0))
+        else:
+            # Update limit only
+            set_limit_and_apply(category_name, limit_update["default_limit"], get_current_month())
+            return Limit(category=category_name, default_limit=limit_update["default_limit"])
 
         # GitHub sync disabled to prevent unnecessary redeploys
 
-        return Limit(category=category_name, default_limit=limit_update.default_limit)
     except Exception as e:
         logger.error("Update limit failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
