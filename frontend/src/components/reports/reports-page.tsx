@@ -66,7 +66,7 @@ export function ReportsPage() {
         </div>
         <Badge variant="secondary" className="gap-2">
           <Calendar className="h-4 w-4" />
-          {format(new Date(selectedMonth + "-01"), "MMMM yyyy")}
+          {format(new Date(selectedMonth + "-15"), "MMMM yyyy")}
         </Badge>
       </div>
 
@@ -196,7 +196,7 @@ export function ReportsPage() {
               <CardTitle>Month-over-Month Comparison</CardTitle>
               <CardDescription>
                 {compareMonth && compareMonth !== "" && compareMonth !== "none"
-                  ? `Comparing ${format(new Date(selectedMonth + "-01"), "MMMM yyyy")} vs ${format(new Date(compareMonth + "-01"), "MMMM yyyy")}`
+                  ? `Comparing ${format(new Date(selectedMonth + "-15"), "MMMM yyyy")} vs ${format(new Date(compareMonth + "-15"), "MMMM yyyy")}`
                   : "Select a comparison month to see differences"}
               </CardDescription>
             </CardHeader>
