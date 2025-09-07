@@ -10,7 +10,7 @@ import {
   HealthResponse
 } from '@/types/api';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://fastapi-production-eadf.up.railway.app';
 
 class ApiError extends Error {
   constructor(public status: number, message: string) {
