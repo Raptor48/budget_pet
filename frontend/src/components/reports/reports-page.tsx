@@ -203,8 +203,8 @@ export function ReportsPage() {
             </CardHeader>
             <CardContent>
               {compareMonth && compareMonth !== "" && compareMonth !== "none" && report?.comparison ? (
-                <DivergingBarChart
-                  data={Object.entries(report.report || {}).map(([category, currentData]) => {
+                (() => {
+                  const chartData = Object.entries(report.report || {}).map(([category, currentData]) => {
                     // Получаем данные для текущего месяца
                     const currentSpent = currentData?.spent || 0;
                     
@@ -222,10 +222,18 @@ export function ReportsPage() {
                       previousMonth: previousSpent,
                       change: change,
                     };
-                  }).filter(item => item.currentMonth > 0 || item.previousMonth > 0)} // Показываем только категории с тратами
-                  currentMonthName={format(new Date(selectedMonth + "-15"), "MMMM yyyy")}
-                  previousMonthName={format(new Date(compareMonth + "-15"), "MMMM yyyy")}
-                />
+                  }).filter(item => item.currentMonth > 0 || item.previousMonth > 0);
+                  
+                  console.log('Report data:', { report, chartData });
+                  
+                  return (
+                    <DivergingBarChart
+                      data={chartData}
+                      currentMonthName={format(new Date(selectedMonth + "-15"), "MMMM yyyy")}
+                      previousMonthName={format(new Date(compareMonth + "-15"), "MMMM yyyy")}
+                    />
+                  );
+                })()
               ) : (
                 <div className="text-center py-8 text-muted-foreground">
                   Select a comparison month to view changes
