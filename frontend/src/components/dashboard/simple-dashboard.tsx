@@ -140,7 +140,7 @@ export function SimpleDashboard() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4 max-h-64 overflow-y-auto">
+            <div className="flex gap-3 max-h-64 overflow-x-auto overflow-y-hidden">
               {Object.entries(report?.report || {}).map(([category, data]) => {
                 const usage = data.budget > 0 ? (data.spent / data.budget) * 100 : 0;
                 const isOver = data.remaining < 0;
@@ -154,20 +154,20 @@ export function SimpleDashboard() {
                 }
 
                 return (
-                  <div key={category} className="space-y-2">
+                  <div key={category} className="flex flex-col items-center min-w-[80px]">
                     {/* Лимит сверху */}
-                    <div className="text-xs text-muted-foreground text-center">
+                    <div className="text-xs text-muted-foreground text-center mb-2">
                       ${data.budget.toFixed(0)}
                     </div>
                     
-                    {/* Вертикальный столбец с названием категории внутри */}
-                    <div className="relative w-full bg-secondary rounded-lg h-16 flex items-center justify-center">
+                    {/* Компактный прогресс-бар с названием категории внутри */}
+                    <div className="relative w-16 h-20 bg-secondary rounded-2xl flex items-center justify-center">
                       <div
-                        className={`absolute bottom-0 left-0 right-0 rounded-lg transition-all duration-300 ${barColor}`}
+                        className={`absolute bottom-0 left-0 right-0 rounded-2xl transition-all duration-300 ${barColor}`}
                         style={{ height: `${Math.min(usage, 100)}%` }}
                       />
                       <span 
-                        className="relative z-10 text-xs font-medium text-center px-2 text-white drop-shadow-sm"
+                        className="relative z-10 text-xs font-medium text-center text-white drop-shadow-sm"
                         style={{ 
                           writingMode: 'vertical-rl',
                           textOrientation: 'mixed'
@@ -178,7 +178,7 @@ export function SimpleDashboard() {
                     </div>
                     
                     {/* Потрачено снизу */}
-                    <div className="text-xs text-center">
+                    <div className="text-xs text-center mt-2">
                       <span className={`font-medium ${isOver ? 'text-red-600' : ''}`}>
                         ${data.spent.toFixed(0)}
                       </span>
