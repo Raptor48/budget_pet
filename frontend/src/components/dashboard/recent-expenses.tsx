@@ -3,7 +3,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { expensesApi } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
-import { format } from "date-fns";
 import { safeFormatDate } from "@/lib/date-utils";
 
 interface RecentExpensesProps {
