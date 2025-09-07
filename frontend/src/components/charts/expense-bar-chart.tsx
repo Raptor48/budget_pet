@@ -1,54 +1,83 @@
 "use client";
 
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { ReportItem } from '@/types/api';
 
 interface ExpenseBarChartProps {
-  data: Record<string, ReportItem>;
+  data: Record<string, { spent: number; budget: number; remaining: number; rolled_over: number }>;
 }
 
 export function ExpenseBarChart({ data }: ExpenseBarChartProps) {
-  const chartData = Object.entries(data).map(([category, item]) => ({
-    category: category.length > 10 ? category.substring(0, 10) + '...' : category,
-    fullCategory: category,
-    spent: item.spent,
-    budget: item.budget,
-    remaining: item.remaining,
+  // Преобразуем данные для диаграммы
+  const chartData = Object.entries(data).map(([category, values]) => ({
+    category,
+    spent: values.spent,
+    budget: values.budget,
+    remaining: values.remaining,
+    usage: values.budget > 0 ? (values.spent / values.budget) * 100 : 0,
   }));
 
-  if (chartData.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-64 text-muted-foreground">
-        No expense data available
-      </div>
-    );
-  }
+  // Сортируем по потраченной сумме (по убыванию)
+  chartData.sort((a, b) => b.spent - a.spent);
+
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      const data = payload[0].payload;
+      return (
+        <div className="bg-background border border-border rounded-lg p-3 shadow-lg">
+          <p className="font-medium">{label}</p>
+          <div className="space-y-1 text-sm">
+            <p className="text-primary">
+              Spent: <span className="font-mono">${data.spent.toFixed(2)}</span>
+            </p>
+            <p className="text-muted-foreground">
+              Budget: <span className="font-mono">${data.budget.toFixed(2)}</span>
+            </p>
+            <p className={data.remaining >= 0 ? "text-green-600" : "text-red-600"}>
+              Remaining: <span className="font-mono">${data.remaining.toFixed(2)}</span>
+            </p>
+            <p className="text-blue-600">
+              Usage: <span className="font-mono">{data.usage.toFixed(1)}%</span>
+            </p>
+          </div>
+        </div>
+      );
+    }
+    return null;
+  };
 
   return (
-    <div className="h-64">
+    <div className="h-96 w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={chartData}>
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis
-            dataKey="category"
+        <BarChart
+          data={chartData}
+          margin={{
+            top: 20,
+            right: 30,
+            left: 20,
+            bottom: 60,
+          }}
+        >
+          <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+          <XAxis 
+            dataKey="category" 
             angle={-45}
             textAnchor="end"
             height={80}
-            interval={0}
+            fontSize={12}
+            className="text-muted-foreground"
           />
-          <YAxis />
-          <Tooltip
-            formatter={(value: number, name: string) => [
-              `$${value.toFixed(2)}`,
-              name === 'spent' ? 'Spent' : name === 'budget' ? 'Budget' : 'Remaining'
-            ]}
-            labelFormatter={(label) => {
-              const item = chartData.find(d => d.category === label);
-              return item?.fullCategory || label;
-            }}
+          <YAxis 
+            fontSize={12}
+            className="text-muted-foreground"
+            tickFormatter={(value) => `$${value}`}
           />
-          <Bar dataKey="spent" fill="#8884d8" name="spent" />
-          <Bar dataKey="budget" fill="#82ca9d" name="budget" />
+          <Tooltip content={<CustomTooltip />} />
+          <Bar 
+            dataKey="spent" 
+            fill="hsl(var(--primary))" 
+            radius={[4, 4, 0, 0]}
+            name="Spent"
+          />
         </BarChart>
       </ResponsiveContainer>
     </div>

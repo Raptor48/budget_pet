@@ -4,7 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { reportsApi, healthApi } from "@/lib/api";
-import { ExpensePieChart } from "@/components/charts/expense-pie-chart";
+import { ExpenseBarChart } from "@/components/charts/expense-bar-chart";
+import { RecentExpenses } from "@/components/dashboard/recent-expenses";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { format } from "date-fns";
 
@@ -120,17 +121,17 @@ export function SimpleDashboard() {
         </Card>
       </div>
 
-      {/* Charts and Category Overview */}
+      {/* Recent Expenses and Category Overview */}
       <div className="grid gap-6 md:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Expense Distribution</CardTitle>
+            <CardTitle>Recent Expenses</CardTitle>
             <CardDescription>
-              Spending breakdown by category
+              Last 10 transactions
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <ExpensePieChart data={report?.report || {}} />
+            <RecentExpenses month={currentMonth} />
           </CardContent>
         </Card>
 
@@ -174,6 +175,19 @@ export function SimpleDashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Expense Bar Chart - Full Width */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Expense Distribution</CardTitle>
+          <CardDescription>
+            Spending breakdown by category (sorted by amount spent)
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ExpenseBarChart data={report?.report || {}} />
+        </CardContent>
+      </Card>
     </div>
   );
 }
