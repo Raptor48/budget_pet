@@ -1,7 +1,3 @@
-
-
-# Создайте файл export_sqlite.py
-cat > export_sqlite.py << 'EOF'
 import sqlite3
 import json
 import os
@@ -11,12 +7,15 @@ from pathlib import Path
 def export_sqlite_data():
     """Экспортирует данные из SQLite в JSON"""
 
-    # Путь к вашей локальной базе
-    db_path = Path.home() / "budget.db"  # или укажите полный путь
+    # УКАЖИТЕ ПУТЬ К ВАШЕЙ БАЗЕ ДАННЫХ ЗДЕСЬ:
+    db_path = Path.home() / "budget.db"  # Попробуйте этот путь
+
+    # Если база не там, замените на правильный путь:
+    # db_path = Path("/Users/ВАШЕ_ИМЯ/папка/budget.db")
 
     if not db_path.exists():
         print(f"❌ База данных не найдена: {db_path}")
-        print("Проверьте путь к файлу budget.db")
+        print("Найдите файл budget.db и укажите правильный путь выше")
         return
 
     print(f"📂 Подключение к: {db_path}")
@@ -26,26 +25,20 @@ def export_sqlite_data():
         conn = sqlite3.connect(str(db_path))
         cursor = conn.cursor()
 
-        # Экспорт расходов
-        print("📊 Экспорт расходов...")
+        # Получаем все расходы
+        print("📊 Получаем расходы...")
         cursor.execute('SELECT id, category, amount, date FROM expenses ORDER BY date DESC')
         expenses = cursor.fetchall()
 
-        # Экспорт лимитов (бюджетов)
-        print("💰 Экспорт лимитов...")
+        # Получаем все бюджеты
+        print("💰 Получаем бюджеты...")
         cursor.execute('SELECT category, amount FROM limits')
         limits = cursor.fetchall()
 
-        # Экспорт категорий (если есть таблица categories)
-        categories = []
-        try:
-            cursor.execute('SELECT name FROM categories ORDER BY name')
-            categories = [row[0] for row in cursor.fetchall()]
-            print("📂 Экспорт категорий...")
-        except sqlite3.OperationalError:
-            print("⚠️  Таблица categories не найдена, пропускаем")
+        print(f"📊 Найдено расходов: {len(expenses)}")
+        print(f"💰 Найдено бюджетов: {len(limits)}")
 
-        # Подготовка данных для экспорта
+        # Создаем данные для экспорта
         data = {
             'expenses': [
                 {
@@ -60,33 +53,29 @@ def export_sqlite_data():
                     'category': lim[0],
                     'amount': lim[1]
                 } for lim in limits
-            ],
-            'categories': categories
+            ]
         }
 
-        # Сохранение в JSON
+        # Сохраняем в файл
         output_file = 'migration_data.json'
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
-        print("✅ Данные экспортированы!"
+        print("✅ Данные сохранены!")
         print(f"📄 Файл: {output_file}")
-        print(f"📊 Расходов: {len(expenses)}")
-        print(f"💰 Лимитов: {len(limits)}")
-        print(f"📂 Категорий: {len(categories)}")
 
-        # Показать пример данных
+        # Показываем пример данных
         if expenses:
             print("\n📋 Пример последнего расхода:")
-        last_expense = data['expenses'][0]
-        print(f"  Категория: {last_expense['category']}")
-        print(f"  Сумма: ${last_expense['amount']}")
-        print(f"  Дата: {last_expense['date']}")
+            last_expense = data['expenses'][0]
+            print(f"  Категория: {last_expense['category']}")
+            print(f"  Сумма: ${last_expense['amount']}")
+            print(f"  Дата: {last_expense['date']}")
 
         conn.close()
 
     except Exception as e:
-        print(f"❌ Ошибка экспорта: {e}")
+        print(f"❌ Ошибка: {e}")
         return False
 
     return True
@@ -94,4 +83,3 @@ def export_sqlite_data():
 
 if __name__ == "__main__":
     export_sqlite_data()
-EOF
