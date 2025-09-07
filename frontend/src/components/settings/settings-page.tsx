@@ -110,8 +110,8 @@ export function SettingsPage() {
             </div>
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium">GitHub Sync</span>
-              <Badge variant={syncStatus?.configured ? "default" : "secondary"}>
-                {syncLoading ? "Loading..." : syncStatus?.configured ? "Configured" : "Not Configured"}
+              <Badge variant={syncStatus?.sha ? "default" : "secondary"}>
+                {syncLoading ? "Loading..." : syncStatus?.sha ? "Configured" : "Not Configured"}
               </Badge>
             </div>
           </div>
@@ -212,7 +212,7 @@ export function SettingsPage() {
           <div className="flex gap-2">
             <Button
               onClick={handlePull}
-              disabled={!syncStatus?.configured || pullMutation.isPending}
+              disabled={!syncStatus?.sha || pullMutation.isPending}
               variant="outline"
               className="flex-1"
             >
@@ -221,7 +221,7 @@ export function SettingsPage() {
             </Button>
             <Button
               onClick={handlePush}
-              disabled={!syncStatus?.configured || pushMutation.isPending}
+              disabled={!syncStatus?.sha || pushMutation.isPending}
               variant="outline"
               className="flex-1"
             >
@@ -248,7 +248,7 @@ export function SettingsPage() {
             </Alert>
           )}
 
-          {!syncStatus?.configured && (
+          {!syncStatus?.sha && (
             <Alert>
               <Info className="h-4 w-4" />
               <AlertDescription>
