@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { reportsApi } from "@/lib/api";
 import { ExpensePieChart } from "@/components/charts/expense-pie-chart";
 import { ExpenseBarChart } from "@/components/charts/expense-bar-chart";
-import { DivergingBarChart } from "@/components/charts/diverging-bar-chart";
+import { ComparisonTable } from "@/components/charts/comparison-table";
 import { format } from "date-fns";
 import { PieChart, BarChart3, TrendingUp, Calendar } from "lucide-react";
 
@@ -227,7 +227,7 @@ export function ReportsPage() {
                   console.log('Report data:', { report, chartData });
                   
                   return (
-                    <DivergingBarChart
+                    <ComparisonTable
                       data={chartData}
                       currentMonthName={format(new Date(selectedMonth + "-15"), "MMMM yyyy")}
                       previousMonthName={format(new Date(compareMonth + "-15"), "MMMM yyyy")}
