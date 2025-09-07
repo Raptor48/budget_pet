@@ -3,10 +3,10 @@ import tkinter as tk
 from tkinter import messagebox
 import sys
 from pathlib import Path
-from bd import (
+from services.bd_adapter import (
     get_expenses_for_month, add_expense, update_expense, delete_expense,
     set_limit_and_apply, set_limit, list_limits, delete_category,
-    set_apartment_payment, get_apartment_payment, get_current_month
+    get_current_month
 )
 from services.logging_config import get_logger
 

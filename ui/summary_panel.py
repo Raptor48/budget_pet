@@ -1,6 +1,6 @@
 import customtkinter as ctk
 import tkinter as tk
-from bd import get_month_report, prev_month
+from services.bd_adapter import get_month_report, prev_month
 from services.logging_config import get_logger
 
 logger = get_logger("budget-summary")
