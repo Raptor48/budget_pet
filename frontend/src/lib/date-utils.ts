@@ -3,6 +3,8 @@
  * Handles both MM-DD-YYYY and YYYY-MM-DD formats for Safari compatibility
  */
 
+import { format } from 'date-fns';
+
 /**
  * Safely parse a date string that could be in MM-DD-YYYY or YYYY-MM-DD format
  * @param dateString - Date string in either format
@@ -46,7 +48,6 @@ export function safeFormatDate(dateString: string, formatString: string = "MMM d
   }
   
   try {
-    const { format } = require('date-fns');
     return format(date, formatString);
   } catch (error) {
     console.warn('Failed to format date:', dateString, error);
