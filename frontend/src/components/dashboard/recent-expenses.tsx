@@ -40,8 +40,8 @@ export function RecentExpenses({ month }: RecentExpensesProps) {
     );
   }
 
-  // Показываем последние 5 расходов
-  const recentExpenses = expenses.slice(-5).reverse();
+  // Показываем последние 10 расходов
+  const recentExpenses = expenses.slice(-10).reverse();
 
   return (
     <div className="space-y-3">
