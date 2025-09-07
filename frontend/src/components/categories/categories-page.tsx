@@ -14,9 +14,7 @@ import {
   Plus,
   Edit,
   Trash2,
-  DollarSign,
-  AlertCircle,
-  CheckCircle
+  AlertCircle
 } from "lucide-react";
 
 export function CategoriesPage() {

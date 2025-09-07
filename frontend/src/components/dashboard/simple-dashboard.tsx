@@ -8,7 +8,7 @@ import { reportsApi, healthApi } from "@/lib/api";
 import { ExpenseBarChart } from "@/components/charts/expense-bar-chart";
 import { RecentExpenses } from "@/components/dashboard/recent-expenses";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
-import { format, addMonths, subMonths } from "date-fns";
+import { format } from "date-fns";
 import { useState } from "react";
 
 export function SimpleDashboard() {
@@ -180,18 +180,18 @@ export function SimpleDashboard() {
           </CardContent>
         </Card>
 
-        <Card className="h-47">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-0">
-            <CardTitle className="text-xs font-medium">High Usage Categories</CardTitle>
+        <Card className="h-48">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">High Usage Categories</CardTitle>
           </CardHeader>
           <CardContent className="h-full pb-4">
-            <div className="h-full max-h-36 overflow-y-auto space-y-1">
+            <div className="h-full max-h-36 overflow-y-auto space-y-2">
               {Object.entries(report?.report || {})
-                .filter(([_, data]) => {
+                .filter(([, data]) => {
                   const usage = data.budget > 0 ? (data.spent / data.budget) * 100 : 0;
                   return usage >= 80;
                 })
-                .sort(([_, a], [__, b]) => {
+                .sort(([, a], [, b]) => {
                   const usageA = a.budget > 0 ? (a.spent / a.budget) * 100 : 0;
                   const usageB = b.budget > 0 ? (b.spent / b.budget) * 100 : 0;
                   return usageB - usageA; // Сортируем по убыванию использования
@@ -223,7 +223,7 @@ export function SimpleDashboard() {
                 })}
               
               {Object.entries(report?.report || {})
-                .filter(([_, data]) => {
+                .filter(([, data]) => {
                   const usage = data.budget > 0 ? (data.spent / data.budget) * 100 : 0;
                   return usage >= 80;
                 }).length === 0 && (
