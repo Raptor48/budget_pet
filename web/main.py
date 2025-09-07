@@ -4,19 +4,19 @@ from typing import List, Optional
 import os
 from datetime import datetime
 
-from bd import (
+from web.postgres_db import (
     get_expenses_for_month, add_expense, update_expense, delete_expense,
     get_month_report, list_limits, set_limit_and_apply, delete_category,
     get_current_month, get_remaining
 )
 from services.search_filter import matches
 from services.logging_config import get_logger
-from services.github_sync import GithubSync
+# GitHub sync removed - using PostgreSQL directly
 from web.schemas import (
     Expense, ExpenseCreate, ExpenseUpdate, ExpenseResponse,
     Limit, LimitCreate, ReportResponse, SyncStatus, HealthResponse
 )
-from web.deps import get_logger_service, get_github_sync
+from web.deps import get_logger_service
 
 # Initialize FastAPI app
 app = FastAPI(title="Budget API", version="1.0.0")
@@ -32,7 +32,6 @@ app.add_middleware(
 
 # Global services
 logger = get_logger_service()
-github_sync = get_github_sync()
 
 # Admin key for sync endpoints (optional)
 ADMIN_KEY = os.getenv("ADMIN_KEY")
@@ -48,17 +47,16 @@ def require_admin_key(x_admin_key: Optional[str] = None):
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup."""
-    global logger, github_sync
     logger.info("Starting Budget API server")
-
-    if github_sync:
-        try:
-            sha = github_sync.download_db()
-            logger.info("Startup: GitHub DB download successful, sha=%s", sha)
-        except Exception as e:
-            logger.exception("Startup: GitHub download failed")
-    else:
-        logger.info("GitHub sync disabled")
+    
+    try:
+        # Test PostgreSQL connection
+        from web.postgres_db import get_db_connection
+        conn = get_db_connection()
+        conn.close()
+        logger.info("Startup: PostgreSQL connection successful")
+    except Exception as e:
+        logger.error("Startup: PostgreSQL connection failed: %s", e)
 
 @app.get("/healthz", response_model=HealthResponse)
 async def health_check():
