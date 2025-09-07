@@ -161,13 +161,13 @@ export function SimpleDashboard() {
                     </div>
                     
                     {/* Компактный прогресс-бар с названием категории внутри */}
-                    <div className="relative w-12 h-32 bg-secondary rounded-2xl flex items-center justify-center">
+                    <div className="relative w-12 h-32 bg-gray-100 rounded-2xl flex items-center justify-center border border-gray-300">
                       <div
                         className={`absolute bottom-0 left-0 right-0 rounded-2xl transition-all duration-300 ${barColor}`}
                         style={{ height: `${Math.min(usage, 100)}%` }}
                       />
                       <span 
-                        className="relative z-10 text-xs font-medium text-center text-white drop-shadow-sm"
+                        className="relative z-10 text-xs font-medium text-center text-gray-900 drop-shadow-sm"
                         style={{ 
                           writingMode: 'vertical-rl',
                           textOrientation: 'mixed'
