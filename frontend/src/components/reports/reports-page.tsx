@@ -14,12 +14,12 @@ import { PieChart, BarChart3, TrendingUp, Calendar } from "lucide-react";
 
 export function ReportsPage() {
   const [selectedMonth, setSelectedMonth] = useState(format(new Date(), "yyyy-MM"));
-  const [compareMonth, setCompareMonth] = useState("");
+  const [compareMonth, setCompareMonth] = useState("none");
 
   // Получаем отчет за текущий месяц
   const { data: report, isLoading } = useQuery({
     queryKey: ["report", selectedMonth, compareMonth],
-    queryFn: () => reportsApi.getReport(selectedMonth, compareMonth || undefined),
+    queryFn: () => reportsApi.getReport(selectedMonth, compareMonth === "none" ? undefined : compareMonth),
   });
 
   // Генерируем список месяцев для выбора
@@ -94,12 +94,12 @@ export function ReportsPage() {
             </div>
             <div className="grid gap-2">
               <label className="text-sm font-medium">Compare with (optional)</label>
-              <Select value={compareMonth} onValueChange={setCompareMonth}>
+              <Select value={compareMonth} onValueChange={(value) => setCompareMonth(value === "none" ? "" : value)}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select month to compare" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">None</SelectItem>
+                  <SelectItem value="none">None</SelectItem>
                   {generateMonths().map((month) => (
                     <SelectItem key={month.value} value={month.value}>
                       {month.label}
@@ -195,13 +195,13 @@ export function ReportsPage() {
             <CardHeader>
               <CardTitle>Month-over-Month Comparison</CardTitle>
               <CardDescription>
-                {compareMonth
+                {compareMonth && compareMonth !== "" && compareMonth !== "none"
                   ? `Comparing ${format(new Date(selectedMonth + "-01"), "MMMM yyyy")} vs ${format(new Date(compareMonth + "-01"), "MMMM yyyy")}`
                   : "Select a comparison month to see differences"}
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {compareMonth && report?.comparison ? (
+              {compareMonth && compareMonth !== "" && compareMonth !== "none" && report?.comparison ? (
                 <div className="space-y-4">
                   {Object.entries(report.comparison).map(([category, change]) => (
                     <div key={category} className="flex items-center justify-between">
