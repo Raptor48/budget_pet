@@ -230,10 +230,10 @@ export function SimpleDashboard() {
                 
                 // Определяем цвет столбца
                 let barColor = 'bg-primary'; // по умолчанию синий
-                if (usage > 90 || isOver) {
-                  barColor = 'bg-red-600'; // ярко красный при >90% или превышении
-                } else if (usage > 70) {
-                  barColor = 'bg-red-400'; // светло красный при >70%
+                if (usage >= 100 || isOver) {
+                  barColor = 'bg-red-600'; // ярко красный при 100% или превышении
+                } else if (usage > 50) {
+                  barColor = 'bg-red-400'; // светло красный при >50%
                 }
 
                 return (
@@ -274,7 +274,7 @@ export function SimpleDashboard() {
                       </span>
                       {/* Debug info */}
                       <div className="text-xs text-gray-500 mt-1">
-                        {isOver ? 'OVER' : usage > 70 ? 'HIGH' : 'OK'}
+                        {isOver ? 'OVER' : usage >= 100 ? 'FULL' : usage > 50 ? 'HIGH' : 'OK'}
                       </div>
                     </div>
                   </div>
