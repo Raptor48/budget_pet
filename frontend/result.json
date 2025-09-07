@@ -1,0 +1,8950 @@
+{
+ "name": "Family Budget",
+ "type": "bot_chat",
+ "id": 8134194690,
+ "messages": [
+  {
+   "id": 96685,
+   "type": "message",
+   "date": "2025-08-11T14:55:47",
+   "date_unixtime": "1754938547",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 96686,
+   "type": "message",
+   "date": "2025-08-11T14:56:27",
+   "date_unixtime": "1754938587",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 96689,
+   "type": "message",
+   "date": "2025-08-11T15:11:07",
+   "date_unixtime": "1754939467",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 96690,
+   "type": "message",
+   "date": "2025-08-11T15:11:07",
+   "date_unixtime": "1754939467",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Привет! Я бюджет-бот.\nТвой user_id: 590588658\n\nФормат: `food 50`\nКоманды: ",
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " <cat>, ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <cat> <amt>, ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " [YYYY-MM]"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Привет! Я бюджет-бот.\nТвой user_id: 590588658\n\nФормат: `food 50`\nКоманды: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " <cat>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <cat> <amt>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " [YYYY-MM]"
+    }
+   ]
+  },
+  {
+   "id": 96691,
+   "type": "message",
+   "date": "2025-08-11T15:12:09",
+   "date_unixtime": "1754939529",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "food 25",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "food 25"
+    }
+   ]
+  },
+  {
+   "id": 96692,
+   "type": "message",
+   "date": "2025-08-11T15:12:09",
+   "date_unixtime": "1754939529",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Food +25.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Food +25.00"
+    }
+   ]
+  },
+  {
+   "id": 96693,
+   "type": "message",
+   "date": "2025-08-11T15:13:01",
+   "date_unixtime": "1754939581",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "food 500",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "food 500"
+    }
+   ]
+  },
+  {
+   "id": 96694,
+   "type": "message",
+   "date": "2025-08-11T15:13:02",
+   "date_unixtime": "1754939582",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Food +500.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Food +500.00"
+    }
+   ]
+  },
+  {
+   "id": 96695,
+   "type": "message",
+   "date": "2025-08-11T15:14:05",
+   "date_unixtime": "1754939645",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/report"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/report"
+    }
+   ]
+  },
+  {
+   "id": 96696,
+   "type": "message",
+   "date": "2025-08-11T15:14:06",
+   "date_unixtime": "1754939646",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "[2025-08] Отчёт:\n• Beer and Snacks: spent 80.00 / budget 250.00 → rem 170.00\n• Cloth: spent 0.00 / budget 100.00 → rem 100.00\n• Food: spent 0.00 / budget 999.00 → rem 999.00\n• Fun: spent 0.00 / budget 150.00 → rem 150.00\n• Internet, Mobile: spent 0.00 / budget 200.00 → rem 200.00\n• Loan & Credit Cards: spent 280.00 / budget 400.00 → rem 120.00\n• Pharmacy: spent 122.00 / budget 250.00 → rem 128.00\n• Smoking: spent 0.00 / budget 250.00 → rem 250.00\n• Subscriptions: spent 0.00 / budget 100.00 → rem 100.00\n• Travel: spent 0.00 / budget 100.00 → rem 100.00\n• Utilities: spent 140.00 / budget 150.00 → rem 10.00\n• Yummy: spent 0.00 / budget 250.00 → rem 250.00\nИТОГО: spent 622.00 / budget 3199.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "[2025-08] Отчёт:\n• Beer and Snacks: spent 80.00 / budget 250.00 → rem 170.00\n• Cloth: spent 0.00 / budget 100.00 → rem 100.00\n• Food: spent 0.00 / budget 999.00 → rem 999.00\n• Fun: spent 0.00 / budget 150.00 → rem 150.00\n• Internet, Mobile: spent 0.00 / budget 200.00 → rem 200.00\n• Loan & Credit Cards: spent 280.00 / budget 400.00 → rem 120.00\n• Pharmacy: spent 122.00 / budget 250.00 → rem 128.00\n• Smoking: spent 0.00 / budget 250.00 → rem 250.00\n• Subscriptions: spent 0.00 / budget 100.00 → rem 100.00\n• Travel: spent 0.00 / budget 100.00 → rem 100.00\n• Utilities: spent 140.00 / budget 150.00 → rem 10.00\n• Yummy: spent 0.00 / budget 250.00 → rem 250.00\nИТОГО: spent 622.00 / budget 3199.00"
+    }
+   ]
+  },
+  {
+   "id": 96697,
+   "type": "message",
+   "date": "2025-08-11T15:17:52",
+   "date_unixtime": "1754939872",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "Pood 500",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Pood 500"
+    }
+   ]
+  },
+  {
+   "id": 96698,
+   "type": "message",
+   "date": "2025-08-11T15:17:52",
+   "date_unixtime": "1754939872",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Категория 'Pood' не найдена. Добавь её в приложении (Settings → Add Category).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Категория 'Pood' не найдена. Добавь её в приложении (Settings → Add Category)."
+    }
+   ]
+  },
+  {
+   "id": 96699,
+   "type": "message",
+   "date": "2025-08-11T15:17:58",
+   "date_unixtime": "1754939878",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "Food 10",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Food 10"
+    }
+   ]
+  },
+  {
+   "id": 96700,
+   "type": "message",
+   "date": "2025-08-11T15:17:58",
+   "date_unixtime": "1754939878",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Food +10.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Food +10.00"
+    }
+   ]
+  },
+  {
+   "id": 96701,
+   "type": "message",
+   "date": "2025-08-11T15:18:11",
+   "date_unixtime": "1754939891",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "Food 555",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Food 555"
+    }
+   ]
+  },
+  {
+   "id": 96702,
+   "type": "message",
+   "date": "2025-08-11T15:18:11",
+   "date_unixtime": "1754939891",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Food +555.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Food +555.00"
+    }
+   ]
+  },
+  {
+   "id": 96703,
+   "type": "message",
+   "date": "2025-08-11T15:18:30",
+   "date_unixtime": "1754939910",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "Food 444",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Food 444"
+    }
+   ]
+  },
+  {
+   "id": 96704,
+   "type": "message",
+   "date": "2025-08-11T15:18:30",
+   "date_unixtime": "1754939910",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Food +444.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Food +444.00"
+    }
+   ]
+  },
+  {
+   "id": 96705,
+   "type": "message",
+   "date": "2025-08-11T15:18:41",
+   "date_unixtime": "1754939921",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "Food 10",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Food 10"
+    }
+   ]
+  },
+  {
+   "id": 96706,
+   "type": "message",
+   "date": "2025-08-11T15:18:41",
+   "date_unixtime": "1754939921",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Food +10.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Food +10.00"
+    }
+   ]
+  },
+  {
+   "id": 96707,
+   "type": "message",
+   "date": "2025-08-11T15:37:58",
+   "date_unixtime": "1754941078",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "Food 1.40",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Food 1.40"
+    }
+   ]
+  },
+  {
+   "id": 96708,
+   "type": "message",
+   "date": "2025-08-11T15:37:59",
+   "date_unixtime": "1754941079",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Food +1.40",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Food +1.40"
+    }
+   ]
+  },
+  {
+   "id": 96709,
+   "type": "message",
+   "date": "2025-08-11T15:39:34",
+   "date_unixtime": "1754941174",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "Food 1.99",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Food 1.99"
+    }
+   ]
+  },
+  {
+   "id": 96710,
+   "type": "message",
+   "date": "2025-08-11T15:39:34",
+   "date_unixtime": "1754941174",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Food +1.99",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Food +1.99"
+    }
+   ]
+  },
+  {
+   "id": 96711,
+   "type": "message",
+   "date": "2025-08-11T15:48:55",
+   "date_unixtime": "1754941735",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "Food 5",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Food 5"
+    }
+   ]
+  },
+  {
+   "id": 96712,
+   "type": "message",
+   "date": "2025-08-11T15:48:55",
+   "date_unixtime": "1754941735",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Food +5.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Food +5.00"
+    }
+   ]
+  },
+  {
+   "id": 96713,
+   "type": "message",
+   "date": "2025-08-11T15:56:06",
+   "date_unixtime": "1754942166",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "Food 5",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Food 5"
+    }
+   ]
+  },
+  {
+   "id": 96714,
+   "type": "message",
+   "date": "2025-08-11T15:56:08",
+   "date_unixtime": "1754942168",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Food +5.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Food +5.00"
+    }
+   ]
+  },
+  {
+   "id": 96715,
+   "type": "message",
+   "date": "2025-08-11T16:02:29",
+   "date_unixtime": "1754942549",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "Food 111",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Food 111"
+    }
+   ]
+  },
+  {
+   "id": 96716,
+   "type": "message",
+   "date": "2025-08-11T16:02:29",
+   "date_unixtime": "1754942549",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Категория 'Food' не найдена. Добавь её в приложении (Settings → Add Category).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Категория 'Food' не найдена. Добавь её в приложении (Settings → Add Category)."
+    }
+   ]
+  },
+  {
+   "id": 96717,
+   "type": "message",
+   "date": "2025-08-11T16:02:52",
+   "date_unixtime": "1754942572",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 96718,
+   "type": "message",
+   "date": "2025-08-11T16:02:53",
+   "date_unixtime": "1754942573",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Привет! Я бюджет-бот.\nТвой user_id: 590588658\n\nФормат: `food 50`\nКоманды: ",
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " <cat>, ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <cat> <amt>, ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " [YYYY-MM]"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Привет! Я бюджет-бот.\nТвой user_id: 590588658\n\nФормат: `food 50`\nКоманды: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " <cat>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <cat> <amt>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " [YYYY-MM]"
+    }
+   ]
+  },
+  {
+   "id": 96719,
+   "type": "message",
+   "date": "2025-08-11T16:02:58",
+   "date_unixtime": "1754942578",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "Food 50",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Food 50"
+    }
+   ]
+  },
+  {
+   "id": 96720,
+   "type": "message",
+   "date": "2025-08-11T16:02:58",
+   "date_unixtime": "1754942578",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Категория 'Food' не найдена. Добавь её в приложении (Settings → Add Category).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Категория 'Food' не найдена. Добавь её в приложении (Settings → Add Category)."
+    }
+   ]
+  },
+  {
+   "id": 96721,
+   "type": "message",
+   "date": "2025-08-11T16:03:04",
+   "date_unixtime": "1754942584",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "food 50",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "food 50"
+    }
+   ]
+  },
+  {
+   "id": 96722,
+   "type": "message",
+   "date": "2025-08-11T16:03:05",
+   "date_unixtime": "1754942585",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Категория 'food' не найдена. Добавь её в приложении (Settings → Add Category).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Категория 'food' не найдена. Добавь её в приложении (Settings → Add Category)."
+    }
+   ]
+  },
+  {
+   "id": 96723,
+   "type": "message",
+   "date": "2025-08-11T16:06:29",
+   "date_unixtime": "1754942789",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "Food 50",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Food 50"
+    }
+   ]
+  },
+  {
+   "id": 96724,
+   "type": "message",
+   "date": "2025-08-11T16:06:29",
+   "date_unixtime": "1754942789",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Категория 'Food' не найдена. Добавь её в приложении (Settings → Add Category).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Категория 'Food' не найдена. Добавь её в приложении (Settings → Add Category)."
+    }
+   ]
+  },
+  {
+   "id": 96728,
+   "type": "message",
+   "date": "2025-08-11T16:09:31",
+   "date_unixtime": "1754942971",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 96729,
+   "type": "message",
+   "date": "2025-08-11T16:09:31",
+   "date_unixtime": "1754942971",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Привет! Я бюджет-бот.\nТвой user_id: 590588658\n\nФормат: `food 50`\nКоманды: ",
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " <cat>, ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <cat> <amt>, ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " [YYYY-MM]"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Привет! Я бюджет-бот.\nТвой user_id: 590588658\n\nФормат: `food 50`\nКоманды: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " <cat>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <cat> <amt>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " [YYYY-MM]"
+    }
+   ]
+  },
+  {
+   "id": 96730,
+   "type": "message",
+   "date": "2025-08-11T16:09:37",
+   "date_unixtime": "1754942977",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "Food 50",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Food 50"
+    }
+   ]
+  },
+  {
+   "id": 96731,
+   "type": "message",
+   "date": "2025-08-11T16:09:38",
+   "date_unixtime": "1754942978",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Категория 'Food' не найдена. Добавь её в приложении (Settings → Add Category).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Категория 'Food' не найдена. Добавь её в приложении (Settings → Add Category)."
+    }
+   ]
+  },
+  {
+   "id": 96732,
+   "type": "message",
+   "date": "2025-08-11T16:16:20",
+   "date_unixtime": "1754943380",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "food 50",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "food 50"
+    }
+   ]
+  },
+  {
+   "id": 96733,
+   "type": "message",
+   "date": "2025-08-11T16:16:22",
+   "date_unixtime": "1754943382",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Food +50.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Food +50.00"
+    }
+   ]
+  },
+  {
+   "id": 96734,
+   "type": "message",
+   "date": "2025-08-11T16:22:16",
+   "date_unixtime": "1754943736",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "food 1",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "food 1"
+    }
+   ]
+  },
+  {
+   "id": 96735,
+   "type": "message",
+   "date": "2025-08-11T16:22:17",
+   "date_unixtime": "1754943737",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Food +1.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Food +1.00"
+    }
+   ]
+  },
+  {
+   "id": 96737,
+   "type": "message",
+   "date": "2025-08-11T16:30:58",
+   "date_unixtime": "1754944258",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "food 22",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "food 22"
+    }
+   ]
+  },
+  {
+   "id": 96738,
+   "type": "message",
+   "date": "2025-08-11T16:30:59",
+   "date_unixtime": "1754944259",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Food +22.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Food +22.00"
+    }
+   ]
+  },
+  {
+   "id": 96741,
+   "type": "message",
+   "date": "2025-08-11T17:07:54",
+   "date_unixtime": "1754946474",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "Food 9",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Food 9"
+    }
+   ]
+  },
+  {
+   "id": 96742,
+   "type": "message",
+   "date": "2025-08-11T17:07:55",
+   "date_unixtime": "1754946475",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Food +9.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Food +9.00"
+    }
+   ]
+  },
+  {
+   "id": 96743,
+   "type": "message",
+   "date": "2025-08-11T17:08:46",
+   "date_unixtime": "1754946526",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/report"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/report"
+    }
+   ]
+  },
+  {
+   "id": 96744,
+   "type": "message",
+   "date": "2025-08-11T17:08:47",
+   "date_unixtime": "1754946527",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "[2025-08] Отчёт:\n• Beer and Snacks: spent 80.00 / budget 250.00 → rem 170.00\n• Cloth: spent 0.00 / budget 100.00 → rem 100.00\n• Food: spent 87.00 / budget 999.00 → rem 912.00\n• Fun: spent 0.00 / budget 150.00 → rem 150.00\n• Internet, Mobile: spent 3.00 / budget 200.00 → rem 197.00\n• Loan & Credit Cards: spent 280.00 / budget 400.00 → rem 120.00\n• Pharmacy: spent 122.00 / budget 250.00 → rem 128.00\n• Smoking: spent 0.00 / budget 250.00 → rem 250.00\n• Subscriptions: spent 0.00 / budget 100.00 → rem 100.00\n• Travel: spent 0.00 / budget 100.00 → rem 100.00\n• Utilities: spent 140.00 / budget 150.00 → rem 10.00\n• Yummy: spent 0.00 / budget 250.00 → rem 250.00\nИТОГО: spent 712.00 / budget 3199.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "[2025-08] Отчёт:\n• Beer and Snacks: spent 80.00 / budget 250.00 → rem 170.00\n• Cloth: spent 0.00 / budget 100.00 → rem 100.00\n• Food: spent 87.00 / budget 999.00 → rem 912.00\n• Fun: spent 0.00 / budget 150.00 → rem 150.00\n• Internet, Mobile: spent 3.00 / budget 200.00 → rem 197.00\n• Loan & Credit Cards: spent 280.00 / budget 400.00 → rem 120.00\n• Pharmacy: spent 122.00 / budget 250.00 → rem 128.00\n• Smoking: spent 0.00 / budget 250.00 → rem 250.00\n• Subscriptions: spent 0.00 / budget 100.00 → rem 100.00\n• Travel: spent 0.00 / budget 100.00 → rem 100.00\n• Utilities: spent 140.00 / budget 150.00 → rem 10.00\n• Yummy: spent 0.00 / budget 250.00 → rem 250.00\nИТОГО: spent 712.00 / budget 3199.00"
+    }
+   ]
+  },
+  {
+   "id": 96745,
+   "type": "message",
+   "date": "2025-08-11T17:09:05",
+   "date_unixtime": "1754946545",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    }
+   ]
+  },
+  {
+   "id": 96746,
+   "type": "message",
+   "date": "2025-08-11T17:09:06",
+   "date_unixtime": "1754946546",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Лимиты:\nBeer and Snacks: 10.00\nCloth: 100.00\nFood: 999.00\nFun: 150.00\nInternet, Mobile: 200.00\nLoan & Credit Cards: 400.00\nPharmacy: 250.00\nSmoking: 250.00\nSubscriptions: 100.00\nTravel: 100.00\nUtilities: 150.00\nYummy: 250.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Лимиты:\nBeer and Snacks: 10.00\nCloth: 100.00\nFood: 999.00\nFun: 150.00\nInternet, Mobile: 200.00\nLoan & Credit Cards: 400.00\nPharmacy: 250.00\nSmoking: 250.00\nSubscriptions: 100.00\nTravel: 100.00\nUtilities: 150.00\nYummy: 250.00"
+    }
+   ]
+  },
+  {
+   "id": 96747,
+   "type": "message",
+   "date": "2025-08-11T17:09:18",
+   "date_unixtime": "1754946558",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    }
+   ]
+  },
+  {
+   "id": 96748,
+   "type": "message",
+   "date": "2025-08-11T17:09:18",
+   "date_unixtime": "1754946558",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Формат: ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <Category> <amount>"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Формат: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <Category> <amount>"
+    }
+   ]
+  },
+  {
+   "id": 96749,
+   "type": "message",
+   "date": "2025-08-11T17:09:53",
+   "date_unixtime": "1754946593",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "internet, mobile 250",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "internet, mobile 250"
+    }
+   ]
+  },
+  {
+   "id": 96750,
+   "type": "message",
+   "date": "2025-08-11T17:09:53",
+   "date_unixtime": "1754946593",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Формат: <category> <amount> (например, food 50)",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Формат: <category> <amount> (например, food 50)"
+    }
+   ]
+  },
+  {
+   "id": 96751,
+   "type": "message",
+   "date": "2025-08-11T17:10:58",
+   "date_unixtime": "1754946658",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " internet, mobile 999"
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " internet, mobile 999"
+    }
+   ]
+  },
+  {
+   "id": 96752,
+   "type": "message",
+   "date": "2025-08-11T17:10:58",
+   "date_unixtime": "1754946658",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Категория 'internet,' не найдена. Добавь её в приложении (Settings → Add Category).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Категория 'internet,' не найдена. Добавь её в приложении (Settings → Add Category)."
+    }
+   ]
+  },
+  {
+   "id": 96753,
+   "type": "message",
+   "date": "2025-08-11T17:11:14",
+   "date_unixtime": "1754946674",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " pharmacy 999"
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " pharmacy 999"
+    }
+   ]
+  },
+  {
+   "id": 96754,
+   "type": "message",
+   "date": "2025-08-11T17:11:15",
+   "date_unixtime": "1754946675",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Лимит для 'Pharmacy' установлен: 999.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Лимит для 'Pharmacy' установлен: 999.00"
+    }
+   ]
+  },
+  {
+   "id": 96758,
+   "type": "message",
+   "date": "2025-08-11T17:44:41",
+   "date_unixtime": "1754948681",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 96759,
+   "type": "message",
+   "date": "2025-08-11T17:44:42",
+   "date_unixtime": "1754948682",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Привет! Я бюджет-бот.\nТвой user_id: 590588658\n\nЕсли доступ не выдан, сообщи свой user_id владельцу бота.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Привет! Я бюджет-бот.\nТвой user_id: 590588658\n\nЕсли доступ не выдан, сообщи свой user_id владельцу бота."
+    }
+   ]
+  },
+  {
+   "id": 96760,
+   "type": "message",
+   "date": "2025-08-11T17:44:42",
+   "date_unixtime": "1754948682",
+   "edited": "2025-08-11T17:44:57",
+   "edited_unixtime": "1754948697",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Выбери действие:",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Выбери действие:"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Отчёт (месяц)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Лимиты",
+      "dataBase64": "bGltaXRz",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Beer and Snacks +50",
+      "dataBase64": "YWRkOkJlZXIgYW5kIFNuYWNrczo1MA",
+      "data": ""
+     },
+     {
+      "type": "callback",
+      "text": "Beer and Snacks …",
+      "dataBase64": "YXNrOkJlZXIgYW5kIFNuYWNrcw",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Cloth +50",
+      "dataBase64": "YWRkOkNsb3RoOjUw",
+      "data": ""
+     },
+     {
+      "type": "callback",
+      "text": "Cloth …",
+      "dataBase64": "YXNrOkNsb3Ro",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Food +50",
+      "dataBase64": "YWRkOkZvb2Q6NTA",
+      "data": ""
+     },
+     {
+      "type": "callback",
+      "text": "Food …",
+      "dataBase64": "YXNrOkZvb2Q",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96761,
+   "type": "message",
+   "date": "2025-08-11T17:53:40",
+   "date_unixtime": "1754949220",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 96762,
+   "type": "message",
+   "date": "2025-08-11T17:53:40",
+   "date_unixtime": "1754949220",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Привет! Я бюджет-бот.\nТвой user_id: 590588658\n\nЕсли доступ не выдан, сообщи свой user_id владельцу бота.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Привет! Я бюджет-бот.\nТвой user_id: 590588658\n\nЕсли доступ не выдан, сообщи свой user_id владельцу бота."
+    }
+   ]
+  },
+  {
+   "id": 96763,
+   "type": "message",
+   "date": "2025-08-11T17:53:41",
+   "date_unixtime": "1754949221",
+   "edited": "2025-08-11T17:53:55",
+   "edited_unixtime": "1754949235",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Отмена",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96764,
+   "type": "message",
+   "date": "2025-08-11T17:53:59",
+   "date_unixtime": "1754949239",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "12",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "12"
+    }
+   ]
+  },
+  {
+   "id": 96765,
+   "type": "message",
+   "date": "2025-08-11T17:54:01",
+   "date_unixtime": "1754949241",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Beer and Snacks +12.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Beer and Snacks +12.00"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Отчёт (месяц)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Лимиты",
+      "dataBase64": "bGltaXRz",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ Добавить расход",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96773,
+   "type": "message",
+   "date": "2025-08-11T18:20:31",
+   "date_unixtime": "1754950831",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 96774,
+   "type": "message",
+   "date": "2025-08-11T18:20:32",
+   "date_unixtime": "1754950832",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Привет! Я бюджет-бот.\nТвой user_id: 590588658\n\nЕсли доступ не выдан, сообщи свой user_id владельцу бота.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Привет! Я бюджет-бот.\nТвой user_id: 590588658\n\nЕсли доступ не выдан, сообщи свой user_id владельцу бота."
+    }
+   ]
+  },
+  {
+   "id": 96775,
+   "type": "message",
+   "date": "2025-08-11T18:20:32",
+   "date_unixtime": "1754950832",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Выбери действие:",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Выбери действие:"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Отчёт (месяц)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Лимиты",
+      "dataBase64": "bGltaXRz",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Beer and Snacks +50",
+      "dataBase64": "YWRkOkJlZXIgYW5kIFNuYWNrczo1MA",
+      "data": ""
+     },
+     {
+      "type": "callback",
+      "text": "Beer and Snacks …",
+      "dataBase64": "YXNrOkJlZXIgYW5kIFNuYWNrcw",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Cloth +50",
+      "dataBase64": "YWRkOkNsb3RoOjUw",
+      "data": ""
+     },
+     {
+      "type": "callback",
+      "text": "Cloth …",
+      "dataBase64": "YXNrOkNsb3Ro",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Food +50",
+      "dataBase64": "YWRkOkZvb2Q6NTA",
+      "data": ""
+     },
+     {
+      "type": "callback",
+      "text": "Food …",
+      "dataBase64": "YXNrOkZvb2Q",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96776,
+   "type": "message",
+   "date": "2025-08-11T18:26:36",
+   "date_unixtime": "1754951196",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 96777,
+   "type": "message",
+   "date": "2025-08-11T18:26:37",
+   "date_unixtime": "1754951197",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Привет! Я бюджет-бот.\nТвой user_id: 590588658\n\nЕсли доступ не выдан, сообщи свой user_id владельцу бота.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Привет! Я бюджет-бот.\nТвой user_id: 590588658\n\nЕсли доступ не выдан, сообщи свой user_id владельцу бота."
+    }
+   ]
+  },
+  {
+   "id": 96778,
+   "type": "message",
+   "date": "2025-08-11T18:26:37",
+   "date_unixtime": "1754951197",
+   "edited": "2025-08-11T18:26:48",
+   "edited_unixtime": "1754951208",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Выбери действие:",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Выбери действие:"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Отчёт (месяц)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Лимиты",
+      "dataBase64": "bGltaXRz",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ Добавить расход",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96779,
+   "type": "message",
+   "date": "2025-08-11T18:26:56",
+   "date_unixtime": "1754951216",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 96780,
+   "type": "message",
+   "date": "2025-08-11T18:26:56",
+   "date_unixtime": "1754951216",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Привет! Я бюджет-бот.\nТвой user_id: 590588658\n\nЕсли доступ не выдан, сообщи свой user_id владельцу бота.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Привет! Я бюджет-бот.\nТвой user_id: 590588658\n\nЕсли доступ не выдан, сообщи свой user_id владельцу бота."
+    }
+   ]
+  },
+  {
+   "id": 96781,
+   "type": "message",
+   "date": "2025-08-11T18:26:56",
+   "date_unixtime": "1754951216",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Выбери действие:",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Выбери действие:"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Отчёт (месяц)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Лимиты",
+      "dataBase64": "bGltaXRz",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ Добавить расход",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96782,
+   "type": "message",
+   "date": "2025-08-11T18:31:08",
+   "date_unixtime": "1754951468",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 96783,
+   "type": "message",
+   "date": "2025-08-11T18:31:08",
+   "date_unixtime": "1754951468",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Woof-Woof.\nYour ID: 590588658",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658"
+    }
+   ]
+  },
+  {
+   "id": 96784,
+   "type": "message",
+   "date": "2025-08-11T18:31:08",
+   "date_unixtime": "1754951468",
+   "edited": "2025-08-11T18:31:25",
+   "edited_unixtime": "1754951485",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Loan & Credit Cards' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Loan & Credit Cards' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96785,
+   "type": "message",
+   "date": "2025-08-11T18:31:34",
+   "date_unixtime": "1754951494",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "30",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "30"
+    }
+   ]
+  },
+  {
+   "id": 96786,
+   "type": "message",
+   "date": "2025-08-11T18:31:35",
+   "date_unixtime": "1754951495",
+   "edited": "2025-08-11T18:31:41",
+   "edited_unixtime": "1754951501",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Выбери действие:",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Выбери действие:"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Отчёт (месяц)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Лимиты",
+      "dataBase64": "bGltaXRz",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ Добавить расход",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96787,
+   "type": "message",
+   "date": "2025-08-11T18:42:31",
+   "date_unixtime": "1754952151",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 96788,
+   "type": "message",
+   "date": "2025-08-11T18:42:31",
+   "date_unixtime": "1754952151",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Woof-Woof.\nYour ID: 590588658",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658"
+    }
+   ]
+  },
+  {
+   "id": 96789,
+   "type": "message",
+   "date": "2025-08-11T18:42:31",
+   "date_unixtime": "1754952151",
+   "edited": "2025-08-11T18:42:40",
+   "edited_unixtime": "1754952160",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96790,
+   "type": "message",
+   "date": "2025-08-11T18:42:43",
+   "date_unixtime": "1754952163",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "15",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "15"
+    }
+   ]
+  },
+  {
+   "id": 96791,
+   "type": "message",
+   "date": "2025-08-11T18:42:44",
+   "date_unixtime": "1754952164",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Beer and Snacks +15.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Beer and Snacks +15.00"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Отчёт (месяц)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Лимиты",
+      "dataBase64": "bGltaXRz",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ Добавить расход",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96792,
+   "type": "message",
+   "date": "2025-08-11T18:45:45",
+   "date_unixtime": "1754952345",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 96793,
+   "type": "message",
+   "date": "2025-08-11T18:45:45",
+   "date_unixtime": "1754952345",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Woof-Woof.\nYour ID: 590588658",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658"
+    }
+   ]
+  },
+  {
+   "id": 96794,
+   "type": "message",
+   "date": "2025-08-11T18:45:46",
+   "date_unixtime": "1754952346",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Choose action:",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Choose action:"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Отчёт (месяц)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Лимиты",
+      "dataBase64": "bGltaXRz",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ Добавить расход",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96795,
+   "type": "message",
+   "date": "2025-08-11T18:50:56",
+   "date_unixtime": "1754952656",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 96796,
+   "type": "message",
+   "date": "2025-08-11T18:50:57",
+   "date_unixtime": "1754952657",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Woof-Woof.\nYour ID: 590588658",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658"
+    }
+   ]
+  },
+  {
+   "id": 96797,
+   "type": "message",
+   "date": "2025-08-11T18:50:57",
+   "date_unixtime": "1754952657",
+   "edited": "2025-08-11T18:51:51",
+   "edited_unixtime": "1754952711",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Food' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Food' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96798,
+   "type": "message",
+   "date": "2025-08-11T18:51:12",
+   "date_unixtime": "1754952672",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added Food $5.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added Food $5.00"
+    }
+   ]
+  },
+  {
+   "id": 96799,
+   "type": "message",
+   "date": "2025-08-11T18:51:36",
+   "date_unixtime": "1754952696",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "food 1",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "food 1"
+    }
+   ]
+  },
+  {
+   "id": 96800,
+   "type": "message",
+   "date": "2025-08-11T18:51:38",
+   "date_unixtime": "1754952698",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Food +1.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Food +1.00"
+    }
+   ]
+  },
+  {
+   "id": 96801,
+   "type": "message",
+   "date": "2025-08-11T18:51:54",
+   "date_unixtime": "1754952714",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "1",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "1"
+    }
+   ]
+  },
+  {
+   "id": 96802,
+   "type": "message",
+   "date": "2025-08-11T18:51:55",
+   "date_unixtime": "1754952715",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Food +1.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Food +1.00"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Отчёт (месяц)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Лимиты",
+      "dataBase64": "bGltaXRz",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ Добавить расход",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96803,
+   "type": "message",
+   "date": "2025-08-11T19:05:54",
+   "date_unixtime": "1754953554",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 96804,
+   "type": "message",
+   "date": "2025-08-11T19:05:55",
+   "date_unixtime": "1754953555",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Woof-Woof.\nYour ID: 590588658",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658"
+    }
+   ]
+  },
+  {
+   "id": 96805,
+   "type": "message",
+   "date": "2025-08-11T19:05:55",
+   "date_unixtime": "1754953555",
+   "edited": "2025-08-11T19:05:58",
+   "edited_unixtime": "1754953558",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "[2025-08] Отчёт:\n• Beer and Snacks: spent 32.00 / budget 200.00 → rem 168.00\n• Cloth: spent 0.00 / budget 100.00 → rem 100.00\n• Food: spent 27.00 / budget 400.00 → rem 373.00\n• Fun: spent 0.00 / budget 150.00 → rem 150.00\n• Internet, Mobile: spent 0.00 / budget 200.00 → rem 200.00\n• Loan & Credit Cards: spent 30.00 / budget 400.00 → rem 370.00\n• Pharmacy: spent 0.00 / budget 999.00 → rem 999.00\n• Smoking: spent 0.00 / budget 50.00 → rem 50.00\n• Subscriptions: spent 0.00 / budget 100.00 → rem 100.00\n• Taxi: spent 0.00 / budget 100.00 → rem 100.00\n• Transport: spent 0.00 / budget 150.00 → rem 150.00\n• Travel: spent 0.00 / budget 100.00 → rem 100.00\n• Utilities: spent 0.00 / budget 150.00 → rem 150.00\n• Yummy: spent 0.00 / budget 250.00 → rem 250.00\nИТОГО: spent 89.00 / budget 3349.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "[2025-08] Отчёт:\n• Beer and Snacks: spent 32.00 / budget 200.00 → rem 168.00\n• Cloth: spent 0.00 / budget 100.00 → rem 100.00\n• Food: spent 27.00 / budget 400.00 → rem 373.00\n• Fun: spent 0.00 / budget 150.00 → rem 150.00\n• Internet, Mobile: spent 0.00 / budget 200.00 → rem 200.00\n• Loan & Credit Cards: spent 30.00 / budget 400.00 → rem 370.00\n• Pharmacy: spent 0.00 / budget 999.00 → rem 999.00\n• Smoking: spent 0.00 / budget 50.00 → rem 50.00\n• Subscriptions: spent 0.00 / budget 100.00 → rem 100.00\n• Taxi: spent 0.00 / budget 100.00 → rem 100.00\n• Transport: spent 0.00 / budget 150.00 → rem 150.00\n• Travel: spent 0.00 / budget 100.00 → rem 100.00\n• Utilities: spent 0.00 / budget 150.00 → rem 150.00\n• Yummy: spent 0.00 / budget 250.00 → rem 250.00\nИТОГО: spent 89.00 / budget 3349.00"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Отчёт (месяц)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ Добавить расход",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96806,
+   "type": "message",
+   "date": "2025-08-11T19:22:01",
+   "date_unixtime": "1754954521",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 96807,
+   "type": "message",
+   "date": "2025-08-11T19:22:01",
+   "date_unixtime": "1754954521",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Woof-Woof.\nYour ID: 590588658\n\ntype: ",
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " <cat>, ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <cat> <amt>, ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " [YYYY-MM]"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658\n\ntype: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " <cat>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <cat> <amt>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " [YYYY-MM]"
+    }
+   ]
+  },
+  {
+   "id": 96808,
+   "type": "message",
+   "date": "2025-08-11T19:22:01",
+   "date_unixtime": "1754954521",
+   "edited": "2025-08-11T20:09:38",
+   "edited_unixtime": "1754957378",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Выберите категорию:",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Выберите категорию:"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Food",
+      "dataBase64": "YXNrOkZvb2Q",
+      "data": ""
+     },
+     {
+      "type": "callback",
+      "text": "Beer and Snacks",
+      "dataBase64": "YXNrOkJlZXIgYW5kIFNuYWNrcw",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Loan & Credit Cards",
+      "dataBase64": "YXNrOkxvYW4gJiBDcmVkaXQgQ2FyZHM",
+      "data": ""
+     },
+     {
+      "type": "callback",
+      "text": "Cloth",
+      "dataBase64": "YXNrOkNsb3Ro",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Fun",
+      "dataBase64": "YXNrOkZ1bg",
+      "data": ""
+     },
+     {
+      "type": "callback",
+      "text": "Internet, Mobile",
+      "dataBase64": "YXNrOkludGVybmV0LCBNb2JpbGU",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Pharmacy",
+      "dataBase64": "YXNrOlBoYXJtYWN5",
+      "data": ""
+     },
+     {
+      "type": "callback",
+      "text": "Smoking",
+      "dataBase64": "YXNrOlNtb2tpbmc",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "▶️",
+      "dataBase64": "bWVudTphZGQ6MQ",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "⬅️ back",
+      "dataBase64": "YmFjazptYWlu",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96809,
+   "type": "message",
+   "date": "2025-08-11T19:22:27",
+   "date_unixtime": "1754954547",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/help"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/help"
+    }
+   ]
+  },
+  {
+   "id": 96810,
+   "type": "message",
+   "date": "2025-08-11T19:22:27",
+   "date_unixtime": "1754954547",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Примеры:\n• food 50\n• yummy 120.5\n\nКоманды:\n• ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " — отчёт за текущий месяц\n• ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " Food — отчёт по категории\n• ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    " — список лимитов\n• ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " Food 30000 — задать лимит\n• ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " — показать рабочий месяц\n• ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " 2025-08 — выбрать другой месяц для отчётов"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Примеры:\n• food 50\n• yummy 120.5\n\nКоманды:\n• "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " — отчёт за текущий месяц\n• "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " Food — отчёт по категории\n• "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": " — список лимитов\n• "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " Food 30000 — задать лимит\n• "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " — показать рабочий месяц\n• "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " 2025-08 — выбрать другой месяц для отчётов"
+    }
+   ]
+  },
+  {
+   "id": 96814,
+   "type": "message",
+   "date": "2025-08-11T20:09:42",
+   "date_unixtime": "1754957382",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 96815,
+   "type": "message",
+   "date": "2025-08-11T20:09:42",
+   "date_unixtime": "1754957382",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Woof-Woof.\nYour ID: 590588658\n\ntype: ",
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " <cat>, ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <cat> <amt>, ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " [YYYY-MM]"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658\n\ntype: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " <cat>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <cat> <amt>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " [YYYY-MM]"
+    }
+   ]
+  },
+  {
+   "id": 96816,
+   "type": "message",
+   "date": "2025-08-11T20:09:42",
+   "date_unixtime": "1754957382",
+   "edited": "2025-08-11T20:09:46",
+   "edited_unixtime": "1754957386",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96817,
+   "type": "message",
+   "date": "2025-08-11T20:09:55",
+   "date_unixtime": "1754957395",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "28",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "28"
+    }
+   ]
+  },
+  {
+   "id": 96818,
+   "type": "message",
+   "date": "2025-08-11T20:09:57",
+   "date_unixtime": "1754957397",
+   "edited": "2025-08-12T07:57:48",
+   "edited_unixtime": "1754999868",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Internet, Mobile' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Internet, Mobile' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96820,
+   "type": "message",
+   "date": "2025-08-12T07:57:52",
+   "date_unixtime": "1754999872",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "165",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "165"
+    }
+   ]
+  },
+  {
+   "id": 96821,
+   "type": "message",
+   "date": "2025-08-12T07:57:53",
+   "date_unixtime": "1754999873",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "⚠️ Internet, Mobile: spend ⩾50% of limit!. Spent 165.00 / 200.00.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "⚠️ Internet, Mobile: spend ⩾50% of limit!. Spent 165.00 / 200.00."
+    }
+   ]
+  },
+  {
+   "id": 96822,
+   "type": "message",
+   "date": "2025-08-12T07:57:53",
+   "date_unixtime": "1754999873",
+   "edited": "2025-08-12T07:58:07",
+   "edited_unixtime": "1754999887",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Loan & Credit Cards' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Loan & Credit Cards' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96823,
+   "type": "message",
+   "date": "2025-08-12T07:58:10",
+   "date_unixtime": "1754999890",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "25",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "25"
+    }
+   ]
+  },
+  {
+   "id": 96824,
+   "type": "message",
+   "date": "2025-08-12T07:58:11",
+   "date_unixtime": "1754999891",
+   "edited": "2025-08-12T09:05:17",
+   "edited_unixtime": "1755003917",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Выберите категорию:",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Выберите категорию:"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Loan & Credit Cards",
+      "dataBase64": "YXNrOkxvYW4gJiBDcmVkaXQgQ2FyZHM",
+      "data": ""
+     },
+     {
+      "type": "callback",
+      "text": "Internet, Mobile",
+      "dataBase64": "YXNrOkludGVybmV0LCBNb2JpbGU",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Beer and Snacks",
+      "dataBase64": "YXNrOkJlZXIgYW5kIFNuYWNrcw",
+      "data": ""
+     },
+     {
+      "type": "callback",
+      "text": "Food",
+      "dataBase64": "YXNrOkZvb2Q",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Cloth",
+      "dataBase64": "YXNrOkNsb3Ro",
+      "data": ""
+     },
+     {
+      "type": "callback",
+      "text": "Fun",
+      "dataBase64": "YXNrOkZ1bg",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Pharmacy",
+      "dataBase64": "YXNrOlBoYXJtYWN5",
+      "data": ""
+     },
+     {
+      "type": "callback",
+      "text": "Smoking",
+      "dataBase64": "YXNrOlNtb2tpbmc",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "▶️",
+      "dataBase64": "bWVudTphZGQ6MQ",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "⬅️ back",
+      "dataBase64": "YmFjazptYWlu",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96825,
+   "type": "message",
+   "date": "2025-08-12T09:05:27",
+   "date_unixtime": "1755003927",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 96826,
+   "type": "message",
+   "date": "2025-08-12T09:05:27",
+   "date_unixtime": "1755003927",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Woof-Woof.\nYour ID: 590588658\n\ntype: ",
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " <cat>, ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <cat> <amt>, ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " [YYYY-MM]"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658\n\ntype: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " <cat>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <cat> <amt>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " [YYYY-MM]"
+    }
+   ]
+  },
+  {
+   "id": 96827,
+   "type": "message",
+   "date": "2025-08-12T09:05:27",
+   "date_unixtime": "1755003927",
+   "edited": "2025-08-12T09:05:39",
+   "edited_unixtime": "1755003939",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Yummy' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Yummy' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96828,
+   "type": "message",
+   "date": "2025-08-12T09:05:43",
+   "date_unixtime": "1755003943",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "28",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "28"
+    }
+   ]
+  },
+  {
+   "id": 96829,
+   "type": "message",
+   "date": "2025-08-12T09:05:44",
+   "date_unixtime": "1755003944",
+   "edited": "2025-08-13T07:36:45",
+   "edited_unixtime": "1755085005",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Food' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Food' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96878,
+   "type": "message",
+   "date": "2025-08-13T07:36:50",
+   "date_unixtime": "1755085010",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "6.5",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "6.5"
+    }
+   ]
+  },
+  {
+   "id": 96879,
+   "type": "message",
+   "date": "2025-08-13T07:36:51",
+   "date_unixtime": "1755085011",
+   "edited": "2025-08-13T17:44:12",
+   "edited_unixtime": "1755121452",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96884,
+   "type": "message",
+   "date": "2025-08-13T17:44:21",
+   "date_unixtime": "1755121461",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "15",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "15"
+    }
+   ]
+  },
+  {
+   "id": 96885,
+   "type": "message",
+   "date": "2025-08-13T17:44:22",
+   "date_unixtime": "1755121462",
+   "edited": "2025-08-13T17:44:26",
+   "edited_unixtime": "1755121466",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Food' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Food' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96886,
+   "type": "message",
+   "date": "2025-08-13T17:44:35",
+   "date_unixtime": "1755121475",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "42",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "42"
+    }
+   ]
+  },
+  {
+   "id": 96887,
+   "type": "message",
+   "date": "2025-08-13T17:44:36",
+   "date_unixtime": "1755121476",
+   "edited": "2025-08-15T22:01:08",
+   "edited_unixtime": "1755309668",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Subscriptions' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Subscriptions' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96903,
+   "type": "message",
+   "date": "2025-08-15T07:42:02",
+   "date_unixtime": "1755258122",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added Transport $7.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added Transport $7.00"
+    }
+   ]
+  },
+  {
+   "id": 96917,
+   "type": "message",
+   "date": "2025-08-15T13:25:35",
+   "date_unixtime": "1755278735",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added Transport $3.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added Transport $3.00"
+    }
+   ]
+  },
+  {
+   "id": 96918,
+   "type": "message",
+   "date": "2025-08-15T13:25:55",
+   "date_unixtime": "1755278755",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added Food $6.24",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added Food $6.24"
+    }
+   ]
+  },
+  {
+   "id": 96939,
+   "type": "message",
+   "date": "2025-08-15T18:33:45",
+   "date_unixtime": "1755297225",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added Transport $6.50",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added Transport $6.50"
+    }
+   ]
+  },
+  {
+   "id": 96946,
+   "type": "message",
+   "date": "2025-08-15T22:01:12",
+   "date_unixtime": "1755309672",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "7",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "7"
+    }
+   ]
+  },
+  {
+   "id": 96947,
+   "type": "message",
+   "date": "2025-08-15T22:01:13",
+   "date_unixtime": "1755309673",
+   "edited": "2025-08-15T22:01:20",
+   "edited_unixtime": "1755309680",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96948,
+   "type": "message",
+   "date": "2025-08-15T22:01:22",
+   "date_unixtime": "1755309682",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "13",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "13"
+    }
+   ]
+  },
+  {
+   "id": 96949,
+   "type": "message",
+   "date": "2025-08-15T22:01:23",
+   "date_unixtime": "1755309683",
+   "edited": "2025-08-16T10:34:06",
+   "edited_unixtime": "1755354846",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Yummy' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Yummy' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96980,
+   "type": "message",
+   "date": "2025-08-16T10:34:10",
+   "date_unixtime": "1755354850",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "9",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "9"
+    }
+   ]
+  },
+  {
+   "id": 96981,
+   "type": "message",
+   "date": "2025-08-16T10:34:10",
+   "date_unixtime": "1755354850",
+   "edited": "2025-08-16T13:28:28",
+   "edited_unixtime": "1755365308",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Subscriptions' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Subscriptions' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 96990,
+   "type": "message",
+   "date": "2025-08-16T13:18:23",
+   "date_unixtime": "1755364703",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added Transport $5.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added Transport $5.00"
+    }
+   ]
+  },
+  {
+   "id": 96991,
+   "type": "message",
+   "date": "2025-08-16T13:18:39",
+   "date_unixtime": "1755364719",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added Food $5.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added Food $5.00"
+    }
+   ]
+  },
+  {
+   "id": 96992,
+   "type": "message",
+   "date": "2025-08-16T13:28:34",
+   "date_unixtime": "1755365314",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "21",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "21"
+    }
+   ]
+  },
+  {
+   "id": 96993,
+   "type": "message",
+   "date": "2025-08-16T13:28:35",
+   "date_unixtime": "1755365315",
+   "edited": "2025-08-17T17:01:05",
+   "edited_unixtime": "1755464465",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Smoking' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Smoking' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97052,
+   "type": "message",
+   "date": "2025-08-17T16:28:33",
+   "date_unixtime": "1755462513",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added Beer and Snacks $16.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added Beer and Snacks $16.00"
+    }
+   ]
+  },
+  {
+   "id": 97053,
+   "type": "message",
+   "date": "2025-08-17T16:28:44",
+   "date_unixtime": "1755462524",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added Food $5.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added Food $5.00"
+    }
+   ]
+  },
+  {
+   "id": 97054,
+   "type": "message",
+   "date": "2025-08-17T16:29:02",
+   "date_unixtime": "1755462542",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added Transport $16.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added Transport $16.00"
+    }
+   ]
+  },
+  {
+   "id": 97059,
+   "type": "message",
+   "date": "2025-08-17T17:01:09",
+   "date_unixtime": "1755464469",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "16",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "16"
+    }
+   ]
+  },
+  {
+   "id": 97060,
+   "type": "message",
+   "date": "2025-08-17T17:01:10",
+   "date_unixtime": "1755464470",
+   "edited": "2025-08-17T17:18:25",
+   "edited_unixtime": "1755465505",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Выберите категорию:",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Выберите категорию:"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Smoking",
+      "dataBase64": "YXNrOlNtb2tpbmc",
+      "data": ""
+     },
+     {
+      "type": "callback",
+      "text": "Transport",
+      "dataBase64": "YXNrOlRyYW5zcG9ydA",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Food",
+      "dataBase64": "YXNrOkZvb2Q",
+      "data": ""
+     },
+     {
+      "type": "callback",
+      "text": "Beer and Snacks",
+      "dataBase64": "YXNrOkJlZXIgYW5kIFNuYWNrcw",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Subscriptions",
+      "dataBase64": "YXNrOlN1YnNjcmlwdGlvbnM",
+      "data": ""
+     },
+     {
+      "type": "callback",
+      "text": "Yummy",
+      "dataBase64": "YXNrOll1bW15",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "Loan & Credit Cards",
+      "dataBase64": "YXNrOkxvYW4gJiBDcmVkaXQgQ2FyZHM",
+      "data": ""
+     },
+     {
+      "type": "callback",
+      "text": "Internet, Mobile",
+      "dataBase64": "YXNrOkludGVybmV0LCBNb2JpbGU",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "▶️",
+      "dataBase64": "bWVudTphZGQ6MQ",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "⬅️ back",
+      "dataBase64": "YmFjazptYWlu",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97061,
+   "type": "message",
+   "date": "2025-08-17T17:18:44",
+   "date_unixtime": "1755465524",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 97062,
+   "type": "message",
+   "date": "2025-08-17T17:18:44",
+   "date_unixtime": "1755465524",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Woof-Woof.\nYour ID: 590588658\n\ntype: ",
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " <cat>, ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <cat> <amt>, ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " [YYYY-MM]"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658\n\ntype: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " <cat>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <cat> <amt>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " [YYYY-MM]"
+    }
+   ]
+  },
+  {
+   "id": 97063,
+   "type": "message",
+   "date": "2025-08-17T17:18:45",
+   "date_unixtime": "1755465525",
+   "edited": "2025-08-17T17:18:57",
+   "edited_unixtime": "1755465537",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Food' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Food' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97064,
+   "type": "message",
+   "date": "2025-08-17T17:19:00",
+   "date_unixtime": "1755465540",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "8",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "8"
+    }
+   ]
+  },
+  {
+   "id": 97065,
+   "type": "message",
+   "date": "2025-08-17T17:19:01",
+   "date_unixtime": "1755465541",
+   "edited": "2025-08-17T17:19:07",
+   "edited_unixtime": "1755465547",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97066,
+   "type": "message",
+   "date": "2025-08-17T17:19:09",
+   "date_unixtime": "1755465549",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "29",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "29"
+    }
+   ]
+  },
+  {
+   "id": 97067,
+   "type": "message",
+   "date": "2025-08-17T17:19:10",
+   "date_unixtime": "1755465550",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "⚠️ Beer and Snacks: spend ⩾50% of limit!. Spent 101.00 / 200.00.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "⚠️ Beer and Snacks: spend ⩾50% of limit!. Spent 101.00 / 200.00."
+    }
+   ]
+  },
+  {
+   "id": 97068,
+   "type": "message",
+   "date": "2025-08-17T17:19:10",
+   "date_unixtime": "1755465550",
+   "edited": "2025-08-18T16:20:06",
+   "edited_unixtime": "1755548406",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Food' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Food' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97140,
+   "type": "message",
+   "date": "2025-08-18T16:20:20",
+   "date_unixtime": "1755548420",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "26",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "26"
+    }
+   ]
+  },
+  {
+   "id": 97141,
+   "type": "message",
+   "date": "2025-08-18T16:20:22",
+   "date_unixtime": "1755548422",
+   "edited": "2025-08-18T16:20:25",
+   "edited_unixtime": "1755548425",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97142,
+   "type": "message",
+   "date": "2025-08-18T16:20:37",
+   "date_unixtime": "1755548437",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "8",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "8"
+    }
+   ]
+  },
+  {
+   "id": 97143,
+   "type": "message",
+   "date": "2025-08-18T16:20:38",
+   "date_unixtime": "1755548438",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "⚠️ Beer and Snacks: spend ⩾50% of limit!. Spent 109.00 / 200.00.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "⚠️ Beer and Snacks: spend ⩾50% of limit!. Spent 109.00 / 200.00."
+    }
+   ]
+  },
+  {
+   "id": 97144,
+   "type": "message",
+   "date": "2025-08-18T16:20:39",
+   "date_unixtime": "1755548439",
+   "edited": "2025-08-19T14:13:34",
+   "edited_unixtime": "1755627214",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Food' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Food' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97167,
+   "type": "message",
+   "date": "2025-08-19T14:13:39",
+   "date_unixtime": "1755627219",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "13",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "13"
+    }
+   ]
+  },
+  {
+   "id": 97168,
+   "type": "message",
+   "date": "2025-08-19T14:13:40",
+   "date_unixtime": "1755627220",
+   "edited": "2025-08-20T13:14:32",
+   "edited_unixtime": "1755710072",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Выбери действие:",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Выбери действие:"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Report (month)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ add expenses",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97203,
+   "type": "message",
+   "date": "2025-08-20T13:14:29",
+   "date_unixtime": "1755710069",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 97204,
+   "type": "message",
+   "date": "2025-08-20T13:14:30",
+   "date_unixtime": "1755710070",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Woof-Woof.\nYour ID: 590588658\n\ntype: ",
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " <cat>, ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <cat> <amt>, ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " [YYYY-MM]"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658\n\ntype: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " <cat>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <cat> <amt>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " [YYYY-MM]"
+    }
+   ]
+  },
+  {
+   "id": 97205,
+   "type": "message",
+   "date": "2025-08-20T13:14:30",
+   "date_unixtime": "1755710070",
+   "edited": "2025-08-20T13:14:36",
+   "edited_unixtime": "1755710076",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Yummy' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Yummy' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97206,
+   "type": "message",
+   "date": "2025-08-20T13:14:39",
+   "date_unixtime": "1755710079",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "7",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "7"
+    }
+   ]
+  },
+  {
+   "id": 97207,
+   "type": "message",
+   "date": "2025-08-20T13:14:40",
+   "date_unixtime": "1755710080",
+   "edited": "2025-08-20T16:55:03",
+   "edited_unixtime": "1755723303",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Yummy' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Yummy' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97208,
+   "type": "message",
+   "date": "2025-08-20T16:54:49",
+   "date_unixtime": "1755723289",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 97209,
+   "type": "message",
+   "date": "2025-08-20T16:54:50",
+   "date_unixtime": "1755723290",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Woof-Woof.\nYour ID: 590588658\n\ntype: ",
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " <cat>, ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <cat> <amt>, ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " [YYYY-MM]"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658\n\ntype: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " <cat>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <cat> <amt>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " [YYYY-MM]"
+    }
+   ]
+  },
+  {
+   "id": 97210,
+   "type": "message",
+   "date": "2025-08-20T16:54:50",
+   "date_unixtime": "1755723290",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Choose action:",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Choose action:"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Report (month)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ add expenses",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97211,
+   "type": "message",
+   "date": "2025-08-20T16:55:06",
+   "date_unixtime": "1755723306",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "7",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "7"
+    }
+   ]
+  },
+  {
+   "id": 97212,
+   "type": "message",
+   "date": "2025-08-20T16:55:07",
+   "date_unixtime": "1755723307",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Yummy +7.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Yummy +7.00"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Report (month)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ add expenses",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97250,
+   "type": "message",
+   "date": "2025-08-21T03:25:53",
+   "date_unixtime": "1755761153",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 97251,
+   "type": "message",
+   "date": "2025-08-21T03:25:54",
+   "date_unixtime": "1755761154",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Woof-Woof.\nYour ID: 590588658\n\ntype: ",
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " <cat>, ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <cat> <amt>, ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " [YYYY-MM]"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658\n\ntype: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " <cat>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <cat> <amt>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " [YYYY-MM]"
+    }
+   ]
+  },
+  {
+   "id": 97252,
+   "type": "message",
+   "date": "2025-08-21T03:25:54",
+   "date_unixtime": "1755761154",
+   "edited": "2025-08-21T03:25:59",
+   "edited_unixtime": "1755761159",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Yummy' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Yummy' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97253,
+   "type": "message",
+   "date": "2025-08-21T03:26:05",
+   "date_unixtime": "1755761165",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "8",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "8"
+    }
+   ]
+  },
+  {
+   "id": 97254,
+   "type": "message",
+   "date": "2025-08-21T03:26:06",
+   "date_unixtime": "1755761166",
+   "edited": "2025-08-21T03:26:09",
+   "edited_unixtime": "1755761169",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Food' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Food' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97255,
+   "type": "message",
+   "date": "2025-08-21T03:26:17",
+   "date_unixtime": "1755761177",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "8",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "8"
+    }
+   ]
+  },
+  {
+   "id": 97256,
+   "type": "message",
+   "date": "2025-08-21T03:26:18",
+   "date_unixtime": "1755761178",
+   "edited": "2025-08-21T03:26:23",
+   "edited_unixtime": "1755761183",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97257,
+   "type": "message",
+   "date": "2025-08-21T03:26:30",
+   "date_unixtime": "1755761190",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "7",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "7"
+    }
+   ]
+  },
+  {
+   "id": 97258,
+   "type": "message",
+   "date": "2025-08-21T03:26:31",
+   "date_unixtime": "1755761191",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "⚠️ Beer and Snacks: spend ⩾50% of limit!. Spent 116.00 / 200.00.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "⚠️ Beer and Snacks: spend ⩾50% of limit!. Spent 116.00 / 200.00."
+    }
+   ]
+  },
+  {
+   "id": 97259,
+   "type": "message",
+   "date": "2025-08-21T03:26:32",
+   "date_unixtime": "1755761192",
+   "edited": "2025-08-21T21:16:48",
+   "edited_unixtime": "1755825408",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97310,
+   "type": "message",
+   "date": "2025-08-21T21:16:03",
+   "date_unixtime": "1755825363",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added Taxi $13.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added Taxi $13.00"
+    }
+   ]
+  },
+  {
+   "id": 97311,
+   "type": "message",
+   "date": "2025-08-21T21:16:40",
+   "date_unixtime": "1755825400",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 97312,
+   "type": "message",
+   "date": "2025-08-21T21:16:40",
+   "date_unixtime": "1755825400",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Woof-Woof.\nYour ID: 590588658\n\ntype: ",
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " <cat>, ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <cat> <amt>, ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " [YYYY-MM]"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658\n\ntype: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " <cat>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <cat> <amt>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " [YYYY-MM]"
+    }
+   ]
+  },
+  {
+   "id": 97313,
+   "type": "message",
+   "date": "2025-08-21T21:16:40",
+   "date_unixtime": "1755825400",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Choose action:",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Choose action:"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Report (month)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ add expenses",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97314,
+   "type": "message",
+   "date": "2025-08-21T21:16:54",
+   "date_unixtime": "1755825414",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "8",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "8"
+    }
+   ]
+  },
+  {
+   "id": 97315,
+   "type": "message",
+   "date": "2025-08-21T21:16:55",
+   "date_unixtime": "1755825415",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "⚠️ Beer and Snacks: spend ⩾50% of limit!. Spent 124.00 / 200.00.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "⚠️ Beer and Snacks: spend ⩾50% of limit!. Spent 124.00 / 200.00."
+    }
+   ]
+  },
+  {
+   "id": 97316,
+   "type": "message",
+   "date": "2025-08-21T21:16:55",
+   "date_unixtime": "1755825415",
+   "edited": "2025-08-21T21:16:59",
+   "edited_unixtime": "1755825419",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Food' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Food' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97317,
+   "type": "message",
+   "date": "2025-08-21T21:17:10",
+   "date_unixtime": "1755825430",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "37",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "37"
+    }
+   ]
+  },
+  {
+   "id": 97318,
+   "type": "message",
+   "date": "2025-08-21T21:17:11",
+   "date_unixtime": "1755825431",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Food +37.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Food +37.00"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Report (month)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ add expenses",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97324,
+   "type": "message",
+   "date": "2025-08-21T21:20:53",
+   "date_unixtime": "1755825653",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/help"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/help"
+    }
+   ]
+  },
+  {
+   "id": 97325,
+   "type": "message",
+   "date": "2025-08-21T21:20:54",
+   "date_unixtime": "1755825654",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Примеры:\n• food 50\n• yummy 120.5\n\nКоманды:\n• ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " — отчёт за текущий месяц\n• ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " Food — отчёт по категории\n• ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    " — список лимитов\n• ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " Food 30000 — задать лимит\n• ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " — показать рабочий месяц\n• ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " 2025-08 — выбрать другой месяц для отчётов"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Примеры:\n• food 50\n• yummy 120.5\n\nКоманды:\n• "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " — отчёт за текущий месяц\n• "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " Food — отчёт по категории\n• "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": " — список лимитов\n• "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " Food 30000 — задать лимит\n• "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " — показать рабочий месяц\n• "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " 2025-08 — выбрать другой месяц для отчётов"
+    }
+   ]
+  },
+  {
+   "id": 97328,
+   "type": "message",
+   "date": "2025-08-22T22:24:37",
+   "date_unixtime": "1755915877",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added 3D $5.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added 3D $5.00"
+    }
+   ]
+  },
+  {
+   "id": 97329,
+   "type": "message",
+   "date": "2025-08-22T22:24:45",
+   "date_unixtime": "1755915885",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added 3D $39.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added 3D $39.00"
+    }
+   ]
+  },
+  {
+   "id": 97330,
+   "type": "message",
+   "date": "2025-08-23T07:07:54",
+   "date_unixtime": "1755947274",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 97331,
+   "type": "message",
+   "date": "2025-08-23T07:07:54",
+   "date_unixtime": "1755947274",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Woof-Woof.\nYour ID: 590588658\n\ntype: ",
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " <cat>, ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <cat> <amt>, ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " [YYYY-MM]"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658\n\ntype: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " <cat>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <cat> <amt>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " [YYYY-MM]"
+    }
+   ]
+  },
+  {
+   "id": 97332,
+   "type": "message",
+   "date": "2025-08-23T07:07:54",
+   "date_unixtime": "1755947274",
+   "edited": "2025-08-23T07:08:03",
+   "edited_unixtime": "1755947283",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Utilities' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Utilities' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97333,
+   "type": "message",
+   "date": "2025-08-23T07:08:12",
+   "date_unixtime": "1755947292",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "135",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "135"
+    }
+   ]
+  },
+  {
+   "id": 97334,
+   "type": "message",
+   "date": "2025-08-23T07:08:13",
+   "date_unixtime": "1755947293",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "⚠️ Utilities: spend ⩾50% of limit!. Spent 135.00 / 150.00.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "⚠️ Utilities: spend ⩾50% of limit!. Spent 135.00 / 150.00."
+    }
+   ]
+  },
+  {
+   "id": 97335,
+   "type": "message",
+   "date": "2025-08-23T07:08:13",
+   "date_unixtime": "1755947293",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "🔴 Utilities: spend ⩾90% of limit!!! Spent 135.00 / 150.00.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "🔴 Utilities: spend ⩾90% of limit!!! Spent 135.00 / 150.00."
+    }
+   ]
+  },
+  {
+   "id": 97336,
+   "type": "message",
+   "date": "2025-08-23T07:08:13",
+   "date_unixtime": "1755947293",
+   "edited": "2025-08-23T07:08:30",
+   "edited_unixtime": "1755947310",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Transport' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Transport' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97338,
+   "type": "message",
+   "date": "2025-08-23T07:08:34",
+   "date_unixtime": "1755947314",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "20",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "20"
+    }
+   ]
+  },
+  {
+   "id": 97339,
+   "type": "message",
+   "date": "2025-08-23T07:08:35",
+   "date_unixtime": "1755947315",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Transport +20.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Transport +20.00"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Report (month)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ add expenses",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97429,
+   "type": "message",
+   "date": "2025-08-24T07:00:46",
+   "date_unixtime": "1756033246",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 97430,
+   "type": "message",
+   "date": "2025-08-24T07:00:46",
+   "date_unixtime": "1756033246",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Woof-Woof.\nYour ID: 590588658\n\ntype: ",
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " <cat>, ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <cat> <amt>, ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " [YYYY-MM]"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658\n\ntype: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " <cat>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <cat> <amt>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " [YYYY-MM]"
+    }
+   ]
+  },
+  {
+   "id": 97431,
+   "type": "message",
+   "date": "2025-08-24T07:00:46",
+   "date_unixtime": "1756033246",
+   "edited": "2025-08-24T07:00:51",
+   "edited_unixtime": "1756033251",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Yummy' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Yummy' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97432,
+   "type": "message",
+   "date": "2025-08-24T07:00:56",
+   "date_unixtime": "1756033256",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "28",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "28"
+    }
+   ]
+  },
+  {
+   "id": 97433,
+   "type": "message",
+   "date": "2025-08-24T07:00:57",
+   "date_unixtime": "1756033257",
+   "edited": "2025-08-24T07:01:08",
+   "edited_unixtime": "1756033268",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97434,
+   "type": "message",
+   "date": "2025-08-24T07:01:13",
+   "date_unixtime": "1756033273",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "18",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "18"
+    }
+   ]
+  },
+  {
+   "id": 97435,
+   "type": "message",
+   "date": "2025-08-24T07:01:14",
+   "date_unixtime": "1756033274",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "⚠️ Beer and Snacks: spend ⩾50% of limit!. Spent 142.00 / 200.00.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "⚠️ Beer and Snacks: spend ⩾50% of limit!. Spent 142.00 / 200.00."
+    }
+   ]
+  },
+  {
+   "id": 97436,
+   "type": "message",
+   "date": "2025-08-24T07:01:14",
+   "date_unixtime": "1756033274",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Beer and Snacks +18.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Beer and Snacks +18.00"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Report (month)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ add expenses",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97453,
+   "type": "message",
+   "date": "2025-08-24T12:06:22",
+   "date_unixtime": "1756051582",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added Transport $13.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added Transport $13.00"
+    }
+   ]
+  },
+  {
+   "id": 97454,
+   "type": "message",
+   "date": "2025-08-24T12:06:31",
+   "date_unixtime": "1756051591",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added Food $10.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added Food $10.00"
+    }
+   ]
+  },
+  {
+   "id": 97455,
+   "type": "message",
+   "date": "2025-08-24T12:07:33",
+   "date_unixtime": "1756051653",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added Loan & Credit Cards $50.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added Loan & Credit Cards $50.00"
+    }
+   ]
+  },
+  {
+   "id": 97457,
+   "type": "message",
+   "date": "2025-08-25T07:34:49",
+   "date_unixtime": "1756121689",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 97458,
+   "type": "message",
+   "date": "2025-08-25T07:34:49",
+   "date_unixtime": "1756121689",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Woof-Woof.\nYour ID: 590588658\n\ntype: ",
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " <cat>, ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <cat> <amt>, ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " [YYYY-MM]"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658\n\ntype: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " <cat>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <cat> <amt>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " [YYYY-MM]"
+    }
+   ]
+  },
+  {
+   "id": 97459,
+   "type": "message",
+   "date": "2025-08-25T07:34:49",
+   "date_unixtime": "1756121689",
+   "edited": "2025-08-25T07:34:54",
+   "edited_unixtime": "1756121694",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Loan & Credit Cards' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Loan & Credit Cards' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97460,
+   "type": "message",
+   "date": "2025-08-25T07:35:02",
+   "date_unixtime": "1756121702",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "56",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "56"
+    }
+   ]
+  },
+  {
+   "id": 97461,
+   "type": "message",
+   "date": "2025-08-25T07:35:03",
+   "date_unixtime": "1756121703",
+   "edited": "2025-08-25T09:46:12",
+   "edited_unixtime": "1756129572",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Yummy' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Yummy' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97469,
+   "type": "message",
+   "date": "2025-08-25T09:06:26",
+   "date_unixtime": "1756127186",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added Transport $6.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added Transport $6.00"
+    }
+   ]
+  },
+  {
+   "id": 97470,
+   "type": "message",
+   "date": "2025-08-25T09:06:36",
+   "date_unixtime": "1756127196",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added Food $30.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added Food $30.00"
+    }
+   ]
+  },
+  {
+   "id": 97472,
+   "type": "message",
+   "date": "2025-08-25T09:46:06",
+   "date_unixtime": "1756129566",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 97473,
+   "type": "message",
+   "date": "2025-08-25T09:46:06",
+   "date_unixtime": "1756129566",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Woof-Woof.\nYour ID: 590588658\n\ntype: ",
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " <cat>, ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <cat> <amt>, ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " [YYYY-MM]"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658\n\ntype: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " <cat>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <cat> <amt>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " [YYYY-MM]"
+    }
+   ]
+  },
+  {
+   "id": 97474,
+   "type": "message",
+   "date": "2025-08-25T09:46:06",
+   "date_unixtime": "1756129566",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Choose action:",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Choose action:"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Report (month)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ add expenses",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97475,
+   "type": "message",
+   "date": "2025-08-25T09:46:16",
+   "date_unixtime": "1756129576",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "9",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "9"
+    }
+   ]
+  },
+  {
+   "id": 97476,
+   "type": "message",
+   "date": "2025-08-25T09:46:17",
+   "date_unixtime": "1756129577",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Yummy +9.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Yummy +9.00"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Report (month)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ add expenses",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97589,
+   "type": "message",
+   "date": "2025-08-26T19:00:16",
+   "date_unixtime": "1756249216",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 97590,
+   "type": "message",
+   "date": "2025-08-26T19:00:16",
+   "date_unixtime": "1756249216",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Woof-Woof.\nYour ID: 590588658\n\ntype: ",
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " <cat>, ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <cat> <amt>, ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " [YYYY-MM]"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658\n\ntype: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " <cat>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <cat> <amt>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " [YYYY-MM]"
+    }
+   ]
+  },
+  {
+   "id": 97591,
+   "type": "message",
+   "date": "2025-08-26T19:00:17",
+   "date_unixtime": "1756249217",
+   "edited": "2025-08-26T19:00:20",
+   "edited_unixtime": "1756249220",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97592,
+   "type": "message",
+   "date": "2025-08-26T19:00:24",
+   "date_unixtime": "1756249224",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "53",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "53"
+    }
+   ]
+  },
+  {
+   "id": 97593,
+   "type": "message",
+   "date": "2025-08-26T19:00:25",
+   "date_unixtime": "1756249225",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "⚠️ Beer and Snacks: spend ⩾50% of limit!. Spent 195.00 / 200.00.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "⚠️ Beer and Snacks: spend ⩾50% of limit!. Spent 195.00 / 200.00."
+    }
+   ]
+  },
+  {
+   "id": 97594,
+   "type": "message",
+   "date": "2025-08-26T19:00:26",
+   "date_unixtime": "1756249226",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "🔴 Beer and Snacks: spend ⩾90% of limit!!! Spent 195.00 / 200.00.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "🔴 Beer and Snacks: spend ⩾90% of limit!!! Spent 195.00 / 200.00."
+    }
+   ]
+  },
+  {
+   "id": 97595,
+   "type": "message",
+   "date": "2025-08-26T19:00:26",
+   "date_unixtime": "1756249226",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Beer and Snacks +53.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Beer and Snacks +53.00"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Report (month)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ add expenses",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97611,
+   "type": "message",
+   "date": "2025-08-27T10:31:49",
+   "date_unixtime": "1756305109",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 97612,
+   "type": "message",
+   "date": "2025-08-27T10:31:49",
+   "date_unixtime": "1756305109",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Woof-Woof.\nYour ID: 590588658\n\ntype: ",
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " <cat>, ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <cat> <amt>, ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " [YYYY-MM]"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658\n\ntype: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " <cat>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <cat> <amt>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " [YYYY-MM]"
+    }
+   ]
+  },
+  {
+   "id": 97613,
+   "type": "message",
+   "date": "2025-08-27T10:31:49",
+   "date_unixtime": "1756305109",
+   "edited": "2025-08-27T10:32:07",
+   "edited_unixtime": "1756305127",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Subscriptions' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Subscriptions' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97614,
+   "type": "message",
+   "date": "2025-08-27T10:32:00",
+   "date_unixtime": "1756305120",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 97615,
+   "type": "message",
+   "date": "2025-08-27T10:32:01",
+   "date_unixtime": "1756305121",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Woof-Woof.\nYour ID: 590588658\n\ntype: ",
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " <cat>, ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <cat> <amt>, ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " [YYYY-MM]"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658\n\ntype: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " <cat>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <cat> <amt>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " [YYYY-MM]"
+    }
+   ]
+  },
+  {
+   "id": 97616,
+   "type": "message",
+   "date": "2025-08-27T10:32:01",
+   "date_unixtime": "1756305121",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Choose action:",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Choose action:"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Report (month)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ add expenses",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97617,
+   "type": "message",
+   "date": "2025-08-27T10:32:11",
+   "date_unixtime": "1756305131",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "41",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "41"
+    }
+   ]
+  },
+  {
+   "id": 97618,
+   "type": "message",
+   "date": "2025-08-27T10:32:12",
+   "date_unixtime": "1756305132",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "⚠️ Subscriptions: spend ⩾50% of limit!. Spent 69.00 / 100.00.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "⚠️ Subscriptions: spend ⩾50% of limit!. Spent 69.00 / 100.00."
+    }
+   ]
+  },
+  {
+   "id": 97619,
+   "type": "message",
+   "date": "2025-08-27T10:32:12",
+   "date_unixtime": "1756305132",
+   "edited": "2025-08-27T16:31:57",
+   "edited_unixtime": "1756326717",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Food' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Food' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97658,
+   "type": "message",
+   "date": "2025-08-27T16:32:00",
+   "date_unixtime": "1756326720",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "13",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "13"
+    }
+   ]
+  },
+  {
+   "id": 97659,
+   "type": "message",
+   "date": "2025-08-27T16:32:01",
+   "date_unixtime": "1756326721",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "⚠️ Food: spend ⩾50% of limit!. Spent 209.74 / 400.00.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "⚠️ Food: spend ⩾50% of limit!. Spent 209.74 / 400.00."
+    }
+   ]
+  },
+  {
+   "id": 97660,
+   "type": "message",
+   "date": "2025-08-27T16:32:01",
+   "date_unixtime": "1756326721",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Food +13.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Food +13.00"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Report (month)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ add expenses",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97673,
+   "type": "message",
+   "date": "2025-08-29T10:07:05",
+   "date_unixtime": "1756476425",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 97674,
+   "type": "message",
+   "date": "2025-08-29T10:07:06",
+   "date_unixtime": "1756476426",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Woof-Woof.\nYour ID: 590588658\n\ntype: ",
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " <cat>, ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <cat> <amt>, ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " [YYYY-MM]"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658\n\ntype: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " <cat>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <cat> <amt>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " [YYYY-MM]"
+    }
+   ]
+  },
+  {
+   "id": 97675,
+   "type": "message",
+   "date": "2025-08-29T10:07:06",
+   "date_unixtime": "1756476426",
+   "edited": "2025-08-29T10:07:16",
+   "edited_unixtime": "1756476436",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Yummy' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Yummy' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97676,
+   "type": "message",
+   "date": "2025-08-29T10:07:13",
+   "date_unixtime": "1756476433",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 97677,
+   "type": "message",
+   "date": "2025-08-29T10:07:14",
+   "date_unixtime": "1756476434",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Woof-Woof.\nYour ID: 590588658\n\ntype: ",
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " <cat>, ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <cat> <amt>, ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " [YYYY-MM]"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658\n\ntype: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " <cat>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <cat> <amt>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " [YYYY-MM]"
+    }
+   ]
+  },
+  {
+   "id": 97678,
+   "type": "message",
+   "date": "2025-08-29T10:07:14",
+   "date_unixtime": "1756476434",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Choose action:",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Choose action:"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Report (month)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ add expenses",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97679,
+   "type": "message",
+   "date": "2025-08-29T10:07:22",
+   "date_unixtime": "1756476442",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "14",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "14"
+    }
+   ]
+  },
+  {
+   "id": 97680,
+   "type": "message",
+   "date": "2025-08-29T10:07:23",
+   "date_unixtime": "1756476443",
+   "edited": "2025-08-30T10:49:55",
+   "edited_unixtime": "1756565395",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Utilities' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Utilities' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97725,
+   "type": "message",
+   "date": "2025-08-30T10:49:52",
+   "date_unixtime": "1756565392",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 97726,
+   "type": "message",
+   "date": "2025-08-30T10:49:52",
+   "date_unixtime": "1756565392",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Woof-Woof.\nYour ID: 590588658\n\ntype: ",
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " <cat>, ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <cat> <amt>, ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " [YYYY-MM]"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658\n\ntype: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " <cat>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <cat> <amt>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " [YYYY-MM]"
+    }
+   ]
+  },
+  {
+   "id": 97727,
+   "type": "message",
+   "date": "2025-08-30T10:49:52",
+   "date_unixtime": "1756565392",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Choose action:",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Choose action:"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Report (month)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ add expenses",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97728,
+   "type": "message",
+   "date": "2025-08-30T10:50:01",
+   "date_unixtime": "1756565401",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "75",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "75"
+    }
+   ]
+  },
+  {
+   "id": 97729,
+   "type": "message",
+   "date": "2025-08-30T10:50:03",
+   "date_unixtime": "1756565403",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "⚠️ Utilities: spend ⩾50% of limit!. Spent 210.00 / 150.00.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "⚠️ Utilities: spend ⩾50% of limit!. Spent 210.00 / 150.00."
+    }
+   ]
+  },
+  {
+   "id": 97730,
+   "type": "message",
+   "date": "2025-08-30T10:50:03",
+   "date_unixtime": "1756565403",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "🔴 Utilities: spend ⩾90% of limit!!! Spent 210.00 / 150.00.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "🔴 Utilities: spend ⩾90% of limit!!! Spent 210.00 / 150.00."
+    }
+   ]
+  },
+  {
+   "id": 97731,
+   "type": "message",
+   "date": "2025-08-30T10:50:03",
+   "date_unixtime": "1756565403",
+   "edited": "2025-08-30T10:50:19",
+   "edited_unixtime": "1756565419",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97732,
+   "type": "message",
+   "date": "2025-08-30T10:50:25",
+   "date_unixtime": "1756565425",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "40",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "40"
+    }
+   ]
+  },
+  {
+   "id": 97733,
+   "type": "message",
+   "date": "2025-08-30T10:50:27",
+   "date_unixtime": "1756565427",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "⚠️ Beer and Snacks: spend ⩾50% of limit!. Spent 235.00 / 200.00.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "⚠️ Beer and Snacks: spend ⩾50% of limit!. Spent 235.00 / 200.00."
+    }
+   ]
+  },
+  {
+   "id": 97734,
+   "type": "message",
+   "date": "2025-08-30T10:50:27",
+   "date_unixtime": "1756565427",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "🔴 Beer and Snacks: spend ⩾90% of limit!!! Spent 235.00 / 200.00.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "🔴 Beer and Snacks: spend ⩾90% of limit!!! Spent 235.00 / 200.00."
+    }
+   ]
+  },
+  {
+   "id": 97735,
+   "type": "message",
+   "date": "2025-08-30T10:50:27",
+   "date_unixtime": "1756565427",
+   "edited": "2025-08-30T10:50:31",
+   "edited_unixtime": "1756565431",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Food' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Food' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97736,
+   "type": "message",
+   "date": "2025-08-30T10:50:36",
+   "date_unixtime": "1756565436",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "80",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "80"
+    }
+   ]
+  },
+  {
+   "id": 97737,
+   "type": "message",
+   "date": "2025-08-30T10:50:38",
+   "date_unixtime": "1756565438",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "⚠️ Food: spend ⩾50% of limit!. Spent 289.74 / 400.00.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "⚠️ Food: spend ⩾50% of limit!. Spent 289.74 / 400.00."
+    }
+   ]
+  },
+  {
+   "id": 97738,
+   "type": "message",
+   "date": "2025-08-30T10:50:38",
+   "date_unixtime": "1756565438",
+   "edited": "2025-08-30T20:19:27",
+   "edited_unixtime": "1756599567",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Yummy' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Yummy' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97745,
+   "type": "message",
+   "date": "2025-08-30T20:19:31",
+   "date_unixtime": "1756599571",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "25",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "25"
+    }
+   ]
+  },
+  {
+   "id": 97746,
+   "type": "message",
+   "date": "2025-08-30T20:19:32",
+   "date_unixtime": "1756599572",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "⚠️ Yummy: spend ⩾50% of limit!. Spent 135.00 / 250.00.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "⚠️ Yummy: spend ⩾50% of limit!. Spent 135.00 / 250.00."
+    }
+   ]
+  },
+  {
+   "id": 97747,
+   "type": "message",
+   "date": "2025-08-30T20:19:32",
+   "date_unixtime": "1756599572",
+   "edited": "2025-08-30T20:19:38",
+   "edited_unixtime": "1756599578",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Smoking' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Smoking' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97748,
+   "type": "message",
+   "date": "2025-08-30T20:19:40",
+   "date_unixtime": "1756599580",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "25",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "25"
+    }
+   ]
+  },
+  {
+   "id": 97749,
+   "type": "message",
+   "date": "2025-08-30T20:19:41",
+   "date_unixtime": "1756599581",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "⚠️ Smoking: spend ⩾50% of limit!. Spent 41.00 / 50.00.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "⚠️ Smoking: spend ⩾50% of limit!. Spent 41.00 / 50.00."
+    }
+   ]
+  },
+  {
+   "id": 97750,
+   "type": "message",
+   "date": "2025-08-30T20:19:41",
+   "date_unixtime": "1756599581",
+   "edited": "2025-08-31T09:18:01",
+   "edited_unixtime": "1756646281",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "[2025-08] Отчёт:\n• 3D: spent 44.00 / budget 150.00 → rem 106.00\n• Beer and Snacks: spent 268.00 / budget 200.00 → rem -68.00\n• Cloth: spent 0.00 / budget 100.00 → rem 100.00\n• Food: spent 289.74 / budget 400.00 → rem 110.26\n• Fun: spent 0.00 / budget 150.00 → rem 150.00\n• Internet, Mobile: spent 165.00 / budget 200.00 → rem 35.00\n• Loan & Credit Cards: spent 131.00 / budget 400.00 → rem 269.00\n• Pharmacy: spent 0.00 / budget 999.00 → rem 999.00\n• Smoking: spent 41.00 / budget 50.00 → rem 9.00\n• Subscriptions: spent 69.00 / budget 100.00 → rem 31.00\n• Taxi: spent 13.00 / budget 100.00 → rem 87.00\n• Transport: spent 76.50 / budget 150.00 → rem 73.50\n• Travel: spent 0.00 / budget 100.00 → rem 100.00\n• Utilities: spent 210.00 / budget 150.00 → rem -60.00\n• Yummy: spent 135.00 / budget 250.00 → rem 115.00\nИТОГО: spent 1442.24 / budget 3499.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "[2025-08] Отчёт:\n• 3D: spent 44.00 / budget 150.00 → rem 106.00\n• Beer and Snacks: spent 268.00 / budget 200.00 → rem -68.00\n• Cloth: spent 0.00 / budget 100.00 → rem 100.00\n• Food: spent 289.74 / budget 400.00 → rem 110.26\n• Fun: spent 0.00 / budget 150.00 → rem 150.00\n• Internet, Mobile: spent 165.00 / budget 200.00 → rem 35.00\n• Loan & Credit Cards: spent 131.00 / budget 400.00 → rem 269.00\n• Pharmacy: spent 0.00 / budget 999.00 → rem 999.00\n• Smoking: spent 41.00 / budget 50.00 → rem 9.00\n• Subscriptions: spent 69.00 / budget 100.00 → rem 31.00\n• Taxi: spent 13.00 / budget 100.00 → rem 87.00\n• Transport: spent 76.50 / budget 150.00 → rem 73.50\n• Travel: spent 0.00 / budget 100.00 → rem 100.00\n• Utilities: spent 210.00 / budget 150.00 → rem -60.00\n• Yummy: spent 135.00 / budget 250.00 → rem 115.00\nИТОГО: spent 1442.24 / budget 3499.00"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Report (month)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ add expenses",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97752,
+   "type": "message",
+   "date": "2025-08-31T09:17:44",
+   "date_unixtime": "1756646264",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added Beer and Snacks $33.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added Beer and Snacks $33.00"
+    }
+   ]
+  },
+  {
+   "id": 97753,
+   "type": "message",
+   "date": "2025-08-31T09:19:11",
+   "date_unixtime": "1756646351",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added Transport $6.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added Transport $6.00"
+    }
+   ]
+  },
+  {
+   "id": 97794,
+   "type": "message",
+   "date": "2025-09-02T19:09:26",
+   "date_unixtime": "1756854566",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 97795,
+   "type": "message",
+   "date": "2025-09-02T19:09:26",
+   "date_unixtime": "1756854566",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Woof-Woof.\nYour ID: 590588658\n\ntype: ",
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " <cat>, ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <cat> <amt>, ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " [YYYY-MM]"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658\n\ntype: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " <cat>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <cat> <amt>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " [YYYY-MM]"
+    }
+   ]
+  },
+  {
+   "id": 97796,
+   "type": "message",
+   "date": "2025-09-02T19:09:26",
+   "date_unixtime": "1756854566",
+   "edited": "2025-09-02T19:09:30",
+   "edited_unixtime": "1756854570",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Food' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Food' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97797,
+   "type": "message",
+   "date": "2025-09-02T19:09:43",
+   "date_unixtime": "1756854583",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "5$",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "5$"
+    }
+   ]
+  },
+  {
+   "id": 97798,
+   "type": "message",
+   "date": "2025-09-02T19:09:44",
+   "date_unixtime": "1756854584",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите число, например 123.45 или 123,45. Или нажмите Отмена.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите число, например 123.45 или 123,45. Или нажмите Отмена."
+    }
+   ]
+  },
+  {
+   "id": 97799,
+   "type": "message",
+   "date": "2025-09-02T19:09:53",
+   "date_unixtime": "1756854593",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "5",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "5"
+    }
+   ]
+  },
+  {
+   "id": 97800,
+   "type": "message",
+   "date": "2025-09-02T19:09:54",
+   "date_unixtime": "1756854594",
+   "edited": "2025-09-02T21:02:56",
+   "edited_unixtime": "1756861376",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Beer and Snacks' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97805,
+   "type": "message",
+   "date": "2025-09-02T21:03:00",
+   "date_unixtime": "1756861380",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "11",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "11"
+    }
+   ]
+  },
+  {
+   "id": 97806,
+   "type": "message",
+   "date": "2025-09-02T21:03:01",
+   "date_unixtime": "1756861381",
+   "edited": "2025-09-02T21:03:04",
+   "edited_unixtime": "1756861384",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "[2025-09] Отчёт:\n• 3D: spent 0.00 / budget 256.00 → rem 256.00\n• Beer and Snacks: spent 11.00 / budget 200.00 → rem 189.00\n• Cloth: spent 0.00 / budget 200.00 → rem 200.00\n• Food: spent 5.00 / budget 510.26 → rem 505.26\n• Fun: spent 0.00 / budget 300.00 → rem 300.00\n• Internet, Mobile: spent 0.00 / budget 235.00 → rem 235.00\n• Loan & Credit Cards: spent 0.00 / budget 669.00 → rem 669.00\n• Pharmacy: spent 0.00 / budget 1998.00 → rem 1998.00\n• Smoking: spent 0.00 / budget 59.00 → rem 59.00\n• Subscriptions: spent 0.00 / budget 131.00 → rem 131.00\n• Taxi: spent 0.00 / budget 187.00 → rem 187.00\n• Transport: spent 0.00 / budget 217.50 → rem 217.50\n• Travel: spent 0.00 / budget 200.00 → rem 200.00\n• Utilities: spent 0.00 / budget 150.00 → rem 150.00\n• Yummy: spent 0.00 / budget 365.00 → rem 365.00\nИТОГО: spent 16.00 / budget 5677.76",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "[2025-09] Отчёт:\n• 3D: spent 0.00 / budget 256.00 → rem 256.00\n• Beer and Snacks: spent 11.00 / budget 200.00 → rem 189.00\n• Cloth: spent 0.00 / budget 200.00 → rem 200.00\n• Food: spent 5.00 / budget 510.26 → rem 505.26\n• Fun: spent 0.00 / budget 300.00 → rem 300.00\n• Internet, Mobile: spent 0.00 / budget 235.00 → rem 235.00\n• Loan & Credit Cards: spent 0.00 / budget 669.00 → rem 669.00\n• Pharmacy: spent 0.00 / budget 1998.00 → rem 1998.00\n• Smoking: spent 0.00 / budget 59.00 → rem 59.00\n• Subscriptions: spent 0.00 / budget 131.00 → rem 131.00\n• Taxi: spent 0.00 / budget 187.00 → rem 187.00\n• Transport: spent 0.00 / budget 217.50 → rem 217.50\n• Travel: spent 0.00 / budget 200.00 → rem 200.00\n• Utilities: spent 0.00 / budget 150.00 → rem 150.00\n• Yummy: spent 0.00 / budget 365.00 → rem 365.00\nИТОГО: spent 16.00 / budget 5677.76"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Report (month)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ add expenses",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 97812,
+   "type": "message",
+   "date": "2025-09-03T10:25:57",
+   "date_unixtime": "1756909557",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added Loan & Credit Cards $25.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added Loan & Credit Cards $25.00"
+    }
+   ]
+  },
+  {
+   "id": 97981,
+   "type": "message",
+   "date": "2025-09-05T18:23:03",
+   "date_unixtime": "1757110983",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added Transport $9.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added Transport $9.00"
+    }
+   ]
+  },
+  {
+   "id": 97982,
+   "type": "message",
+   "date": "2025-09-05T18:23:17",
+   "date_unixtime": "1757110997",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added Food $10.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added Food $10.00"
+    }
+   ]
+  },
+  {
+   "id": 98016,
+   "type": "message",
+   "date": "2025-09-06T13:05:03",
+   "date_unixtime": "1757178303",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Taya Stolpovskaia added Food $3.50",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Taya Stolpovskaia added Food $3.50"
+    }
+   ]
+  },
+  {
+   "id": 98021,
+   "type": "message",
+   "date": "2025-09-06T15:42:12",
+   "date_unixtime": "1757187732",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 98022,
+   "type": "message",
+   "date": "2025-09-06T15:42:12",
+   "date_unixtime": "1757187732",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Woof-Woof.\nYour ID: 590588658\n\ntype: ",
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " <cat>, ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " <cat> <amt>, ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    ", ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " [YYYY-MM]"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Woof-Woof.\nYour ID: 590588658\n\ntype: "
+    },
+    {
+     "type": "bot_command",
+     "text": "/help"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " <cat>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " <cat> <amt>, "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": ", "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " [YYYY-MM]"
+    }
+   ]
+  },
+  {
+   "id": 98023,
+   "type": "message",
+   "date": "2025-09-06T15:42:12",
+   "date_unixtime": "1757187732",
+   "edited": "2025-09-06T15:42:17",
+   "edited_unixtime": "1757187737",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Введите сумму для категории 'Utilities' (например, 123.45).",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Введите сумму для категории 'Utilities' (например, 123.45)."
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Cancel",
+      "dataBase64": "Y2FuY2Vs",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 98024,
+   "type": "message",
+   "date": "2025-09-06T15:42:20",
+   "date_unixtime": "1757187740",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": "141",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "141"
+    }
+   ]
+  },
+  {
+   "id": 98025,
+   "type": "message",
+   "date": "2025-09-06T15:42:21",
+   "date_unixtime": "1757187741",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "⚠️ Utilities: spend ⩾50% of limit!. Spent 141.00 / 150.00.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "⚠️ Utilities: spend ⩾50% of limit!. Spent 141.00 / 150.00."
+    }
+   ]
+  },
+  {
+   "id": 98026,
+   "type": "message",
+   "date": "2025-09-06T15:42:21",
+   "date_unixtime": "1757187741",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "🔴 Utilities: spend ⩾90% of limit!!! Spent 141.00 / 150.00.",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "🔴 Utilities: spend ⩾90% of limit!!! Spent 141.00 / 150.00."
+    }
+   ]
+  },
+  {
+   "id": 98027,
+   "type": "message",
+   "date": "2025-09-06T15:42:21",
+   "date_unixtime": "1757187741",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "OK: Utilities +141.00",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "OK: Utilities +141.00"
+    }
+   ],
+   "inline_bot_buttons": [
+    [
+     {
+      "type": "callback",
+      "text": "Report (month)",
+      "dataBase64": "cmVwb3J0",
+      "data": ""
+     }
+    ],
+    [
+     {
+      "type": "callback",
+      "text": "➕ add expenses",
+      "dataBase64": "bWVudTphZGQ6MA",
+      "data": ""
+     }
+    ]
+   ]
+  },
+  {
+   "id": 98073,
+   "type": "message",
+   "date": "2025-09-07T09:35:19",
+   "date_unixtime": "1757252119",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/help"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/help"
+    }
+   ]
+  },
+  {
+   "id": 98074,
+   "type": "message",
+   "date": "2025-09-07T09:35:20",
+   "date_unixtime": "1757252120",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "Примеры:\n• food 50\n• yummy 120.5\n\nКоманды:\n• ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " — отчёт за текущий месяц\n• ",
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    " Food — отчёт по категории\n• ",
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    " — список лимитов\n• ",
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    " Food 30000 — задать лимит\n• ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " — показать рабочий месяц\n• ",
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    " 2025-08 — выбрать другой месяц для отчётов"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Примеры:\n• food 50\n• yummy 120.5\n\nКоманды:\n• "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " — отчёт за текущий месяц\n• "
+    },
+    {
+     "type": "bot_command",
+     "text": "/report"
+    },
+    {
+     "type": "plain",
+     "text": " Food — отчёт по категории\n• "
+    },
+    {
+     "type": "bot_command",
+     "text": "/limits"
+    },
+    {
+     "type": "plain",
+     "text": " — список лимитов\n• "
+    },
+    {
+     "type": "bot_command",
+     "text": "/setlimit"
+    },
+    {
+     "type": "plain",
+     "text": " Food 30000 — задать лимит\n• "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " — показать рабочий месяц\n• "
+    },
+    {
+     "type": "bot_command",
+     "text": "/month"
+    },
+    {
+     "type": "plain",
+     "text": " 2025-08 — выбрать другой месяц для отчётов"
+    }
+   ]
+  },
+  {
+   "id": 98075,
+   "type": "message",
+   "date": "2025-09-07T09:35:24",
+   "date_unixtime": "1757252124",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/report"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/report"
+    }
+   ]
+  },
+  {
+   "id": 98076,
+   "type": "message",
+   "date": "2025-09-07T09:35:24",
+   "date_unixtime": "1757252124",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "[2025-09] Summary:\n• 3D: spent 0.00 / budget 256.00 → rem 256.00\n• Beer and Snacks: spent 11.00 / budget 200.00 → rem 189.00\n• Cloth: spent 0.00 / budget 200.00 → rem 200.00\n• Food: spent 18.50 / budget 510.26 → rem 491.76\n• Fun: spent 0.00 / budget 300.00 → rem 300.00\n• Internet, Mobile: spent 0.00 / budget 235.00 → rem 235.00\n• Loan & Credit Cards: spent 25.00 / budget 669.00 → rem 644.00\n• Pharmacy: spent 0.00 / budget 1998.00 → rem 1998.00\n• Smoking: spent 0.00 / budget 59.00 → rem 59.00\n• Subscriptions: spent 0.00 / budget 131.00 → rem 131.00\n• Taxi: spent 0.00 / budget 187.00 → rem 187.00\n• Transport: spent 9.00 / budget 217.50 → rem 208.50\n• Travel: spent 0.00 / budget 200.00 → rem 200.00\n• Utilities: spent 141.00 / budget 150.00 → rem 9.00\n• Yummy: spent 0.00 / budget 365.00 → rem 365.00\nFinal: spent 204.50 / budget 5677.76",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "[2025-09] Summary:\n• 3D: spent 0.00 / budget 256.00 → rem 256.00\n• Beer and Snacks: spent 11.00 / budget 200.00 → rem 189.00\n• Cloth: spent 0.00 / budget 200.00 → rem 200.00\n• Food: spent 18.50 / budget 510.26 → rem 491.76\n• Fun: spent 0.00 / budget 300.00 → rem 300.00\n• Internet, Mobile: spent 0.00 / budget 235.00 → rem 235.00\n• Loan & Credit Cards: spent 25.00 / budget 669.00 → rem 644.00\n• Pharmacy: spent 0.00 / budget 1998.00 → rem 1998.00\n• Smoking: spent 0.00 / budget 59.00 → rem 59.00\n• Subscriptions: spent 0.00 / budget 131.00 → rem 131.00\n• Taxi: spent 0.00 / budget 187.00 → rem 187.00\n• Transport: spent 9.00 / budget 217.50 → rem 208.50\n• Travel: spent 0.00 / budget 200.00 → rem 200.00\n• Utilities: spent 141.00 / budget 150.00 → rem 9.00\n• Yummy: spent 0.00 / budget 365.00 → rem 365.00\nFinal: spent 204.50 / budget 5677.76"
+    }
+   ]
+  },
+  {
+   "id": 98083,
+   "type": "message",
+   "date": "2025-09-07T12:25:45",
+   "date_unixtime": "1757262345",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/report"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/report"
+    }
+   ]
+  },
+  {
+   "id": 98084,
+   "type": "message",
+   "date": "2025-09-07T12:28:52",
+   "date_unixtime": "1757262532",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 98085,
+   "type": "message",
+   "date": "2025-09-07T12:32:28",
+   "date_unixtime": "1757262748",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 98086,
+   "type": "message",
+   "date": "2025-09-07T12:32:29",
+   "date_unixtime": "1757262749",
+   "edited": "2025-09-07T12:41:29",
+   "edited_unixtime": "1757263289",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Нет расходов за 2025-09",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Нет расходов за 2025-09"
+    }
+   ]
+  },
+  {
+   "id": 98087,
+   "type": "message",
+   "date": "2025-09-07T12:41:34",
+   "date_unixtime": "1757263294",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/report"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/report"
+    }
+   ]
+  },
+  {
+   "id": 98088,
+   "type": "message",
+   "date": "2025-09-07T12:41:35",
+   "date_unixtime": "1757263295",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Нет расходов за 2025-09",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Нет расходов за 2025-09"
+    }
+   ]
+  },
+  {
+   "id": 98089,
+   "type": "message",
+   "date": "2025-09-07T12:41:40",
+   "date_unixtime": "1757263300",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 98090,
+   "type": "message",
+   "date": "2025-09-07T12:41:40",
+   "date_unixtime": "1757263300",
+   "edited": "2025-09-07T12:41:42",
+   "edited_unixtime": "1757263302",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Ошибка: 'amount'",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Ошибка: 'amount'"
+    }
+   ]
+  },
+  {
+   "id": 98091,
+   "type": "message",
+   "date": "2025-09-07T12:57:36",
+   "date_unixtime": "1757264256",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 98092,
+   "type": "message",
+   "date": "2025-09-07T12:57:36",
+   "date_unixtime": "1757264256",
+   "edited": "2025-09-07T12:57:39",
+   "edited_unixtime": "1757264259",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Нет расходов за 2025-09",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Нет расходов за 2025-09"
+    }
+   ]
+  },
+  {
+   "id": 98093,
+   "type": "message",
+   "date": "2025-09-07T12:58:08",
+   "date_unixtime": "1757264288",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 98094,
+   "type": "message",
+   "date": "2025-09-07T12:58:09",
+   "date_unixtime": "1757264289",
+   "edited": "2025-09-07T12:58:12",
+   "edited_unixtime": "1757264292",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Нет расходов за 2025-09",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Нет расходов за 2025-09"
+    }
+   ]
+  },
+  {
+   "id": 98097,
+   "type": "message",
+   "date": "2025-09-07T13:07:10",
+   "date_unixtime": "1757264830",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/report"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/report"
+    }
+   ]
+  },
+  {
+   "id": 98098,
+   "type": "message",
+   "date": "2025-09-07T13:07:11",
+   "date_unixtime": "1757264831",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Нет расходов за 2025-09",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Нет расходов за 2025-09"
+    }
+   ]
+  },
+  {
+   "id": 98099,
+   "type": "message",
+   "date": "2025-09-07T13:10:36",
+   "date_unixtime": "1757265036",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/report"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/report"
+    }
+   ]
+  },
+  {
+   "id": 98100,
+   "type": "message",
+   "date": "2025-09-07T13:10:37",
+   "date_unixtime": "1757265037",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Нет расходов за 2025-09",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Нет расходов за 2025-09"
+    }
+   ]
+  },
+  {
+   "id": 98101,
+   "type": "message",
+   "date": "2025-09-07T13:12:41",
+   "date_unixtime": "1757265161",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/report"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/report"
+    }
+   ]
+  },
+  {
+   "id": 98102,
+   "type": "message",
+   "date": "2025-09-07T13:12:47",
+   "date_unixtime": "1757265167",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 98103,
+   "type": "message",
+   "date": "2025-09-07T13:13:55",
+   "date_unixtime": "1757265235",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 98104,
+   "type": "message",
+   "date": "2025-09-07T13:15:57",
+   "date_unixtime": "1757265357",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 98105,
+   "type": "message",
+   "date": "2025-09-07T13:15:58",
+   "date_unixtime": "1757265358",
+   "edited": "2025-09-07T13:15:59",
+   "edited_unixtime": "1757265359",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Нет расходов за 2025-09",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Нет расходов за 2025-09"
+    }
+   ]
+  },
+  {
+   "id": 98106,
+   "type": "message",
+   "date": "2025-09-07T13:22:13",
+   "date_unixtime": "1757265733",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 98107,
+   "type": "message",
+   "date": "2025-09-07T13:22:14",
+   "date_unixtime": "1757265734",
+   "edited": "2025-09-07T13:22:16",
+   "edited_unixtime": "1757265736",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    {
+     "type": "pre",
+     "text": "Отчёт за 2025-09\n\nUtilities            $141.00 / $300.00  Остаток: $159.00\nPharmacy             $1.00 / $1998.00  Остаток: $1997.00\n3D                   $0.00 / $256.00  Остаток: $256.00\nBeer and Snacks      $0.00 / $276.00  Остаток: $276.00\nCloth                $0.00 / $200.00  Остаток: $200.00\nFood                 $0.00 / $643.26  Остаток: $643.26\nFun                  $0.00 / $300.00  Остаток: $300.00\nInternet, Mobile     $0.00 / $235.00  Остаток: $235.00\nLoan & Credit Cards  $0.00 / $775.00  Остаток: $775.00\nSmoking              $0.00 / $84.00  Остаток: $84.00\nSubscriptions        $0.00 / $172.00  Остаток: $172.00\nTaxi                 $0.00 / $187.00  Остаток: $187.00\nTransport            $0.00 / $262.50  Остаток: $262.50\nTravel               $0.00 / $200.00  Остаток: $200.00\nYummy                $0.00 / $441.00  Остаток: $441.00",
+     "language": ""
+    },
+    ""
+   ],
+   "text_entities": [
+    {
+     "type": "pre",
+     "text": "Отчёт за 2025-09\n\nUtilities            $141.00 / $300.00  Остаток: $159.00\nPharmacy             $1.00 / $1998.00  Остаток: $1997.00\n3D                   $0.00 / $256.00  Остаток: $256.00\nBeer and Snacks      $0.00 / $276.00  Остаток: $276.00\nCloth                $0.00 / $200.00  Остаток: $200.00\nFood                 $0.00 / $643.26  Остаток: $643.26\nFun                  $0.00 / $300.00  Остаток: $300.00\nInternet, Mobile     $0.00 / $235.00  Остаток: $235.00\nLoan & Credit Cards  $0.00 / $775.00  Остаток: $775.00\nSmoking              $0.00 / $84.00  Остаток: $84.00\nSubscriptions        $0.00 / $172.00  Остаток: $172.00\nTaxi                 $0.00 / $187.00  Остаток: $187.00\nTransport            $0.00 / $262.50  Остаток: $262.50\nTravel               $0.00 / $200.00  Остаток: $200.00\nYummy                $0.00 / $441.00  Остаток: $441.00",
+     "language": ""
+    },
+    {
+     "type": "plain",
+     "text": ""
+    }
+   ]
+  },
+  {
+   "id": 98108,
+   "type": "message",
+   "date": "2025-09-07T13:22:28",
+   "date_unixtime": "1757265748",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 98109,
+   "type": "message",
+   "date": "2025-09-07T13:22:28",
+   "date_unixtime": "1757265748",
+   "edited": "2025-09-07T13:22:30",
+   "edited_unixtime": "1757265750",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": "Ошибка: 'amount'",
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "Ошибка: 'amount'"
+    }
+   ]
+  },
+  {
+   "id": 98114,
+   "type": "message",
+   "date": "2025-09-07T13:26:13",
+   "date_unixtime": "1757265973",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 98115,
+   "type": "message",
+   "date": "2025-09-07T13:26:13",
+   "date_unixtime": "1757265973",
+   "edited": "2025-09-07T13:26:14",
+   "edited_unixtime": "1757265974",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "💰 ",
+    {
+     "type": "bold",
+     "text": "Лимиты категорий:"
+    },
+    "\n\n• 3D: $150.00\n• Beer and Snacks: $200.00\n• Cloth: $100.00\n• Food: $400.00\n• Fun: $150.00\n• Internet, Mobile: $200.00\n• Loan & Credit Cards: $400.00\n• Pharmacy: $999.00\n• Smoking: $50.00\n• Subscriptions: $100.00\n• Taxi: $100.00\n• Transport: $150.00\n• Travel: $100.00\n• Utilities: $150.00\n• Yummy: $250.00"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "💰 "
+    },
+    {
+     "type": "bold",
+     "text": "Лимиты категорий:"
+    },
+    {
+     "type": "plain",
+     "text": "\n\n• 3D: $150.00\n• Beer and Snacks: $200.00\n• Cloth: $100.00\n• Food: $400.00\n• Fun: $150.00\n• Internet, Mobile: $200.00\n• Loan & Credit Cards: $400.00\n• Pharmacy: $999.00\n• Smoking: $50.00\n• Subscriptions: $100.00\n• Taxi: $100.00\n• Transport: $150.00\n• Travel: $100.00\n• Utilities: $150.00\n• Yummy: $250.00"
+    }
+   ]
+  },
+  {
+   "id": 98116,
+   "type": "message",
+   "date": "2025-09-07T13:26:16",
+   "date_unixtime": "1757265976",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 98117,
+   "type": "message",
+   "date": "2025-09-07T13:26:16",
+   "date_unixtime": "1757265976",
+   "edited": "2025-09-07T13:26:17",
+   "edited_unixtime": "1757265977",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    {
+     "type": "pre",
+     "text": "Отчёт за 2025-09\n\nUtilities            $141.00 / $300.00  Остаток: $159.00\nPharmacy             $1.00 / $1998.00  Остаток: $1997.00\n3D                   $0.00 / $256.00  Остаток: $256.00\nBeer and Snacks      $0.00 / $276.00  Остаток: $276.00\nCloth                $0.00 / $200.00  Остаток: $200.00\nFood                 $0.00 / $643.26  Остаток: $643.26\nFun                  $0.00 / $300.00  Остаток: $300.00\nInternet, Mobile     $0.00 / $235.00  Остаток: $235.00\nLoan & Credit Cards  $0.00 / $775.00  Остаток: $775.00\nSmoking              $0.00 / $84.00  Остаток: $84.00\nSubscriptions        $0.00 / $172.00  Остаток: $172.00\nTaxi                 $0.00 / $187.00  Остаток: $187.00\nTransport            $0.00 / $262.50  Остаток: $262.50\nTravel               $0.00 / $200.00  Остаток: $200.00\nYummy                $0.00 / $441.00  Остаток: $441.00",
+     "language": ""
+    },
+    ""
+   ],
+   "text_entities": [
+    {
+     "type": "pre",
+     "text": "Отчёт за 2025-09\n\nUtilities            $141.00 / $300.00  Остаток: $159.00\nPharmacy             $1.00 / $1998.00  Остаток: $1997.00\n3D                   $0.00 / $256.00  Остаток: $256.00\nBeer and Snacks      $0.00 / $276.00  Остаток: $276.00\nCloth                $0.00 / $200.00  Остаток: $200.00\nFood                 $0.00 / $643.26  Остаток: $643.26\nFun                  $0.00 / $300.00  Остаток: $300.00\nInternet, Mobile     $0.00 / $235.00  Остаток: $235.00\nLoan & Credit Cards  $0.00 / $775.00  Остаток: $775.00\nSmoking              $0.00 / $84.00  Остаток: $84.00\nSubscriptions        $0.00 / $172.00  Остаток: $172.00\nTaxi                 $0.00 / $187.00  Остаток: $187.00\nTransport            $0.00 / $262.50  Остаток: $262.50\nTravel               $0.00 / $200.00  Остаток: $200.00\nYummy                $0.00 / $441.00  Остаток: $441.00",
+     "language": ""
+    },
+    {
+     "type": "plain",
+     "text": ""
+    }
+   ]
+  },
+  {
+   "id": 98118,
+   "type": "message",
+   "date": "2025-09-07T13:28:24",
+   "date_unixtime": "1757266104",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 98119,
+   "type": "message",
+   "date": "2025-09-07T13:28:24",
+   "date_unixtime": "1757266104",
+   "edited": "2025-09-07T13:28:26",
+   "edited_unixtime": "1757266106",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    "💰 ",
+    {
+     "type": "bold",
+     "text": "Лимиты категорий:"
+    },
+    "\n\n• 3D: $150.00\n• Beer and Snacks: $200.00\n• Cloth: $100.00\n• Food: $400.00\n• Fun: $150.00\n• Internet, Mobile: $200.00\n• Loan & Credit Cards: $400.00\n• Pharmacy: $999.00\n• Smoking: $50.00\n• Subscriptions: $100.00\n• Taxi: $100.00\n• Transport: $150.00\n• Travel: $100.00\n• Utilities: $150.00\n• Yummy: $250.00"
+   ],
+   "text_entities": [
+    {
+     "type": "plain",
+     "text": "💰 "
+    },
+    {
+     "type": "bold",
+     "text": "Лимиты категорий:"
+    },
+    {
+     "type": "plain",
+     "text": "\n\n• 3D: $150.00\n• Beer and Snacks: $200.00\n• Cloth: $100.00\n• Food: $400.00\n• Fun: $150.00\n• Internet, Mobile: $200.00\n• Loan & Credit Cards: $400.00\n• Pharmacy: $999.00\n• Smoking: $50.00\n• Subscriptions: $100.00\n• Taxi: $100.00\n• Transport: $150.00\n• Travel: $100.00\n• Utilities: $150.00\n• Yummy: $250.00"
+    }
+   ]
+  },
+  {
+   "id": 98120,
+   "type": "message",
+   "date": "2025-09-07T13:28:27",
+   "date_unixtime": "1757266107",
+   "from": "Dan",
+   "from_id": "user590588658",
+   "text": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ],
+   "text_entities": [
+    {
+     "type": "bot_command",
+     "text": "/start"
+    }
+   ]
+  },
+  {
+   "id": 98121,
+   "type": "message",
+   "date": "2025-09-07T13:28:27",
+   "date_unixtime": "1757266107",
+   "edited": "2025-09-07T13:28:29",
+   "edited_unixtime": "1757266109",
+   "from": "Family Budget",
+   "from_id": "user8134194690",
+   "text": [
+    {
+     "type": "pre",
+     "text": "Отчёт за 2025-09\n\nUtilities            $141.00 / $300.00  Остаток: $159.00\nPharmacy             $1.00 / $1998.00  Остаток: $1997.00\n3D                   $0.00 / $256.00  Остаток: $256.00\nBeer and Snacks      $0.00 / $276.00  Остаток: $276.00\nCloth                $0.00 / $200.00  Остаток: $200.00\nFood                 $0.00 / $643.26  Остаток: $643.26\nFun                  $0.00 / $300.00  Остаток: $300.00\nInternet, Mobile     $0.00 / $235.00  Остаток: $235.00\nLoan & Credit Cards  $0.00 / $775.00  Остаток: $775.00\nSmoking              $0.00 / $84.00  Остаток: $84.00\nSubscriptions        $0.00 / $172.00  Остаток: $172.00\nTaxi                 $0.00 / $187.00  Остаток: $187.00\nTransport            $0.00 / $262.50  Остаток: $262.50\nTravel               $0.00 / $200.00  Остаток: $200.00\nYummy                $0.00 / $441.00  Остаток: $441.00",
+     "language": ""
+    },
+    ""
+   ],
+   "text_entities": [
+    {
+     "type": "pre",
+     "text": "Отчёт за 2025-09\n\nUtilities            $141.00 / $300.00  Остаток: $159.00\nPharmacy             $1.00 / $1998.00  Остаток: $1997.00\n3D                   $0.00 / $256.00  Остаток: $256.00\nBeer and Snacks      $0.00 / $276.00  Остаток: $276.00\nCloth                $0.00 / $200.00  Остаток: $200.00\nFood                 $0.00 / $643.26  Остаток: $643.26\nFun                  $0.00 / $300.00  Остаток: $300.00\nInternet, Mobile     $0.00 / $235.00  Остаток: $235.00\nLoan & Credit Cards  $0.00 / $775.00  Остаток: $775.00\nSmoking              $0.00 / $84.00  Остаток: $84.00\nSubscriptions        $0.00 / $172.00  Остаток: $172.00\nTaxi                 $0.00 / $187.00  Остаток: $187.00\nTransport            $0.00 / $262.50  Остаток: $262.50\nTravel               $0.00 / $200.00  Остаток: $200.00\nYummy                $0.00 / $441.00  Остаток: $441.00",
+     "language": ""
+    },
+    {
+     "type": "plain",
+     "text": ""
+    }
+   ]
+  }
+ ]
+}

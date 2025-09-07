@@ -26,7 +26,7 @@ def create_tables():
         print("📊 Создаем таблицу expenses...")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS expenses (
-                id INTEGER PRIMARY KEY,
+                id SERIAL PRIMARY KEY,
                 category TEXT NOT NULL,
                 amount REAL NOT NULL,
                 date TEXT NOT NULL
