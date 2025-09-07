@@ -1,0 +1,482 @@
+[
+  {
+    "category": "Food",
+    "amount": 25.0,
+    "date": "2025-08-11",
+    "raw_text": "food 25",
+    "message_id": 96691,
+    "from_user": "Dan",
+    "original_date": "2025-08-11T15:12:09",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 25.0,
+    "date": "2025-08-11",
+    "raw_text": "ok: food +25.00",
+    "message_id": 96692,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-11T15:12:09",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 500.0,
+    "date": "2025-08-11",
+    "raw_text": "food 500",
+    "message_id": 96693,
+    "from_user": "Dan",
+    "original_date": "2025-08-11T15:13:01",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 500.0,
+    "date": "2025-08-11",
+    "raw_text": "ok: food +500.00",
+    "message_id": 96694,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-11T15:13:02",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 500.0,
+    "date": "2025-08-11",
+    "raw_text": "pood 500",
+    "message_id": 96697,
+    "from_user": "Dan",
+    "original_date": "2025-08-11T15:17:52",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 10.0,
+    "date": "2025-08-11",
+    "raw_text": "food 10",
+    "message_id": 96699,
+    "from_user": "Dan",
+    "original_date": "2025-08-11T15:17:58",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 10.0,
+    "date": "2025-08-11",
+    "raw_text": "ok: food +10.00",
+    "message_id": 96700,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-11T15:17:58",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 555.0,
+    "date": "2025-08-11",
+    "raw_text": "food 555",
+    "message_id": 96701,
+    "from_user": "Dan",
+    "original_date": "2025-08-11T15:18:11",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 555.0,
+    "date": "2025-08-11",
+    "raw_text": "ok: food +555.00",
+    "message_id": 96702,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-11T15:18:11",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 444.0,
+    "date": "2025-08-11",
+    "raw_text": "food 444",
+    "message_id": 96703,
+    "from_user": "Dan",
+    "original_date": "2025-08-11T15:18:30",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 444.0,
+    "date": "2025-08-11",
+    "raw_text": "ok: food +444.00",
+    "message_id": 96704,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-11T15:18:30",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 10.0,
+    "date": "2025-08-11",
+    "raw_text": "food 10",
+    "message_id": 96705,
+    "from_user": "Dan",
+    "original_date": "2025-08-11T15:18:41",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 10.0,
+    "date": "2025-08-11",
+    "raw_text": "ok: food +10.00",
+    "message_id": 96706,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-11T15:18:41",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 1.4,
+    "date": "2025-08-11",
+    "raw_text": "food 1.40",
+    "message_id": 96707,
+    "from_user": "Dan",
+    "original_date": "2025-08-11T15:37:58",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 1.4,
+    "date": "2025-08-11",
+    "raw_text": "ok: food +1.40",
+    "message_id": 96708,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-11T15:37:59",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 1.99,
+    "date": "2025-08-11",
+    "raw_text": "food 1.99",
+    "message_id": 96709,
+    "from_user": "Dan",
+    "original_date": "2025-08-11T15:39:34",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 1.99,
+    "date": "2025-08-11",
+    "raw_text": "ok: food +1.99",
+    "message_id": 96710,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-11T15:39:34",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 5.0,
+    "date": "2025-08-11",
+    "raw_text": "food 5",
+    "message_id": 96711,
+    "from_user": "Dan",
+    "original_date": "2025-08-11T15:48:55",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 5.0,
+    "date": "2025-08-11",
+    "raw_text": "ok: food +5.00",
+    "message_id": 96712,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-11T15:48:55",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 5.0,
+    "date": "2025-08-11",
+    "raw_text": "food 5",
+    "message_id": 96713,
+    "from_user": "Dan",
+    "original_date": "2025-08-11T15:56:06",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 5.0,
+    "date": "2025-08-11",
+    "raw_text": "ok: food +5.00",
+    "message_id": 96714,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-11T15:56:08",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 111.0,
+    "date": "2025-08-11",
+    "raw_text": "food 111",
+    "message_id": 96715,
+    "from_user": "Dan",
+    "original_date": "2025-08-11T16:02:29",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 50.0,
+    "date": "2025-08-11",
+    "raw_text": "food 50",
+    "message_id": 96719,
+    "from_user": "Dan",
+    "original_date": "2025-08-11T16:02:58",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 50.0,
+    "date": "2025-08-11",
+    "raw_text": "food 50",
+    "message_id": 96721,
+    "from_user": "Dan",
+    "original_date": "2025-08-11T16:03:04",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 50.0,
+    "date": "2025-08-11",
+    "raw_text": "food 50",
+    "message_id": 96723,
+    "from_user": "Dan",
+    "original_date": "2025-08-11T16:06:29",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 50.0,
+    "date": "2025-08-11",
+    "raw_text": "food 50",
+    "message_id": 96730,
+    "from_user": "Dan",
+    "original_date": "2025-08-11T16:09:37",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 50.0,
+    "date": "2025-08-11",
+    "raw_text": "food 50",
+    "message_id": 96732,
+    "from_user": "Dan",
+    "original_date": "2025-08-11T16:16:20",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 50.0,
+    "date": "2025-08-11",
+    "raw_text": "ok: food +50.00",
+    "message_id": 96733,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-11T16:16:22",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 1.0,
+    "date": "2025-08-11",
+    "raw_text": "food 1",
+    "message_id": 96734,
+    "from_user": "Dan",
+    "original_date": "2025-08-11T16:22:16",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 1.0,
+    "date": "2025-08-11",
+    "raw_text": "ok: food +1.00",
+    "message_id": 96735,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-11T16:22:17",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 22.0,
+    "date": "2025-08-11",
+    "raw_text": "food 22",
+    "message_id": 96737,
+    "from_user": "Dan",
+    "original_date": "2025-08-11T16:30:58",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 22.0,
+    "date": "2025-08-11",
+    "raw_text": "ok: food +22.00",
+    "message_id": 96738,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-11T16:30:59",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 9.0,
+    "date": "2025-08-11",
+    "raw_text": "food 9",
+    "message_id": 96741,
+    "from_user": "Dan",
+    "original_date": "2025-08-11T17:07:54",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 9.0,
+    "date": "2025-08-11",
+    "raw_text": "ok: food +9.00",
+    "message_id": 96742,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-11T17:07:55",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Internet, Mobile",
+    "amount": 250.0,
+    "date": "2025-08-11",
+    "raw_text": "internet, mobile 250",
+    "message_id": 96749,
+    "from_user": "Dan",
+    "original_date": "2025-08-11T17:09:53",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Beer and Snacks",
+    "amount": 12.0,
+    "date": "2025-08-11",
+    "raw_text": "ok: beer and snacks +12.00",
+    "message_id": 96765,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-11T17:54:01",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Beer and Snacks",
+    "amount": 15.0,
+    "date": "2025-08-11",
+    "raw_text": "ok: beer and snacks +15.00",
+    "message_id": 96791,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-11T18:42:44",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 1.0,
+    "date": "2025-08-11",
+    "raw_text": "food 1",
+    "message_id": 96799,
+    "from_user": "Dan",
+    "original_date": "2025-08-11T18:51:36",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 1.0,
+    "date": "2025-08-11",
+    "raw_text": "ok: food +1.00",
+    "message_id": 96800,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-11T18:51:38",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 1.0,
+    "date": "2025-08-11",
+    "raw_text": "ok: food +1.00",
+    "message_id": 96802,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-11T18:51:55",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Yummy",
+    "amount": 7.0,
+    "date": "2025-08-20",
+    "raw_text": "ok: yummy +7.00",
+    "message_id": 97212,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-20T16:55:07",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 37.0,
+    "date": "2025-08-21",
+    "raw_text": "ok: food +37.00",
+    "message_id": 97318,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-21T21:17:11",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Transport",
+    "amount": 20.0,
+    "date": "2025-08-23",
+    "raw_text": "ok: transport +20.00",
+    "message_id": 97339,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-23T07:08:35",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Beer and Snacks",
+    "amount": 18.0,
+    "date": "2025-08-24",
+    "raw_text": "ok: beer and snacks +18.00",
+    "message_id": 97436,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-24T07:01:14",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Yummy",
+    "amount": 9.0,
+    "date": "2025-08-25",
+    "raw_text": "ok: yummy +9.00",
+    "message_id": 97476,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-25T09:46:17",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Beer and Snacks",
+    "amount": 53.0,
+    "date": "2025-08-26",
+    "raw_text": "ok: beer and snacks +53.00",
+    "message_id": 97595,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-26T19:00:26",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Food",
+    "amount": 13.0,
+    "date": "2025-08-27",
+    "raw_text": "ok: food +13.00",
+    "message_id": 97660,
+    "from_user": "Family Budget",
+    "original_date": "2025-08-27T16:32:01",
+    "source": "telegram_import"
+  },
+  {
+    "category": "Utilities",
+    "amount": 141.0,
+    "date": "2025-09-06",
+    "raw_text": "ok: utilities +141.00",
+    "message_id": 98027,
+    "from_user": "Family Budget",
+    "original_date": "2025-09-06T15:42:21",
+    "source": "telegram_import"
+  }
+]
