@@ -57,14 +57,16 @@ export function ExpenseBarChart({ data }: ExpenseBarChartProps) {
             bottom: 60,
           }}
         >
-          <CartesianGrid strokeDasharray="3 3" className="opacity-30" />
+          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--muted))" opacity={0.2} />
           <XAxis 
             dataKey="category" 
             angle={-45}
             textAnchor="end"
             height={80}
             fontSize={12}
-            className="text-muted-foreground"
+            fontWeight="bold"
+            className="text-foreground font-bold"
+            tick={{ fill: 'hsl(var(--foreground))', fontWeight: 'bold' }}
           />
           <YAxis 
             fontSize={12}
@@ -74,7 +76,9 @@ export function ExpenseBarChart({ data }: ExpenseBarChartProps) {
           <Tooltip content={<CustomTooltip />} />
           <Bar 
             dataKey="spent" 
-            fill="hsl(var(--primary))" 
+            fill="hsl(var(--background))" 
+            stroke="hsl(var(--foreground))"
+            strokeWidth={1}
             radius={[4, 4, 0, 0]}
             name="Spent"
           />
