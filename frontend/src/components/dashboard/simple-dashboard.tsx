@@ -180,12 +180,12 @@ export function SimpleDashboard() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="h-48">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">High Usage Categories</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="max-h-32 overflow-y-auto space-y-2">
+          <CardContent className="h-full pb-4">
+            <div className="h-full max-h-32 overflow-y-auto space-y-2">
               {Object.entries(report?.report || {})
                 .filter(([_, data]) => {
                   const usage = data.budget > 0 ? (data.spent / data.budget) * 100 : 0;
