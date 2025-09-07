@@ -140,30 +140,45 @@ export function SimpleDashboard() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4 max-h-64 overflow-y-auto">
+            <div className="grid grid-cols-2 gap-3">
               {Object.entries(report?.report || {}).map(([category, data]) => {
                 const usage = data.budget > 0 ? (data.spent / data.budget) * 100 : 0;
                 const isOver = data.remaining < 0;
+                
+                // Определяем цвет столбца
+                let barColor = 'bg-primary'; // по умолчанию синий
+                if (usage > 90 || isOver) {
+                  barColor = 'bg-red-600'; // ярко красный при >90% или превышении
+                } else if (usage > 70) {
+                  barColor = 'bg-red-400'; // светло красный при >70%
+                }
 
                 return (
                   <div key={category} className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium text-sm">{category}</span>
-                      <span className={`text-sm ${isOver ? 'text-destructive' : ''}`}>
-                        ${data.spent.toFixed(2)} / ${data.budget.toFixed(2)}
+                    {/* Лимит сверху */}
+                    <div className="text-xs text-muted-foreground text-center">
+                      ${data.budget.toFixed(0)}
+                    </div>
+                    
+                    {/* Столбец с названием категории внутри */}
+                    <div className="relative w-full bg-secondary rounded-lg h-16 flex items-center justify-center">
+                      <div
+                        className={`absolute bottom-0 left-0 right-0 rounded-lg transition-all duration-300 ${barColor}`}
+                        style={{ height: `${Math.min(usage, 100)}%` }}
+                      />
+                      <span className="relative z-10 text-xs font-medium text-center px-2 text-white drop-shadow-sm">
+                        {category}
                       </span>
                     </div>
-                    <div className="w-full bg-secondary rounded-full h-2">
-                      <div
-                        className={`h-2 rounded-full transition-all duration-300 ${
-                          isOver ? 'bg-destructive' : usage > 90 ? 'bg-yellow-500' : 'bg-primary'
-                        }`}
-                        style={{ width: `${Math.min(usage, 100)}%` }}
-                      />
-                    </div>
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>{usage.toFixed(1)}% used</span>
-                      <span>${data.remaining.toFixed(2)} remaining</span>
+                    
+                    {/* Потрачено снизу */}
+                    <div className="text-xs text-center">
+                      <span className={`font-medium ${isOver ? 'text-red-600' : ''}`}>
+                        ${data.spent.toFixed(0)}
+                      </span>
+                      <span className="text-muted-foreground ml-1">
+                        ({usage.toFixed(0)}%)
+                      </span>
                     </div>
                   </div>
                 );
