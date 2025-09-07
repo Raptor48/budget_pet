@@ -61,14 +61,32 @@ def _get_categories():
     try:
         # Use asyncio to run the async function
         import asyncio
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            limits = loop.run_until_complete(list_limits())
-            categories = [cat for cat, _ in limits]
+        import threading
+        
+        def run_in_thread():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(list_limits())
+            finally:
+                loop.close()
+        
+        # Run in a separate thread to avoid event loop conflicts
+        result = None
+        def target():
+            nonlocal result
+            result = run_in_thread()
+        
+        thread = threading.Thread(target=target)
+        thread.start()
+        thread.join()
+        
+        if result:
+            categories = [cat for cat, _ in result]
             return _sort_categories_by_usage(categories)
-        finally:
-            loop.close()
+        else:
+            return ["Food", "Transport", "Entertainment"]  # fallback
+            
     except Exception as e:
         log.error("Failed to get categories: %s", e)
         return ["Food", "Transport", "Entertainment"]  # fallback
