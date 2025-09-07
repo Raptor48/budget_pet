@@ -12,28 +12,50 @@ import { format, addMonths, subMonths } from "date-fns";
 import { useState } from "react";
 
 export function SimpleDashboard() {
-  const [selectedMonth, setSelectedMonth] = useState(format(new Date(), "yyyy-MM"));
+  const currentDate = new Date();
+  const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth() + 1);
+  
+  // Формируем selectedMonth в формате YYYY-MM для API
+  const selectedMonthFormatted = `${selectedYear}-${selectedMonth.toString().padStart(2, '0')}`;
 
-  // Генерируем список месяцев (текущий + 12 месяцев назад + 12 месяцев вперед)
-  const generateMonthOptions = () => {
+  // Генерируем список лет (текущий + 2 года назад + 2 года вперед)
+  const generateYearOptions = () => {
     const options = [];
-    const currentDate = new Date();
+    const currentYear = new Date().getFullYear();
     
-    // Начинаем с 12 месяцев назад, заканчиваем 12 месяцами вперед
-    for (let i = -12; i <= 12; i++) {
-      const date = addMonths(currentDate, i);
-      const value = format(date, "yyyy-MM");
-      const label = format(date, "MMMM yyyy");
-      options.push({ value, label });
+    for (let i = -2; i <= 2; i++) {
+      const year = currentYear + i;
+      options.push({ value: year, label: year.toString() });
     }
     
     return options;
   };
 
+  // Генерируем список месяцев
+  const generateMonthOptions = () => {
+    const months = [
+      { value: 1, label: "January" },
+      { value: 2, label: "February" },
+      { value: 3, label: "March" },
+      { value: 4, label: "April" },
+      { value: 5, label: "May" },
+      { value: 6, label: "June" },
+      { value: 7, label: "July" },
+      { value: 8, label: "August" },
+      { value: 9, label: "September" },
+      { value: 10, label: "October" },
+      { value: 11, label: "November" },
+      { value: 12, label: "December" }
+    ];
+    
+    return months;
+  };
+
   // Получаем отчет за выбранный месяц
   const { data: report, isLoading } = useQuery({
-    queryKey: ["report", selectedMonth],
-    queryFn: () => reportsApi.getReport(selectedMonth),
+    queryKey: ["report", selectedMonthFormatted],
+    queryFn: () => reportsApi.getReport(selectedMonthFormatted),
   });
 
   // Проверяем здоровье API
@@ -76,20 +98,34 @@ export function SimpleDashboard() {
           <h1 className="text-3xl font-bold">Dashboard</h1>
           <div className="flex items-center gap-4">
             <p className="text-muted-foreground">
-              Overview for {format(new Date(selectedMonth + "-15"), "MMMM yyyy")}
+              Overview for {format(new Date(selectedYear, selectedMonth - 1, 15), "MMMM yyyy")}
             </p>
-            <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-              <SelectTrigger className="w-40">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {generateMonthOptions().map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex gap-2">
+              <Select value={selectedYear.toString()} onValueChange={(value) => setSelectedYear(parseInt(value))}>
+                <SelectTrigger className="w-20">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {generateYearOptions().map((option) => (
+                    <SelectItem key={option.value} value={option.value.toString()}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={selectedMonth.toString()} onValueChange={(value) => setSelectedMonth(parseInt(value))}>
+                <SelectTrigger className="w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {generateMonthOptions().map((option) => (
+                    <SelectItem key={option.value} value={option.value.toString()}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -160,7 +196,7 @@ export function SimpleDashboard() {
             <CardTitle>Recent Expenses</CardTitle>
           </CardHeader>
           <CardContent>
-            <RecentExpenses month={selectedMonth} />
+            <RecentExpenses month={selectedMonthFormatted} />
           </CardContent>
         </Card>
 
