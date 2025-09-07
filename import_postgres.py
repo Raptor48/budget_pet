@@ -7,6 +7,9 @@ from psycopg2.extras import execute_values
 def import_to_postgres():
     """Импортирует данные в PostgreSQL"""
 
+    # ВАШ ПРИВАТНЫЙ URL (используется Railway сервисами):
+    # database_url = "postgresql://postgres:qLyWBUAaVUsEIaQtfQmtMlsAWFyNJBIw@postgres.railway.internal:5432/railway"
+
     # ДЛЯ ЛОКАЛЬНОГО ИМПОРТА ИСПОЛЬЗУЙТЕ ПУБЛИЧНЫЙ URL:
     database_url = "postgresql://postgres:qLyWBUAaVUsEIaQtfQmtMlsAWFyNJBIw@roundhouse.proxy.rlwy.net:44861/railway"
 
