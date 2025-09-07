@@ -160,13 +160,19 @@ export function SimpleDashboard() {
                       ${data.budget.toFixed(0)}
                     </div>
                     
-                    {/* Столбец с названием категории внутри */}
+                    {/* Вертикальный столбец с названием категории внутри */}
                     <div className="relative w-full bg-secondary rounded-lg h-16 flex items-center justify-center">
                       <div
                         className={`absolute bottom-0 left-0 right-0 rounded-lg transition-all duration-300 ${barColor}`}
                         style={{ height: `${Math.min(usage, 100)}%` }}
                       />
-                      <span className="relative z-10 text-xs font-medium text-center px-2 text-white drop-shadow-sm">
+                      <span 
+                        className="relative z-10 text-xs font-medium text-center px-2 text-white drop-shadow-sm"
+                        style={{ 
+                          writingMode: 'vertical-rl',
+                          textOrientation: 'mixed'
+                        }}
+                      >
                         {category}
                       </span>
                     </div>
