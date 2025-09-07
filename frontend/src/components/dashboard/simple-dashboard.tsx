@@ -140,7 +140,7 @@ export function SimpleDashboard() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-4 max-h-64 overflow-y-auto">
               {Object.entries(report?.report || {}).map(([category, data]) => {
                 const usage = data.budget > 0 ? (data.spent / data.budget) * 100 : 0;
                 const isOver = data.remaining < 0;
