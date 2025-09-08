@@ -14,14 +14,14 @@ export function safeParseDate(dateString: string): Date | null {
   if (!dateString) return null;
   
   try {
-    // Try parsing as YYYY-MM-DD first (ISO format)
+    // Try parsing as YYYY-MM-DD first (ISO format from PostgreSQL)
     if (dateString.match(/^\d{4}-\d{2}-\d{2}$/)) {
       // Parse as local date to avoid timezone issues
       const [year, month, day] = dateString.split('-');
       return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
     }
     
-    // Try parsing as MM-DD-YYYY format
+    // Try parsing as MM-DD-YYYY format (legacy)
     if (dateString.match(/^\d{2}-\d{2}-\d{4}$/)) {
       const [month, day, year] = dateString.split('-');
       // Create date in local timezone

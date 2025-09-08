@@ -30,8 +30,8 @@ export function ComparisonTable({ data, currentMonthName, previousMonthName }: C
   const formatCurrency = (amount: number) => `$${amount.toFixed(2)}`;
 
   const getChangeIcon = (change: number) => {
-    if (change > 0) return <TrendingUp className="h-4 w-4 text-green-600" />;
-    if (change < 0) return <TrendingDown className="h-4 w-4 text-red-600" />;
+    if (change > 0) return <TrendingUp className="h-4 w-4 text-red-600" />;
+    if (change < 0) return <TrendingDown className="h-4 w-4 text-green-600" />;
     return <Minus className="h-4 w-4 text-gray-500" />;
   };
 
