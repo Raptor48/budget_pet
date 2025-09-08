@@ -27,7 +27,7 @@ def get_db_connection():
 
 def _today_iso() -> str:
     """Get today's date in YYYY-MM-DD format."""
-    today = date.today()
+    today = datetime.now().date()
     return f"{today.year}-{today.month:02d}-{today.day:02d}"
 
 def _month_from_date(date_str: str) -> str:
