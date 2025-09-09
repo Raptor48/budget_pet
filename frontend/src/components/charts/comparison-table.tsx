@@ -2,6 +2,7 @@
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { formatCurrency } from "@/lib/utils";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 
 interface ComparisonTableProps {
@@ -26,8 +27,6 @@ export function ComparisonTable({ data, currentMonthName, previousMonthName }: C
       </div>
     );
   }
-
-  const formatCurrency = (amount: number) => `$${amount.toFixed(2)}`;
 
   const getChangeIcon = (change: number) => {
     if (change > 0) return <TrendingUp className="h-4 w-4 text-red-600" />;
@@ -61,14 +60,14 @@ export function ComparisonTable({ data, currentMonthName, previousMonthName }: C
             {/* Previous month amount */}
             <div className="text-center">
               <div className="text-lg font-semibold text-orange-600">
-                {formatCurrency(item.previousMonth)}
+                {formatCurrency(item.previousMonth * 100)}
               </div>
             </div>
             
             {/* Current month amount */}
             <div className="text-center">
               <div className="text-lg font-semibold text-blue-600">
-                {formatCurrency(item.currentMonth)}
+                {formatCurrency(item.currentMonth * 100)}
               </div>
             </div>
             
@@ -94,19 +93,19 @@ export function ComparisonTable({ data, currentMonthName, previousMonthName }: C
           <div className="grid grid-cols-3 gap-4 text-center">
             <div>
               <div className="text-2xl font-bold text-orange-600">
-                {formatCurrency(data.reduce((sum, item) => sum + item.previousMonth, 0))}
+                {formatCurrency(data.reduce((sum, item) => sum + item.previousMonth, 0) * 100)}
               </div>
               <div className="text-sm text-muted-foreground">Total {previousMonthName}</div>
             </div>
             <div>
               <div className="text-2xl font-bold text-blue-600">
-                {formatCurrency(data.reduce((sum, item) => sum + item.currentMonth, 0))}
+                {formatCurrency(data.reduce((sum, item) => sum + item.currentMonth, 0) * 100)}
               </div>
               <div className="text-sm text-muted-foreground">Total {currentMonthName}</div>
             </div>
             <div>
               <div className="text-2xl font-bold text-gray-600">
-                {formatCurrency(data.reduce((sum, item) => sum + item.currentMonth, 0) - data.reduce((sum, item) => sum + item.previousMonth, 0))}
+                {formatCurrency((data.reduce((sum, item) => sum + item.currentMonth, 0) - data.reduce((sum, item) => sum + item.previousMonth, 0)) * 100)}
               </div>
               <div className="text-sm text-muted-foreground">Difference</div>
             </div>

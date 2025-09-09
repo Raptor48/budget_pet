@@ -92,16 +92,23 @@ def add_expense(category: str, amount: float, date: Optional[str] = None) -> Tup
             exceeded = remaining < 0
             return exceeded, remaining
 
-def update_expense(expense_id: int, category: str, amount: float) -> None:
+def update_expense(expense_id: int, category: str, amount: float, date: Optional[str] = None) -> None:
     """Update an expense."""
     amount = _validate_amount(amount, "amount")
     with get_db_connection() as conn:
         with conn.cursor() as cursor:
-            cursor.execute("""
-                UPDATE expenses 
-                SET category=%s, amount=%s 
-                WHERE id=%s
-            """, (category, amount, expense_id))
+            if date:
+                cursor.execute("""
+                    UPDATE expenses 
+                    SET category=%s, amount=%s, date=%s 
+                    WHERE id=%s
+                """, (category, amount, date, expense_id))
+            else:
+                cursor.execute("""
+                    UPDATE expenses 
+                    SET category=%s, amount=%s 
+                    WHERE id=%s
+                """, (category, amount, expense_id))
             conn.commit()
 
 def delete_expense(expense_id: int) -> None:

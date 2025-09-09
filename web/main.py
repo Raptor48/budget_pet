@@ -21,9 +21,11 @@ from web.schemas import (
     Limit, LimitCreate, ReportResponse, SyncStatus, HealthResponse
 )
 from web.deps import get_logger_service
+from web.finance import api_router as finance_api_router, get_finance_repo
 
 # Initialize FastAPI app
 app = FastAPI(title="Budget API", version="1.0.0")
+
 
 # Add CORS middleware
 app.add_middleware(
@@ -59,6 +61,11 @@ async def startup_event():
         conn = get_db_connection()
         conn.close()
         logger.info("Startup: PostgreSQL connection successful")
+        
+        # Initialize finance tables
+        finance_repo = get_finance_repo()
+        await finance_repo.init_tables()
+        logger.info("Startup: Finance tables initialized")
     except Exception as e:
         logger.error("Startup: PostgreSQL connection failed: %s", e)
 
@@ -123,7 +130,9 @@ async def get_expenses(
 async def create_expense(expense: ExpenseCreate):
     """Create a new expense."""
     try:
-        exceeded, remaining = add_expense(expense.category, expense.amount)
+        # Use provided date or default to today
+        expense_date = expense.date if expense.date else None
+        exceeded, remaining = add_expense(expense.category, expense.amount, expense_date)
 
         # GitHub sync disabled to prevent unnecessary redeploys
 
@@ -146,7 +155,8 @@ async def update_expense_endpoint(expense_id: int, expense_update: ExpenseUpdate
         update_expense(
             expense_id,
             expense_update.category or current_expense[1],
-            expense_update.amount or current_expense[2]
+            expense_update.amount or current_expense[2],
+            expense_update.date
         )
 
         # Calculate remaining after update
@@ -274,31 +284,18 @@ async def delete_category_endpoint(category_name: str):
 @app.get("/sync/status", response_model=SyncStatus)
 async def get_sync_status():
     """Get current sync status."""
-    sha = github_sync.get_current_sha() if github_sync else None
-    return SyncStatus(sha=sha, last_sync=datetime.now().isoformat() if sha else None)
+    # GitHub sync disabled - using PostgreSQL directly
+    return SyncStatus(sha=None, last_sync=None)
 
 @app.post("/sync/pull", dependencies=[Depends(require_admin_key)])
 async def sync_pull():
     """Force pull latest database from GitHub."""
-    if not github_sync:
-        raise HTTPException(status_code=400, detail="GitHub sync not configured")
-
-    try:
-        new_sha = github_sync.download_db()
-        return {"message": "Database pulled successfully", "sha": new_sha}
-    except Exception as e:
-        logger.error("Sync pull failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    raise HTTPException(status_code=400, detail="GitHub sync not configured - using PostgreSQL directly")
 
 @app.post("/sync/push", dependencies=[Depends(require_admin_key)])
 async def sync_push():
     """Force push database to GitHub."""
-    if not github_sync:
-        raise HTTPException(status_code=400, detail="GitHub sync not configured")
+    raise HTTPException(status_code=400, detail="GitHub sync not configured - using PostgreSQL directly")
 
-    try:
-        new_sha = github_sync.upload_db(github_sync.get_current_sha(), "API: manual push")
-        return {"message": "Database pushed successfully", "sha": new_sha}
-    except Exception as e:
-        logger.error("Sync push failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+# Include finance router
+app.include_router(finance_api_router)
