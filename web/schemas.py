@@ -6,11 +6,12 @@ class ExpenseBase(BaseModel):
     amount: float
 
 class ExpenseCreate(ExpenseBase):
-    pass
+    date: Optional[str] = None  # YYYY-MM-DD format, defaults to today if not provided
 
 class ExpenseUpdate(BaseModel):
     category: Optional[str] = None
     amount: Optional[float] = None
+    date: Optional[str] = None
 
 class Expense(ExpenseBase):
     id: int

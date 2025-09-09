@@ -12,6 +12,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 
 # --- API client imports (replacing GitHub I/O) ------------------------------
 from services.bot_adapter import add_expense, get_month_report, get_remaining, list_limits, set_limit, get_current_month
+from services.finance_adapter import get_finance_accounts, get_finance_summary, create_finance_payment, get_loans, get_cards, get_income, FinanceAPIError
 
 BOT_CURRENCY_SYMBOL = os.getenv("BOT_CURRENCY_SYMBOL", "$")
 currency_symbol = BOT_CURRENCY_SYMBOL
@@ -128,8 +129,89 @@ def _build_categories_keyboard(page=0, per_page=8):
 def _build_main_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📊 Report (month)", callback_data="report")],
-        [InlineKeyboardButton("➕ add expenses", callback_data="add")]
+        [InlineKeyboardButton("➕ add expenses", callback_data="add")],
+        [InlineKeyboardButton("💰 Loans & Credit Cards", callback_data="finance")]
     ])
+
+def _build_finance_keyboard():
+    """Build finance menu keyboard."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 Finance Summary", callback_data="finance:summary")],
+        [InlineKeyboardButton("🏦 Loans", callback_data="finance:loans")],
+        [InlineKeyboardButton("💳 Credit Cards", callback_data="finance:cards")],
+        [InlineKeyboardButton("💵 Income", callback_data="finance:income")],
+        [InlineKeyboardButton("⬅️ back", callback_data="back:main")]
+    ])
+
+def _build_loans_keyboard():
+    """Build loans menu keyboard."""
+    try:
+        loans = get_loans()
+        if not loans:
+            return InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ back", callback_data="back:finance")]
+            ])
+        
+        rows = []
+        for loan in loans:
+            rows.append([InlineKeyboardButton(
+                f"🏦 {loan['name']} (${loan['current_balance_cents']/100:.2f})", 
+                callback_data=f"loan:{loan['id']}"
+            )])
+        
+        rows.append([InlineKeyboardButton("⬅️ back", callback_data="back:finance")])
+        return InlineKeyboardMarkup(rows)
+    except FinanceAPIError:
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("❌ Error loading loans", callback_data="back:finance")]
+        ])
+
+def _build_cards_keyboard():
+    """Build credit cards menu keyboard."""
+    try:
+        cards = get_cards()
+        if not cards:
+            return InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ back", callback_data="back:finance")]
+            ])
+        
+        rows = []
+        for card in cards:
+            rows.append([InlineKeyboardButton(
+                f"💳 {card['name']} (${card['current_balance_cents']/100:.2f})", 
+                callback_data=f"card:{card['id']}"
+            )])
+        
+        rows.append([InlineKeyboardButton("⬅️ back", callback_data="back:finance")])
+        return InlineKeyboardMarkup(rows)
+    except FinanceAPIError:
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("❌ Error loading cards", callback_data="back:finance")]
+        ])
+
+def _build_income_keyboard():
+    """Build income menu keyboard."""
+    try:
+        current_month = get_current_month()
+        income = get_income(current_month)
+        if not income:
+            return InlineKeyboardMarkup([
+                [InlineKeyboardButton("⬅️ back", callback_data="back:finance")]
+            ])
+        
+        rows = []
+        for entry in income:
+            rows.append([InlineKeyboardButton(
+                f"💵 {entry['person']} - ${entry['amount_cents']/100:.2f} ({entry['occurred_at']})", 
+                callback_data=f"income:{entry['id']}"
+            )])
+        
+        rows.append([InlineKeyboardButton("⬅️ back", callback_data="back:finance")])
+        return InlineKeyboardMarkup(rows)
+    except FinanceAPIError:
+        return InlineKeyboardMarkup([
+            [InlineKeyboardButton("❌ Error loading income", callback_data="back:finance")]
+        ])
 
 # --- Commands ---
 
@@ -308,6 +390,61 @@ async def on_btn(update: Update, context: ContextTypes.DEFAULT_TYPE):
             log.error("Limits button failed: %s", e)
             await q.edit_message_text(f"Ошибка: {e}")
     
+    elif data == "finance":
+        await q.edit_message_text("💰 <b>Loans & Credit Cards</b>\n\nВыберите действие:", reply_markup=_build_finance_keyboard(), parse_mode="HTML")
+    
+    elif data == "finance:summary":
+        try:
+            month = get_current_month()
+            summary = get_finance_summary(month)
+            
+            text = f"📊 <b>Finance Summary - {month}</b>\n\n"
+            text += f"💰 <b>Total Income:</b> ${summary['income_total_cents']/100:.2f}\n"
+            text += f"   • Denis: ${summary['income_by_person']['Denis']/100:.2f}\n"
+            text += f"   • Taya: ${summary['income_by_person']['Taya']/100:.2f}\n\n"
+            text += f"💳 <b>Total Debt:</b> ${summary['debt_totals']['combined_balance_cents']/100:.2f}\n"
+            text += f"   • Loans: ${summary['debt_totals']['loans_balance_cents']/100:.2f}\n"
+            text += f"   • Cards: ${summary['debt_totals']['cards_balance_cents']/100:.2f}\n\n"
+            text += f"💸 <b>Min Payments:</b> ${summary['debt_totals']['min_payments_cents']/100:.2f}\n\n"
+            
+            net_income = summary['income_total_cents'] - summary['debt_totals']['min_payments_cents']
+            text += f"📈 <b>Net Income:</b> ${net_income/100:.2f}\n"
+            
+            if summary['loans_estimated_close']:
+                text += f"\n🏦 <b>Estimated Loan Closures:</b>\n"
+                for loan in summary['loans_estimated_close']:
+                    text += f"   • {loan['name']}: {loan['remaining_months']} months (est. {loan['estimated_close_date']})\n"
+            
+            await q.edit_message_text(text, reply_markup=_build_finance_keyboard(), parse_mode="HTML")
+            
+        except FinanceAPIError as e:
+            await q.edit_message_text(f"❌ Error loading finance summary: {e}", reply_markup=_build_finance_keyboard())
+        except Exception as e:
+            log.error("Finance summary failed: %s", e)
+            await q.edit_message_text(f"❌ Error: {e}", reply_markup=_build_finance_keyboard())
+    
+    elif data == "finance:loans":
+        await q.edit_message_text("🏦 <b>Loans</b>\n\nВыберите займ для платежа:", reply_markup=_build_loans_keyboard(), parse_mode="HTML")
+    
+    elif data == "finance:cards":
+        await q.edit_message_text("💳 <b>Credit Cards</b>\n\nВыберите карту для платежа:", reply_markup=_build_cards_keyboard(), parse_mode="HTML")
+    
+    elif data == "finance:income":
+        await q.edit_message_text("💵 <b>Income</b>\n\nДоходы за текущий месяц:", reply_markup=_build_income_keyboard(), parse_mode="HTML")
+    
+    elif data.startswith("loan:"):
+        loan_id = int(data.split(":")[1])
+        context.user_data["await_payment_for"] = {"type": "loan", "id": loan_id}
+        await q.edit_message_text("💳 Введите сумму платежа по займу:")
+    
+    elif data.startswith("card:"):
+        card_id = int(data.split(":")[1])
+        context.user_data["await_payment_for"] = {"type": "card", "id": card_id}
+        await q.edit_message_text("💳 Введите сумму платежа по кредитной карте:")
+    
+    elif data == "back:finance":
+        await q.edit_message_text("💰 <b>Loans & Credit Cards</b>\n\nВыберите действие:", reply_markup=_build_finance_keyboard(), parse_mode="HTML")
+    
     elif data == "back:main":
         await q.edit_message_text("🤖 Бот для семейного бюджета\n\nВыберите действие:", reply_markup=_build_main_keyboard())
 
@@ -319,8 +456,44 @@ async def text_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     text = update.message.text.strip()
     pending_cat = context.user_data.get("await_amount_for")
+    pending_payment = context.user_data.get("await_payment_for")
     
-    if pending_cat:
+    if pending_payment:
+        # User is entering payment amount
+        amt_txt = text.replace(",", ".")
+        try:
+            amount = float(amt_txt)
+        except ValueError:
+            await update.message.reply_text("Введите число, например 123.45 или 123,45. Или нажмите /cancel")
+            return
+        
+        try:
+            # Create payment
+            today = datetime.now().strftime("%Y-%m-%d")
+            payment = create_finance_payment(
+                account_type=pending_payment["type"],
+                account_id=pending_payment["id"],
+                amount=amount,
+                occurred_at=today,
+                person="Denis",  # Default to Denis, can be made configurable
+                note=f"Payment via bot"
+            )
+            
+            context.user_data.pop("await_payment_for", None)
+            
+            account_type_name = "займ" if pending_payment["type"] == "loan" else "кредитная карта"
+            msg = f"✅ Платеж по {account_type_name}: -{currency_symbol}{amount:.2f}\n"
+            msg += f"📅 Дата: {today}"
+            
+            await update.message.reply_text(msg, reply_markup=_build_main_keyboard())
+            
+        except FinanceAPIError as e:
+            await update.message.reply_text(f"❌ Ошибка при создании платежа: {e}")
+        except Exception as e:
+            log.error("Create payment failed: %s", e)
+            await update.message.reply_text(f"❌ Ошибка: {e}")
+    
+    elif pending_cat:
         # User is entering amount
         amt_txt = text.replace(",", ".")
         try:

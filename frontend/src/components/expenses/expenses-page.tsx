@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { expensesApi, limitsApi } from "@/lib/api";
-import { Plus, Trash2, Search } from "lucide-react";
+import { Plus, Trash2, Search, Edit } from "lucide-react";
 import { format } from "date-fns";
 import { safeFormatDate } from "@/lib/date-utils";
 import { Expense } from "@/types/api";
@@ -20,7 +20,9 @@ export function ExpensesPage() {
   const [selectedMonth, setSelectedMonth] = useState(format(new Date(), "yyyy-MM"));
   const [searchQuery, setSearchQuery] = useState("");
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [newExpense, setNewExpense] = useState({ category: "", amount: "" });
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  const [newExpense, setNewExpense] = useState({ category: "", amount: "", date: "" });
 
   const queryClient = useQueryClient();
 
@@ -38,13 +40,23 @@ export function ExpensesPage() {
 
   // Мутация для создания расхода
   const createExpenseMutation = useMutation({
-    mutationFn: (expense: { category: string; amount: number }) =>
+    mutationFn: (expense: { category: string; amount: number; date?: string }) =>
       expensesApi.create(expense),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["expenses"] });
       queryClient.invalidateQueries({ queryKey: ["report"] });
       setIsAddDialogOpen(false);
-      setNewExpense({ category: "", amount: "" });
+      setNewExpense({ category: "", amount: "", date: "" });
+    },
+  });
+
+  // Мутация для обновления расхода
+  const updateExpenseMutation = useMutation({
+    mutationFn: ({ id, expense }: { id: number; expense: { category: string; amount: number; date?: string } }) =>
+      expensesApi.update(id, expense),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["expenses"] });
+      queryClient.invalidateQueries({ queryKey: ["report"] });
     },
   });
 
@@ -63,7 +75,28 @@ export function ExpensesPage() {
     createExpenseMutation.mutate({
       category: newExpense.category,
       amount: parseFloat(newExpense.amount),
+      date: newExpense.date || undefined,
     });
+  };
+
+  const handleEditExpense = (expense: Expense) => {
+    setEditingExpense(expense);
+    setIsEditDialogOpen(true);
+  };
+
+  const handleUpdateExpense = () => {
+    if (!editingExpense || !editingExpense.category || !editingExpense.amount) return;
+
+    updateExpenseMutation.mutate({
+      id: editingExpense.id,
+      expense: {
+        category: editingExpense.category,
+        amount: editingExpense.amount,
+        date: editingExpense.date,
+      },
+    });
+    setIsEditDialogOpen(false);
+    setEditingExpense(null);
   };
 
   const handleDeleteExpense = (id: number) => {
@@ -144,6 +177,20 @@ export function ExpensesPage() {
                   }
                 />
               </div>
+              <div className="grid gap-2">
+                <Label htmlFor="date">Date (optional)</Label>
+                <Input
+                  id="date"
+                  type="date"
+                  value={newExpense.date}
+                  onChange={(e) =>
+                    setNewExpense({ ...newExpense, date: e.target.value })
+                  }
+                />
+                <p className="text-sm text-muted-foreground">
+                  Leave empty to use today&apos;s date
+                </p>
+              </div>
             </div>
             <DialogFooter>
               <Button
@@ -151,6 +198,74 @@ export function ExpensesPage() {
                 disabled={createExpenseMutation.isPending}
               >
                 {createExpenseMutation.isPending ? "Adding..." : "Add Expense"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Dialog */}
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Edit Expense</DialogTitle>
+              <DialogDescription>
+                Update the details for this expense.
+              </DialogDescription>
+            </DialogHeader>
+            {editingExpense && (
+              <div className="grid gap-4 py-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-category">Category</Label>
+                  <Select
+                    value={editingExpense.category}
+                    onValueChange={(value) =>
+                      setEditingExpense({ ...editingExpense, category: value })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {limits?.map((limit) => (
+                        <SelectItem key={limit.category} value={limit.category}>
+                          {limit.category}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-amount">Amount ($)</Label>
+                  <Input
+                    id="edit-amount"
+                    type="number"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={editingExpense.amount}
+                    onChange={(e) =>
+                      setEditingExpense({ ...editingExpense, amount: parseFloat(e.target.value) || 0 })
+                    }
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-date">Date</Label>
+                  <Input
+                    id="edit-date"
+                    type="date"
+                    value={editingExpense.date ? editingExpense.date.split('T')[0] : ''}
+                    onChange={(e) =>
+                      setEditingExpense({ ...editingExpense, date: e.target.value })
+                    }
+                  />
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              <Button
+                onClick={handleUpdateExpense}
+                disabled={updateExpenseMutation.isPending}
+              >
+                {updateExpenseMutation.isPending ? "Updating..." : "Update Expense"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -235,6 +350,14 @@ export function ExpensesPage() {
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleEditExpense(expense)}
+                          disabled={updateExpenseMutation.isPending}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="sm"
