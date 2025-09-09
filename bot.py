@@ -41,9 +41,13 @@ def _sort_categories_by_usage(cats: list[str]) -> list[str]:
 
 # --- Telegram Bot Logic ---
 
-# Logging
+# Logging configuration
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 log = logging.getLogger(__name__)
+
+# Set httpx logging to WARNING to reduce noise in Railway logs
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 # Config
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")

@@ -8,7 +8,7 @@ import asyncio
 import logging
 
 # Set up logging
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("budget-bot-adapter")
 logger.setLevel(logging.INFO)
 
 # Global async API client instance
