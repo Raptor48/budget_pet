@@ -8,9 +8,11 @@ import aiohttp
 from typing import List, Dict, Optional, Tuple, Any
 from datetime import datetime
 import os
-from services.logging_config import get_logger
+import logging
 
-logger = get_logger("api-client")
+# Set up proper logging
+logger = logging.getLogger("budget-api-client")
+logger.setLevel(logging.INFO)
 
 class BudgetApiClient:
     """Synchronous API client for Desktop GUI."""
