@@ -123,6 +123,7 @@ class AsyncBudgetApiClient:
         timeout = aiohttp.ClientTimeout(total=30)
         
         try:
+            logger.info(f"Making async API request: {method} {url}")
             # Create SSL context that doesn't verify certificates for Railway.app
             import ssl
             ssl_context = ssl.create_default_context()
@@ -133,7 +134,9 @@ class AsyncBudgetApiClient:
             async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
                 async with session.request(method, url, **kwargs) as response:
                     response.raise_for_status()
-                    return await response.json()
+                    result = await response.json()
+                    logger.info(f"Async API request successful: {method} {url} - Status: {response.status}")
+                    return result
         except aiohttp.ClientError as e:
             logger.error(f"Async API request failed: {method} {url} - {e}")
             raise RuntimeError(f"API request failed: {e}")
