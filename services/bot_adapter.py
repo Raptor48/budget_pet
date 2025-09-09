@@ -5,6 +5,11 @@ This allows minimal changes to existing bot code.
 from services.api_client import AsyncBudgetApiClient
 from typing import List, Tuple, Dict
 import asyncio
+import logging
+
+# Set up logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 # Global async API client instance
 _async_api_client = None
@@ -20,13 +25,23 @@ def get_async_api_client() -> AsyncBudgetApiClient:
 
 async def add_expense(category: str, amount: float) -> Tuple[bool, float]:
     """Add expense. Returns (exceeded_limit, remaining_amount)"""
-    return await get_async_api_client().add_expense(category, amount)
+    try:
+        logger.info(f"Bot adapter: Adding expense {category}=${amount}")
+        result = await get_async_api_client().add_expense(category, amount)
+        logger.info(f"Bot adapter: Add expense result: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Bot adapter: Failed to add expense {category}=${amount}: {e}")
+        # Return default values to prevent bot crash
+        return False, 0.0
 
 async def get_month_report(month: str) -> Dict[str, Dict[str, float]]:
     """Get spending report for a month."""
     try:
+        logger.info(f"Bot adapter: Getting month report for {month}")
         # Get raw API data
         api_data = await get_async_api_client().get_month_report(month)
+        logger.info(f"Bot adapter: API returned report data: {api_data}")
         
         # FastAPI returns: {"report": {"category": {"spent": X, "budget": Y, "remaining": Z}}}
         report_data = api_data.get('report', {})
@@ -39,8 +54,10 @@ async def get_month_report(month: str) -> Dict[str, Dict[str, float]]:
                 'budget': data.get('budget', 0.0)
             }
         
+        logger.info(f"Bot adapter: Converted report: {result}")
         return result
     except Exception as e:
+        logger.error(f"Bot adapter: Failed to get month report for {month}: {e}")
         # Return empty dict on error to avoid bot crashes
         return {}
 
