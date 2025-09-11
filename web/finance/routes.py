@@ -226,6 +226,40 @@ async def get_payment_analytics(payment_id: int):
     return analytics
 
 
+# Peers management endpoints
+@router.post("/peers")
+async def add_peer(user_id: int, username: str):
+    """Add a peer for notifications."""
+    repo = get_finance_repo()
+    await repo.add_peer_if_new(user_id, username)
+    return {"message": "Peer added successfully"}
+
+
+@router.get("/peers")
+async def get_peers(exclude_id: Optional[int] = Query(None, description="Exclude user ID")):
+    """Get peer IDs for notifications."""
+    repo = get_finance_repo()
+    peer_ids = await repo.get_peer_ids(exclude_id=exclude_id)
+    return {"peer_ids": peer_ids}
+
+
+# Budget alerts endpoints
+@router.get("/alerts/check")
+async def check_alert(category: str, month: str, threshold: int):
+    """Check if threshold alert was already sent."""
+    repo = get_finance_repo()
+    was_notified = await repo.was_notified(category, month, threshold)
+    return {"was_notified": was_notified}
+
+
+@router.post("/alerts/mark")
+async def mark_alert(category: str, month: str, threshold: int):
+    """Mark threshold alert as sent."""
+    repo = get_finance_repo()
+    await repo.mark_notified(category, month, threshold)
+    return {"message": "Alert marked as sent"}
+
+
 # Bot support endpoints
 @router.get("/accounts", response_model=AccountsOut)
 async def get_accounts():
