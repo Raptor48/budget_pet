@@ -24,7 +24,7 @@ export function CardForm({ card, onSuccess, trigger }: CardFormProps) {
     apr_percent: card?.apr_percent || '',
     current_balance_cents: card?.current_balance_cents || '',
     credit_limit_cents: card?.credit_limit_cents || '',
-    due_date: card?.due_date || '',
+    due_day: card?.due_day || '',
     min_payment_cents: card?.min_payment_cents || '',
   });
 
@@ -39,7 +39,7 @@ export function CardForm({ card, onSuccess, trigger }: CardFormProps) {
         current_balance_cents: Math.round((parseFloat(String(formData.current_balance_cents)) || 0) * 100),
         credit_limit_cents: formData.credit_limit_cents ? Math.round(parseFloat(String(formData.credit_limit_cents)) * 100) : undefined,
         min_payment_cents: Math.round((parseFloat(String(formData.min_payment_cents)) || 0) * 100),
-        due_date: formData.due_date || undefined,
+        due_day: formData.due_day ? parseInt(String(formData.due_day)) : undefined,
       };
 
       if (card) {
@@ -115,13 +115,15 @@ export function CardForm({ card, onSuccess, trigger }: CardFormProps) {
               />
             </div>
             <div>
-              <Label htmlFor="due_date">Due Date</Label>
+              <Label htmlFor="due_day">Due Day (1-31)</Label>
               <Input
-                id="due_date"
-                type="date"
-                value={formData.due_date}
-                onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
-                placeholder="Select due date"
+                id="due_day"
+                type="number"
+                min="1"
+                max="31"
+                value={formData.due_day}
+                onChange={(e) => setFormData({ ...formData, due_day: e.target.value })}
+                placeholder="Day of month for payment"
               />
             </div>
           </div>

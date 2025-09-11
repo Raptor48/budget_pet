@@ -224,7 +224,7 @@ export default function FinancesPage() {
                   <TableHead>Balance</TableHead>
                   <TableHead>Min Payment</TableHead>
                   <TableHead>APR</TableHead>
-                  <TableHead>Due Date</TableHead>
+                  <TableHead>Due Day</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -235,7 +235,7 @@ export default function FinancesPage() {
                     <TableCell>{formatCurrency(loan.current_balance_cents)}</TableCell>
                     <TableCell>{formatCurrency(loan.min_payment_cents)}</TableCell>
                     <TableCell>{loan.apr_percent}%</TableCell>
-                    <TableCell>{loan.due_date ? formatDate(loan.due_date) : '-'}</TableCell>
+                    <TableCell>{loan.due_day ? `${loan.due_day}` : '-'}</TableCell>
                     <TableCell>
                       <div className="flex gap-2">
                         <PaymentDialog
@@ -281,7 +281,7 @@ export default function FinancesPage() {
                   <TableHead>Balance</TableHead>
                   <TableHead>Min Payment</TableHead>
                   <TableHead>APR</TableHead>
-                  <TableHead>Due Date</TableHead>
+                  <TableHead>Due Day</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -292,7 +292,7 @@ export default function FinancesPage() {
                     <TableCell>{formatCurrency(card.current_balance_cents)}</TableCell>
                     <TableCell>{formatCurrency(card.min_payment_cents)}</TableCell>
                     <TableCell>{card.apr_percent}%</TableCell>
-                    <TableCell>{card.due_date ? formatDate(card.due_date) : '-'}</TableCell>
+                    <TableCell>{card.due_day ? `${card.due_day}` : '-'}</TableCell>
                     <TableCell>
                       <div className="flex gap-2">
                         <PaymentDialog

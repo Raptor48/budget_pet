@@ -64,7 +64,7 @@ export interface Loan {
   category_name: string;
   apr_percent: number;
   current_balance_cents: number;
-  due_date?: string;
+  due_day?: number;
   min_payment_cents: number;
   remaining_months?: number;
   close_date?: string;
@@ -78,7 +78,7 @@ export interface LoanCreate {
   category_name: string;
   apr_percent: number;
   current_balance_cents: number;
-  due_date?: string;
+  due_day?: number;
   min_payment_cents: number;
   remaining_months?: number;
   close_date?: string;
@@ -89,7 +89,7 @@ export interface LoanUpdate {
   category_name?: string;
   apr_percent?: number;
   current_balance_cents?: number;
-  due_date?: string;
+  due_day?: number;
   min_payment_cents?: number;
   remaining_months?: number;
   close_date?: string;
@@ -103,7 +103,7 @@ export interface CreditCard {
   apr_percent: number;
   current_balance_cents: number;
   credit_limit_cents?: number;
-  due_date?: string;
+  due_day?: number;
   min_payment_cents: number;
   is_active: boolean;
   created_at: string;
@@ -116,7 +116,7 @@ export interface CreditCardCreate {
   apr_percent: number;
   current_balance_cents: number;
   credit_limit_cents?: number;
-  due_date?: string;
+  due_day?: number;
   min_payment_cents: number;
 }
 
@@ -126,7 +126,7 @@ export interface CreditCardUpdate {
   apr_percent?: number;
   current_balance_cents?: number;
   credit_limit_cents?: number;
-  due_date?: string;
+  due_day?: number;
   min_payment_cents?: number;
   is_active?: boolean;
 }
