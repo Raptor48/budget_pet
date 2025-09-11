@@ -181,6 +181,38 @@ class AsyncBudgetApiClient:
             "amount": amount
         })
     
+    # --- Notifications ---
+    
+    async def add_peer(self, user_id: int, username: str) -> None:
+        """Add a peer for notifications."""
+        await self._request("POST", "/api/finances/peers", params={
+            "user_id": user_id,
+            "username": username
+        })
+    
+    async def get_peers(self, exclude_id: Optional[int] = None) -> Dict[str, List[int]]:
+        """Get peer IDs for notifications."""
+        params = {}
+        if exclude_id is not None:
+            params["exclude_id"] = exclude_id
+        return await self._request("GET", "/api/finances/peers", params=params)
+    
+    async def check_alert(self, category: str, month: str, threshold: int) -> Dict[str, bool]:
+        """Check if threshold alert was already sent."""
+        return await self._request("GET", "/api/finances/alerts/check", params={
+            "category": category,
+            "month": month,
+            "threshold": threshold
+        })
+    
+    async def mark_alert(self, category: str, month: str, threshold: int) -> None:
+        """Mark threshold alert as sent."""
+        await self._request("POST", "/api/finances/alerts/mark", params={
+            "category": category,
+            "month": month,
+            "threshold": threshold
+        })
+
     # --- Utility ---
     
     def get_current_month(self) -> str:

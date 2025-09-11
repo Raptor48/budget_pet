@@ -116,6 +116,31 @@ class FinanceRepository:
             """,
             """
             CREATE INDEX IF NOT EXISTS idx_finance_income_person ON finance_income(person)
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS peers (
+                id BIGINT PRIMARY KEY,
+                username TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_peers_created_at ON peers(created_at)
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS budget_alerts (
+                category TEXT NOT NULL,
+                month TEXT NOT NULL,
+                threshold INTEGER NOT NULL,
+                notified_ts BIGINT NOT NULL,
+                PRIMARY KEY (category, month, threshold)
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_budget_alerts_category ON budget_alerts(category)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_budget_alerts_month ON budget_alerts(month)
             """
         ]
 
@@ -764,6 +789,68 @@ class FinanceRepository:
             apr_percent = Decimal(str(account_row["apr_percent"]))
             
             return calculate_payment_analytics(payment, balance_before, apr_percent)
+
+    # Peers management for notifications
+    async def add_peer_if_new(self, user_id: int, username: str) -> None:
+        """Add user to peers table if not already present."""
+        pool = await self.get_pool()
+        query = """
+            INSERT INTO peers (id, username)
+            VALUES ($1, $2)
+            ON CONFLICT (id) DO NOTHING
+        """
+        async with pool.acquire() as conn:
+            await conn.execute(query, user_id, username)
+
+    async def get_peer_ids(self, exclude_id: Optional[int] = None, 
+                          allowed_ids: Optional[List[int]] = None) -> List[int]:
+        """Get list of peer IDs, optionally excluding one and filtering by allowed_ids."""
+        pool = await self.get_pool()
+        query = "SELECT id FROM peers"
+        params = []
+        param_count = 1
+
+        if exclude_id is not None:
+            query += f" WHERE id != ${param_count}"
+            params.append(exclude_id)
+            param_count += 1
+
+        if allowed_ids is not None and len(allowed_ids) > 0:
+            if exclude_id is not None:
+                query += f" AND id = ANY(${param_count})"
+            else:
+                query += f" WHERE id = ANY(${param_count})"
+            params.append(allowed_ids)
+
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(query, *params)
+            return [row["id"] for row in rows]
+
+    # Budget alerts for threshold notifications
+    async def was_notified(self, category: str, month: str, threshold: int) -> bool:
+        """Check if threshold notification was already sent."""
+        pool = await self.get_pool()
+        query = """
+            SELECT 1 FROM budget_alerts 
+            WHERE category = $1 AND month = $2 AND threshold = $3
+        """
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(query, category, month, threshold)
+            return row is not None
+
+    async def mark_notified(self, category: str, month: str, threshold: int) -> None:
+        """Mark threshold notification as sent."""
+        pool = await self.get_pool()
+        import time
+        ts = int(time.time())
+        query = """
+            INSERT INTO budget_alerts (category, month, threshold, notified_ts)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (category, month, threshold) 
+            DO UPDATE SET notified_ts = EXCLUDED.notified_ts
+        """
+        async with pool.acquire() as conn:
+            await conn.execute(query, category, month, threshold, ts)
 
     # Bot support
     async def get_accounts(self) -> AccountsOut:

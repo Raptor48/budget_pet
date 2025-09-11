@@ -11,7 +11,10 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
 
 # --- API client imports (replacing GitHub I/O) ------------------------------
-from services.bot_adapter import add_expense, get_month_report, get_remaining, list_limits, set_limit, get_current_month
+from services.bot_adapter import (
+    add_expense, get_month_report, get_remaining, list_limits, set_limit, get_current_month,
+    add_peer_if_new, get_peer_ids, maybe_notify_thresholds, notify_peers
+)
 from services.finance_adapter import get_finance_accounts, get_finance_summary, create_finance_payment, get_loans, get_cards, get_income, FinanceAPIError
 
 BOT_CURRENCY_SYMBOL = os.getenv("BOT_CURRENCY_SYMBOL", "$")
@@ -224,6 +227,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Access denied.")
         return
     
+    # Add user to peers for notifications
+    user_id = update.effective_user.id
+    username = update.effective_user.full_name or "Unknown"
+    await add_peer_if_new(user_id, username)
+    
     await update.message.reply_text(
         "👋 Привет! Я бот для учёта расходов.\n\n"
         "Команды:\n"
@@ -356,8 +364,8 @@ async def on_btn(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             if not report_data:
                 await q.edit_message_text(f"Нет расходов за {month}")
-                return
-            
+        return
+
             # Convert to format expected by _format_report_html
             report = []
             for category, data in report_data.items():
@@ -517,6 +525,16 @@ async def text_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
             _record_category_use(pending_cat)
             await update.message.reply_text(msg, reply_markup=_build_main_keyboard())
             
+            # Send threshold notifications
+            month = get_current_month()
+            await maybe_notify_thresholds(pending_cat, month, context)
+            
+            # Notify other peers
+            sender_id = update.effective_user.id if update.effective_user else None
+            sender_name = update.effective_user.full_name if update.effective_user else "Someone"
+            allowed_ids = ALLOWED if len(ALLOWED) > 0 else None
+            await notify_peers(sender_name, pending_cat, amount, currency_symbol, context, sender_id, allowed_ids)
+            
         except Exception as e:
             log.error("Add expense failed: %s", e)
             await update.message.reply_text(f"Ошибка: {e}")
@@ -535,8 +553,18 @@ async def text_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if exceeded:
                     msg += f"\n⚠️ Превышен лимит! Остаток: {currency_symbol}{remaining:.2f}"
                 
-                _record_category_use(cat)
+            _record_category_use(cat)
                 await update.message.reply_text(msg, reply_markup=_build_main_keyboard())
+                
+                # Send threshold notifications
+                month = get_current_month()
+                await maybe_notify_thresholds(cat, month, context)
+                
+                # Notify other peers
+                sender_id = update.effective_user.id if update.effective_user else None
+                sender_name = update.effective_user.full_name if update.effective_user else "Someone"
+                allowed_ids = ALLOWED if len(ALLOWED) > 0 else None
+                await notify_peers(sender_name, cat, amount, currency_symbol, context, sender_id, allowed_ids)
                 
             except ValueError:
                 await update.message.reply_text("Неверный формат суммы")
