@@ -47,7 +47,7 @@ class FinanceRepository:
               category_name TEXT NOT NULL,
               apr_percent NUMERIC(6,3) NOT NULL DEFAULT 0,
               current_balance_cents BIGINT NOT NULL DEFAULT 0,
-              due_date DATE,
+              due_day SMALLINT CHECK (due_day >= 1 AND due_day <= 31),
               min_payment_cents BIGINT NOT NULL DEFAULT 0,
               remaining_months INT,
               close_date DATE,
@@ -70,7 +70,7 @@ class FinanceRepository:
               apr_percent NUMERIC(6,3) NOT NULL DEFAULT 0,
               current_balance_cents BIGINT NOT NULL DEFAULT 0,
               credit_limit_cents BIGINT,
-              due_date DATE,
+              due_day SMALLINT CHECK (due_day >= 1 AND due_day <= 31),
               min_payment_cents BIGINT NOT NULL DEFAULT 0,
               is_active BOOLEAN NOT NULL DEFAULT TRUE,
               created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -141,6 +141,35 @@ class FinanceRepository:
             """,
             """
             CREATE INDEX IF NOT EXISTS idx_budget_alerts_month ON budget_alerts(month)
+            """,
+            # Migration: Convert due_day to due_day
+            """
+            DO $$
+            BEGIN
+                -- Add due_day column to loans if it doesn't exist
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='finance_loans' AND column_name='due_day') THEN
+                    ALTER TABLE finance_loans ADD COLUMN due_day SMALLINT CHECK (due_day >= 1 AND due_day <= 31);
+                    -- Copy day from due_day to due_day
+                    UPDATE finance_loans SET due_day = EXTRACT(DAY FROM due_day) WHERE due_day IS NOT NULL;
+                    -- Drop due_day column
+                    ALTER TABLE finance_loans DROP COLUMN IF EXISTS due_day;
+                END IF;
+            END
+            $$
+            """,
+            """
+            DO $$
+            BEGIN
+                -- Add due_day column to credit cards if it doesn't exist
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='finance_credit_cards' AND column_name='due_day') THEN
+                    ALTER TABLE finance_credit_cards ADD COLUMN due_day SMALLINT CHECK (due_day >= 1 AND due_day <= 31);
+                    -- Copy day from due_day to due_day
+                    UPDATE finance_credit_cards SET due_day = EXTRACT(DAY FROM due_day) WHERE due_day IS NOT NULL;
+                    -- Drop due_day column
+                    ALTER TABLE finance_credit_cards DROP COLUMN IF EXISTS due_day;
+                END IF;
+            END
+            $$
             """
         ]
 
@@ -154,7 +183,7 @@ class FinanceRepository:
         pool = await self.get_pool()
         query = """
             SELECT id, name, category_name, apr_percent, current_balance_cents,
-                   due_date, min_payment_cents, remaining_months, close_date,
+                   due_day, min_payment_cents, remaining_months, close_date,
                    is_active, created_at, updated_at
             FROM finance_loans
         """
@@ -171,17 +200,17 @@ class FinanceRepository:
         pool = await self.get_pool()
         query = """
             INSERT INTO finance_loans (name, category_name, apr_percent, current_balance_cents,
-                                     due_date, min_payment_cents, remaining_months, close_date, is_active)
+                                     due_day, min_payment_cents, remaining_months, close_date, is_active)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING id, name, category_name, apr_percent, current_balance_cents,
-                      due_date, min_payment_cents, remaining_months, close_date,
+                      due_day, min_payment_cents, remaining_months, close_date,
                       is_active, created_at, updated_at
         """
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 query,
                 loan.name, loan.category_name, float(loan.apr_percent),
-                loan.current_balance_cents, loan.due_date, loan.min_payment_cents,
+                loan.current_balance_cents, loan.due_day, loan.min_payment_cents,
                 loan.remaining_months, loan.close_date, loan.is_active
             )
             return LoanOut(**dict(row))
@@ -211,9 +240,9 @@ class FinanceRepository:
             updates.append(f"current_balance_cents = ${param_count}")
             params.append(loan.current_balance_cents)
             param_count += 1
-        if loan.due_date is not None:
-            updates.append(f"due_date = ${param_count}")
-            params.append(loan.due_date)
+        if loan.due_day is not None:
+            updates.append(f"due_day = ${param_count}")
+            params.append(loan.due_day)
             param_count += 1
         if loan.min_payment_cents is not None:
             updates.append(f"min_payment_cents = ${param_count}")
@@ -243,7 +272,7 @@ class FinanceRepository:
             SET {', '.join(updates)}
             WHERE id = ${param_count}
             RETURNING id, name, category_name, apr_percent, current_balance_cents,
-                      due_date, min_payment_cents, remaining_months, close_date,
+                      due_day, min_payment_cents, remaining_months, close_date,
                       is_active, created_at, updated_at
         """
 
@@ -256,7 +285,7 @@ class FinanceRepository:
         pool = await self.get_pool()
         query = """
             SELECT id, name, category_name, apr_percent, current_balance_cents,
-                   due_date, min_payment_cents, remaining_months, close_date,
+                   due_day, min_payment_cents, remaining_months, close_date,
                    is_active, created_at, updated_at
             FROM finance_loans
             WHERE id = $1
@@ -283,7 +312,7 @@ class FinanceRepository:
         pool = await self.get_pool()
         query = """
             SELECT id, name, category_name, apr_percent, current_balance_cents,
-                   credit_limit_cents, due_date, min_payment_cents,
+                   credit_limit_cents, due_day, min_payment_cents,
                    is_active, created_at, updated_at
             FROM finance_credit_cards
         """
@@ -300,10 +329,10 @@ class FinanceRepository:
         pool = await self.get_pool()
         query = """
             INSERT INTO finance_credit_cards (name, category_name, apr_percent, current_balance_cents,
-                                            credit_limit_cents, due_date, min_payment_cents, is_active)
+                                            credit_limit_cents, due_day, min_payment_cents, is_active)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING id, name, category_name, apr_percent, current_balance_cents,
-                      credit_limit_cents, due_date, min_payment_cents,
+                      credit_limit_cents, due_day, min_payment_cents,
                       is_active, created_at, updated_at
         """
         async with pool.acquire() as conn:
@@ -311,7 +340,7 @@ class FinanceRepository:
                 query,
                 card.name, card.category_name, float(card.apr_percent),
                 card.current_balance_cents, card.credit_limit_cents,
-                card.due_date, card.min_payment_cents, card.is_active
+                card.due_day, card.min_payment_cents, card.is_active
             )
             return CreditCardOut(**dict(row))
 
@@ -344,9 +373,9 @@ class FinanceRepository:
             updates.append(f"credit_limit_cents = ${param_count}")
             params.append(card.credit_limit_cents)
             param_count += 1
-        if card.due_date is not None:
-            updates.append(f"due_date = ${param_count}")
-            params.append(card.due_date)
+        if card.due_day is not None:
+            updates.append(f"due_day = ${param_count}")
+            params.append(card.due_day)
             param_count += 1
         if card.min_payment_cents is not None:
             updates.append(f"min_payment_cents = ${param_count}")
@@ -368,7 +397,7 @@ class FinanceRepository:
             SET {', '.join(updates)}
             WHERE id = ${param_count}
             RETURNING id, name, category_name, apr_percent, current_balance_cents,
-                      credit_limit_cents, due_date, min_payment_cents,
+                      credit_limit_cents, due_day, min_payment_cents,
                       is_active, created_at, updated_at
         """
 
@@ -381,7 +410,7 @@ class FinanceRepository:
         pool = await self.get_pool()
         query = """
             SELECT id, name, category_name, apr_percent, current_balance_cents,
-                   credit_limit_cents, due_date, min_payment_cents,
+                   credit_limit_cents, due_day, min_payment_cents,
                    is_active, created_at, updated_at
             FROM finance_credit_cards
             WHERE id = $1
@@ -638,22 +667,20 @@ class FinanceRepository:
             loans_query = """
                 SELECT 
                     COALESCE(SUM(CASE WHEN is_active THEN current_balance_cents ELSE 0 END), 0) as loans_balance,
-                    COALESCE(SUM(CASE WHEN is_active AND (due_date IS NULL OR EXTRACT(YEAR FROM due_date) = $3 AND EXTRACT(MONTH FROM due_date) = $4) 
-                                      THEN min_payment_cents ELSE 0 END), 0) as loans_min_payment
+                    COALESCE(SUM(CASE WHEN is_active THEN min_payment_cents ELSE 0 END), 0) as loans_min_payment
                 FROM finance_loans
             """
-            loans_row = await conn.fetchrow(loans_query, start_date, end_date, year, month_num)
+            loans_row = await conn.fetchrow(loans_query)
             loans_balance = loans_row["loans_balance"] if loans_row else 0
             loans_min_payment = loans_row["loans_min_payment"] if loans_row else 0
             
             cards_query = """
                 SELECT 
                     COALESCE(SUM(CASE WHEN is_active THEN current_balance_cents ELSE 0 END), 0) as cards_balance,
-                    COALESCE(SUM(CASE WHEN is_active AND (due_date IS NULL OR EXTRACT(YEAR FROM due_date) = $3 AND EXTRACT(MONTH FROM due_date) = $4) 
-                                      THEN min_payment_cents ELSE 0 END), 0) as cards_min_payment
+                    COALESCE(SUM(CASE WHEN is_active THEN min_payment_cents ELSE 0 END), 0) as cards_min_payment
                 FROM finance_credit_cards
             """
-            cards_row = await conn.fetchrow(cards_query, start_date, end_date, year, month_num)
+            cards_row = await conn.fetchrow(cards_query)
             cards_balance = cards_row["cards_balance"] if cards_row else 0
             cards_min_payment = cards_row["cards_min_payment"] if cards_row else 0
 

@@ -23,7 +23,7 @@ export function LoanForm({ loan, onSuccess, trigger }: LoanFormProps) {
     category_name: loan?.category_name || '',
     apr_percent: loan?.apr_percent || '',
     current_balance_cents: loan?.current_balance_cents || '',
-    due_date: loan?.due_date || '',
+    due_day: loan?.due_day || '',
     min_payment_cents: loan?.min_payment_cents || '',
     remaining_months: loan?.remaining_months || '',
     close_date: loan?.close_date || '',
@@ -75,7 +75,7 @@ export function LoanForm({ loan, onSuccess, trigger }: LoanFormProps) {
         apr_percent: parseFloat(String(formData.apr_percent)) || 0,
         current_balance_cents: Math.round((parseFloat(String(formData.current_balance_cents)) || 0) * 100),
         min_payment_cents: Math.round((parseFloat(String(formData.min_payment_cents)) || 0) * 100),
-        due_date: formData.due_date || undefined,
+        due_day: formData.due_day ? parseInt(String(formData.due_day)) : undefined,
         remaining_months: formData.remaining_months ? parseInt(String(formData.remaining_months)) : undefined,
         close_date: formData.close_date || undefined,
       };
@@ -153,13 +153,15 @@ export function LoanForm({ loan, onSuccess, trigger }: LoanFormProps) {
               />
             </div>
             <div>
-              <Label htmlFor="due_date">Due Date</Label>
+              <Label htmlFor="due_day">Due Day (1-31)</Label>
               <Input
-                id="due_date"
-                type="date"
-                value={formData.due_date}
-                onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
-                placeholder="Select due date"
+                id="due_day"
+                type="number"
+                min="1"
+                max="31"
+                value={formData.due_day}
+                onChange={(e) => setFormData({ ...formData, due_day: e.target.value })}
+                placeholder="Day of month for payment"
               />
             </div>
           </div>

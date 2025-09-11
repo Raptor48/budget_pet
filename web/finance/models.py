@@ -49,7 +49,7 @@ class LoanBase(BaseModel):
     category_name: str = Field(..., min_length=1, max_length=255)
     apr_percent: condecimal(ge=0, decimal_places=3) = Field(default=Decimal('0.000'))
     current_balance_cents: conint(ge=0) = Field(default=0)
-    due_date: Optional[date] = None
+    due_day: Optional[conint(ge=1, le=31)] = None
     min_payment_cents: conint(ge=0) = Field(default=0)
     remaining_months: Optional[conint(ge=0)] = None
     close_date: Optional[date] = None
@@ -65,7 +65,7 @@ class LoanUpdate(BaseModel):
     category_name: Optional[str] = Field(None, min_length=1, max_length=255)
     apr_percent: Optional[condecimal(ge=0, decimal_places=3)] = None
     current_balance_cents: Optional[conint(ge=0)] = None
-    due_date: Optional[date] = None
+    due_day: Optional[conint(ge=1, le=31)] = None
     min_payment_cents: Optional[conint(ge=0)] = None
     remaining_months: Optional[conint(ge=0)] = None
     close_date: Optional[date] = None
@@ -87,7 +87,7 @@ class CreditCardBase(BaseModel):
     apr_percent: condecimal(ge=0, decimal_places=3) = Field(default=Decimal('0.000'))
     current_balance_cents: conint(ge=0) = Field(default=0)
     credit_limit_cents: Optional[conint(ge=0)] = None
-    due_date: Optional[date] = None
+    due_day: Optional[conint(ge=1, le=31)] = None
     min_payment_cents: conint(ge=0) = Field(default=0)
     is_active: bool = Field(default=True)
 
@@ -102,7 +102,7 @@ class CreditCardUpdate(BaseModel):
     apr_percent: Optional[condecimal(ge=0, decimal_places=3)] = None
     current_balance_cents: Optional[conint(ge=0)] = None
     credit_limit_cents: Optional[conint(ge=0)] = None
-    due_date: Optional[date] = None
+    due_day: Optional[conint(ge=1, le=31)] = None
     min_payment_cents: Optional[conint(ge=0)] = None
     is_active: Optional[bool] = None
 
