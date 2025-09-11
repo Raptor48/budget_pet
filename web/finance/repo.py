@@ -638,20 +638,22 @@ class FinanceRepository:
             loans_query = """
                 SELECT 
                     COALESCE(SUM(CASE WHEN is_active THEN current_balance_cents ELSE 0 END), 0) as loans_balance,
-                    COALESCE(SUM(CASE WHEN is_active THEN min_payment_cents ELSE 0 END), 0) as loans_min_payment
+                    COALESCE(SUM(CASE WHEN is_active AND (due_date IS NULL OR EXTRACT(YEAR FROM due_date) = $3 AND EXTRACT(MONTH FROM due_date) = $4) 
+                                      THEN min_payment_cents ELSE 0 END), 0) as loans_min_payment
                 FROM finance_loans
             """
-            loans_row = await conn.fetchrow(loans_query)
+            loans_row = await conn.fetchrow(loans_query, start_date, end_date, year, month_num)
             loans_balance = loans_row["loans_balance"] if loans_row else 0
             loans_min_payment = loans_row["loans_min_payment"] if loans_row else 0
             
             cards_query = """
                 SELECT 
                     COALESCE(SUM(CASE WHEN is_active THEN current_balance_cents ELSE 0 END), 0) as cards_balance,
-                    COALESCE(SUM(CASE WHEN is_active THEN min_payment_cents ELSE 0 END), 0) as cards_min_payment
+                    COALESCE(SUM(CASE WHEN is_active AND (due_date IS NULL OR EXTRACT(YEAR FROM due_date) = $3 AND EXTRACT(MONTH FROM due_date) = $4) 
+                                      THEN min_payment_cents ELSE 0 END), 0) as cards_min_payment
                 FROM finance_credit_cards
             """
-            cards_row = await conn.fetchrow(cards_query)
+            cards_row = await conn.fetchrow(cards_query, start_date, end_date, year, month_num)
             cards_balance = cards_row["cards_balance"] if cards_row else 0
             cards_min_payment = cards_row["cards_min_payment"] if cards_row else 0
 
