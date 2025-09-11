@@ -364,7 +364,7 @@ async def on_btn(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             if not report_data:
                 await q.edit_message_text(f"Нет расходов за {month}")
-        return
+                return
 
             # Convert to format expected by _format_report_html
             report = []
@@ -553,7 +553,7 @@ async def text_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if exceeded:
                     msg += f"\n⚠️ Превышен лимит! Остаток: {currency_symbol}{remaining:.2f}"
                 
-            _record_category_use(cat)
+                _record_category_use(cat)
                 await update.message.reply_text(msg, reply_markup=_build_main_keyboard())
                 
                 # Send threshold notifications
