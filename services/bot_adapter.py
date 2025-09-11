@@ -102,16 +102,12 @@ async def add_peer_if_new(user_id: int, username: str) -> None:
     except Exception as e:
         logger.error(f"Bot adapter: Failed to add peer {user_id}: {e}")
 
-async def get_peer_ids(exclude_id: Optional[int] = None, allowed_ids: Optional[List[int]] = None) -> List[int]:
+async def get_peer_ids(exclude_id: Optional[int] = None) -> List[int]:
     """Get list of peer IDs for notifications."""
     try:
-        logger.info(f"Bot adapter: Getting peer IDs (exclude={exclude_id}, allowed={allowed_ids})")
+        logger.info(f"Bot adapter: Getting peer IDs (exclude={exclude_id})")
         result = await get_async_api_client().get_peers(exclude_id=exclude_id)
         peer_ids = result.get('peer_ids', [])
-        
-        # Filter by allowed_ids if provided
-        if allowed_ids and len(allowed_ids) > 0:
-            peer_ids = [pid for pid in peer_ids if pid in allowed_ids]
         
         logger.info(f"Bot adapter: Found {len(peer_ids)} peers: {peer_ids}")
         return peer_ids
@@ -190,7 +186,16 @@ async def notify_peers(sender_name: str, category: str, amount: float, currency_
             await add_peer_if_new(sender_id, sender_name)
         
         # Get peer IDs
-        peer_ids = await get_peer_ids(exclude_id=sender_id, allowed_ids=allowed_ids)
+        peer_ids = await get_peer_ids(exclude_id=sender_id)
+        
+        # Filter by allowed_ids if provided
+        if allowed_ids and len(allowed_ids) > 0:
+            peer_ids = [pid for pid in peer_ids if pid in allowed_ids]
+        
+        # Fallback: if no peers in DB but allowed_ids exists, notify all allowed users except sender
+        if not peer_ids and allowed_ids and len(allowed_ids) > 0:
+            peer_ids = [i for i in allowed_ids if i != sender_id]
+            logger.info(f"Bot adapter: Using fallback - notifying all allowed users: {peer_ids}")
         
         if not peer_ids:
             logger.info("Bot adapter: No peers to notify")
