@@ -10,8 +10,10 @@ import {
   PieChart,
   Settings,
   Wallet,
-  CreditCard
+  CreditCard,
+  LogOut
 } from "lucide-react";
+import { useAuth } from "@/contexts/auth-context";
 
 const navigation = [
   {
@@ -48,6 +50,11 @@ const navigation = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const { user, logout } = useAuth();
+
+  const handleLogout = async () => {
+    await logout();
+  };
 
   return (
     <div className="flex flex-col w-64 bg-card border-r border-border">
@@ -77,20 +84,29 @@ export function Sidebar() {
         })}
       </nav>
 
-      <div className="p-4 border-t border-border">
+      <div className="p-4 border-t border-border space-y-3">
         <div className="flex items-center gap-3 p-3 rounded-lg bg-muted">
           <div className="w-8 h-8 bg-primary rounded-full flex items-center justify-center">
             <span className="text-primary-foreground font-semibold text-sm">
-              BP
+              {user?.username.charAt(0).toUpperCase() || 'U'}
             </span>
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate">Family Budget</p>
+            <p className="text-sm font-medium truncate">{user?.username || 'User'}</p>
             <p className="text-xs text-muted-foreground truncate">
-              budget@example.com
+              Logged in
             </p>
           </div>
         </div>
+        
+        <Button
+          variant="ghost"
+          className="w-full justify-start gap-3 h-11 text-muted-foreground hover:text-foreground"
+          onClick={handleLogout}
+        >
+          <LogOut className="h-5 w-5" />
+          Logout
+        </Button>
       </div>
     </div>
   );

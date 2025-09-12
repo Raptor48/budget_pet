@@ -22,6 +22,7 @@ from web.schemas import (
 )
 from web.deps import get_logger_service
 from web.finance import api_router as finance_api_router, get_finance_repo
+from web.auth import auth_router, AuthMiddleware
 
 # Initialize FastAPI app
 app = FastAPI(title="Budget API", version="1.0.0")
@@ -35,6 +36,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add authentication middleware
+app.add_middleware(AuthMiddleware)
 
 # Global services
 logger = get_logger_service()
@@ -297,5 +301,6 @@ async def sync_push():
     """Force push database to GitHub."""
     raise HTTPException(status_code=400, detail="GitHub sync not configured - using PostgreSQL directly")
 
-# Include finance router
+# Include routers
+app.include_router(auth_router)
 app.include_router(finance_api_router)
