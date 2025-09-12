@@ -42,13 +42,17 @@ async def login(login_data: LoginRequest, response: Response):
     active_sessions[session_token] = user
     
     # Set secure cookie (30 days)
+    # Use environment-based settings for flexibility
+    is_production = os.getenv("RAILWAY_ENVIRONMENT") == "production"
+    
     response.set_cookie(
         key="session_token",
         value=session_token,
         max_age=30 * 24 * 60 * 60,  # 30 days in seconds
         httponly=True,
-        secure=False,  # Set to True in production with HTTPS
-        samesite="lax"
+        secure=is_production,  # HTTPS in production, HTTP in development
+        samesite="none" if is_production else "lax",  # Cross-origin for production
+        domain=None  # Let browser set domain automatically
     )
     
     return LoginResponse(

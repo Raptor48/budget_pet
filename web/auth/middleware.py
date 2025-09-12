@@ -26,13 +26,23 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if request.url.path == "/api/healthz":
             return await call_next(request)
         
+        # Skip auth for CORS preflight requests
+        if request.method == "OPTIONS":
+            return await call_next(request)
+        
         # Check session
         session_token = request.cookies.get("session_token")
         
-        if not session_token or session_token not in active_sessions:
+        if not session_token:
             return JSONResponse(
                 status_code=401,
-                content={"detail": "Authentication required"}
+                content={"detail": "No session token found in cookies"}
+            )
+        
+        if session_token not in active_sessions:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Invalid or expired session token"}
             )
         
         # Continue to protected route
