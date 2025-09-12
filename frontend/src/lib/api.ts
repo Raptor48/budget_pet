@@ -46,6 +46,7 @@ async function apiRequest<T>(
       'Content-Type': 'application/json',
       ...options.headers,
     },
+    credentials: 'include', // Include cookies for cross-origin requests
     ...options,
   });
 
