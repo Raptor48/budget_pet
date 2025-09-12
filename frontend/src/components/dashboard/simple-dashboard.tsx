@@ -4,12 +4,13 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { reportsApi, healthApi } from "@/lib/api";
+import { reportsApi, healthApi, financeApi } from "@/lib/api";
 import { ExpenseBarChart } from "@/components/charts/expense-bar-chart";
 import { RecentExpenses } from "@/components/dashboard/recent-expenses";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { format } from "date-fns";
 import { useState } from "react";
+import { DollarSign, TrendingUp, TrendingDown, CreditCard } from "lucide-react";
 
 export function SimpleDashboard() {
   const currentDate = new Date();
@@ -69,6 +70,12 @@ export function SimpleDashboard() {
     queryKey: ["health"],
     queryFn: () => healthApi.check(),
     refetchInterval: 30000,
+  });
+
+  // Получаем финансовую сводку (Min Payments)
+  const { data: financeSummary } = useQuery({
+    queryKey: ["finance-summary", selectedMonthFormatted],
+    queryFn: () => financeApi.getSummary(selectedMonthFormatted),
   });
 
   if (isLoading) {
@@ -146,24 +153,39 @@ export function SimpleDashboard() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Budget</CardTitle>
+            <CardTitle className="text-sm font-medium">Budget Overview</CardTitle>
+            <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${totalBudget.toFixed(2)}</div>
-            <p className="text-xs text-muted-foreground">
-              Monthly budget allocation
-            </p>
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-muted-foreground">Budget:</span>
+                <span className="text-lg font-semibold">${totalBudget.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-muted-foreground">Spent:</span>
+                <span className="text-lg font-semibold">${totalSpent.toFixed(2)}</span>
+              </div>
+              <div className="pt-1 border-t">
+                <p className="text-xs text-muted-foreground">
+                  {budgetUsage.toFixed(1)}% of budget used
+                </p>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Spent</CardTitle>
+            <CardTitle className="text-sm font-medium">Min Payments</CardTitle>
+            <CreditCard className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${totalSpent.toFixed(2)}</div>
+            <div className="text-2xl font-bold">
+              ${financeSummary ? ((financeSummary.debt_totals.min_payments_cents) / 100).toFixed(2) : '0.00'}
+            </div>
             <p className="text-xs text-muted-foreground">
-              {budgetUsage.toFixed(1)}% of budget used
+              Monthly loan & card payments
             </p>
           </CardContent>
         </Card>
@@ -171,11 +193,18 @@ export function SimpleDashboard() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Remaining</CardTitle>
+            {totalRemaining < 0 ? (
+              <TrendingDown className="h-4 w-4 text-destructive" />
+            ) : (
+              <DollarSign className="h-4 w-4 text-muted-foreground" />
+            )}
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${totalRemaining.toFixed(2)}</div>
+            <div className={`text-2xl font-bold ${totalRemaining < 0 ? 'text-destructive' : ''}`}>
+              ${totalRemaining.toFixed(2)}
+            </div>
             <p className="text-xs text-muted-foreground">
-              Available to spend
+              {totalRemaining < 0 ? "Over budget!" : "Available to spend"}
             </p>
           </CardContent>
         </Card>
