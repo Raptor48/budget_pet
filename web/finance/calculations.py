@@ -164,13 +164,18 @@ def calculate_account_analytics(
     )
 
 
-def calculate_average_payment(payments: List[PaymentOut], months_back: int = 6) -> Optional[int]:
+def calculate_average_payment(payments: List[PaymentOut], months_back: int = 6, reference_date: Optional[date] = None) -> Optional[int]:
     """Calculate average payment amount over the last N months."""
     if not payments:
         return None
     
-    # Filter payments from last N months
-    cutoff_date = date.today().replace(day=1)
+    # Use reference_date if provided, otherwise use today's date
+    # This allows calculations for any month, not just current month
+    if reference_date is None:
+        reference_date = date.today()
+    
+    # Filter payments from last N months from reference date
+    cutoff_date = reference_date.replace(day=1)
     for _ in range(months_back):
         if cutoff_date.month == 1:
             cutoff_date = cutoff_date.replace(year=cutoff_date.year - 1, month=12)
@@ -200,6 +205,10 @@ def generate_interest_summary(
     loans_interest = 0
     cards_interest = 0
     
+    # Parse month once for all calculations
+    year, month_num = map(int, month.split('-'))
+    reference_date = date(year, month_num, 1)
+    
     # Process loans
     for loan in loans:
         if not loan.is_active:
@@ -207,7 +216,7 @@ def generate_interest_summary(
             
         # Get payments for this loan
         loan_payments = [p for p in payments if p.account_type == "loan" and p.account_id == loan.id]
-        avg_payment = calculate_average_payment(loan_payments) or loan.min_payment_cents
+        avg_payment = calculate_average_payment(loan_payments, reference_date=reference_date) or loan.min_payment_cents
         
         analytics = calculate_account_analytics(
             account_id=loan.id,
@@ -229,7 +238,7 @@ def generate_interest_summary(
             
         # Get payments for this card
         card_payments = [p for p in payments if p.account_type == "card" and p.account_id == card.id]
-        avg_payment = calculate_average_payment(card_payments) or card.min_payment_cents
+        avg_payment = calculate_average_payment(card_payments, reference_date=reference_date) or card.min_payment_cents
         
         analytics = calculate_account_analytics(
             account_id=card.id,

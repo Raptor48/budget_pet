@@ -41,21 +41,33 @@ async function apiRequest<T>(
 ): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
 
-  const response = await fetch(url, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
-    credentials: 'include', // Include cookies for cross-origin requests
-    ...options,
-  });
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+      credentials: 'include', // Include cookies for cross-origin requests
+      ...options,
+    });
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
-    throw new ApiError(response.status, errorData.detail || 'Unknown error');
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+      throw new ApiError(response.status, errorData.detail || 'Unknown error');
+    }
+
+    return response.json();
+  } catch (error) {
+    // Handle network errors or fetch failures
+    if (error instanceof ApiError) {
+      throw error; // Re-throw API errors as-is
+    }
+    
+    // Network error or fetch failed
+    const networkError = error instanceof Error ? error.message : 'Network error';
+    console.error('API request failed:', { url, error: networkError, apiBaseUrl: API_BASE_URL });
+    throw new ApiError(0, `Failed to fetch: ${networkError}. API URL: ${API_BASE_URL || 'NOT SET'}`);
   }
-
-  return response.json();
 }
 
 // Health check

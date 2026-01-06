@@ -47,7 +47,8 @@ export default function FinancesPage() {
       setCards(cardsData);
       setIncome(incomeData);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load data');
+      const errorMessage = err instanceof Error ? err.message : 'Failed to load data';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
