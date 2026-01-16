@@ -11,8 +11,8 @@ import { Label } from '@/components/ui/label';
 import { PiggyBank } from '@/types/api';
 import { financeApi } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
-import { format, differenceInMonths, isPast, isFuture } from 'date-fns';
-import { Edit, Trash2, Plus, CheckCircle2, Calendar, Target } from 'lucide-react';
+import { format, differenceInMonths, isPast } from 'date-fns';
+import { Trash2, Plus, CheckCircle2, Calendar, Target } from 'lucide-react';
 import * as Icons from 'lucide-react';
 import { PiggyBankForm } from './piggy-bank-form';
 
