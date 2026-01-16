@@ -54,9 +54,9 @@ async function apiRequest<T>(
     ? localStorage.getItem('auth_token') 
     : null;
 
-  const headers: HeadersInit = {
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...options.headers,
+    ...(options.headers as Record<string, string> || {}),
   };
 
   // Add Authorization header if token exists (for Safari with cross-site tracking)
