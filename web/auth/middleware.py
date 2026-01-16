@@ -30,13 +30,19 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if request.method == "OPTIONS":
             return await call_next(request)
         
-        # Check session
+        # Check session from cookie OR Authorization header (Safari compatibility)
         session_token = request.cookies.get("session_token")
+        
+        # Fallback to Authorization header for Safari with cross-site tracking enabled
+        if not session_token:
+            auth_header = request.headers.get("Authorization")
+            if auth_header and auth_header.startswith("Bearer "):
+                session_token = auth_header.replace("Bearer ", "").strip()
         
         if not session_token:
             return JSONResponse(
                 status_code=401,
-                content={"detail": "No session token found in cookies"}
+                content={"detail": "No session token found in cookies or Authorization header"}
             )
         
         if session_token not in active_sessions:

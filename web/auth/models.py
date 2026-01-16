@@ -16,6 +16,7 @@ class LoginResponse(BaseModel):
     success: bool
     message: str
     user: dict | None = None
+    token: str | None = None  # Token for Authorization header (Safari compatibility)
 
 
 class User(BaseModel):

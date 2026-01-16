@@ -64,7 +64,8 @@ async def login(login_data: LoginRequest, request: Request, response: Response):
     return LoginResponse(
         success=True,
         message="Login successful",
-        user=user.dict()
+        user=user.dict(),
+        token=session_token  # Return token for Authorization header (Safari compatibility)
     )
 
 
@@ -72,7 +73,12 @@ async def login(login_data: LoginRequest, request: Request, response: Response):
 async def logout(request: Request, response: Response):
     """Logout endpoint - removes session."""
     
+    # Check session from cookie OR Authorization header
     session_token = request.cookies.get("session_token")
+    if not session_token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            session_token = auth_header.replace("Bearer ", "").strip()
     
     if session_token and session_token in active_sessions:
         del active_sessions[session_token]
@@ -87,7 +93,12 @@ async def logout(request: Request, response: Response):
 async def get_current_user(request: Request):
     """Get current user info."""
     
+    # Check session from cookie OR Authorization header
     session_token = request.cookies.get("session_token")
+    if not session_token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            session_token = auth_header.replace("Bearer ", "").strip()
     
     if not session_token or session_token not in active_sessions:
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -100,7 +111,13 @@ async def get_current_user(request: Request):
 async def auth_status(request: Request):
     """Check authentication status."""
     
+    # Check session from cookie OR Authorization header
     session_token = request.cookies.get("session_token")
+    if not session_token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            session_token = auth_header.replace("Bearer ", "").strip()
+    
     authenticated = session_token is not None and session_token in active_sessions
     
     return {"authenticated": authenticated}
