@@ -100,6 +100,10 @@ export function SimpleDashboard() {
   const totalRemaining = Object.values(report?.report || {}).reduce(
     (sum, item) => sum + item.remaining, 0
   );
+  
+  // Subtract recurring expenses from remaining budget
+  const recurringExpensesTotal = financeSummary?.debt_totals.recurring_expenses_total_cents || 0;
+  const totalRemainingAfterRecurring = totalRemaining - (recurringExpensesTotal / 100);
 
   const budgetUsage = totalBudget > 0 ? (totalSpent / totalBudget) * 100 : 0;
 
@@ -177,34 +181,43 @@ export function SimpleDashboard() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Min Payments</CardTitle>
+            <CardTitle className="text-sm font-medium">Payments & Subscriptions</CardTitle>
             <CreditCard className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              ${financeSummary ? ((financeSummary.debt_totals.min_payments_cents) / 100).toFixed(2) : '0.00'}
+            <div className="space-y-2">
+              <div className="text-2xl font-bold">
+                ${financeSummary ? (((financeSummary.debt_totals.min_payments_cents + financeSummary.debt_totals.recurring_expenses_total_cents) / 100).toFixed(2)) : '0.00'}
+              </div>
+              <div className="text-xs text-muted-foreground space-y-1">
+                <div className="flex justify-between">
+                  <span>Min Payments:</span>
+                  <span>${financeSummary ? ((financeSummary.debt_totals.min_payments_cents) / 100).toFixed(2) : '0.00'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Recurring Expenses:</span>
+                  <span>${financeSummary ? ((financeSummary.debt_totals.recurring_expenses_total_cents) / 100).toFixed(2) : '0.00'}</span>
+                </div>
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Monthly loan & card payments
-            </p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Remaining</CardTitle>
-            {totalRemaining < 0 ? (
+            {totalRemainingAfterRecurring < 0 ? (
               <TrendingDown className="h-4 w-4 text-destructive" />
             ) : (
               <DollarSign className="h-4 w-4 text-muted-foreground" />
             )}
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-bold ${totalRemaining < 0 ? 'text-destructive' : ''}`}>
-              ${totalRemaining.toFixed(2)}
+            <div className={`text-2xl font-bold ${totalRemainingAfterRecurring < 0 ? 'text-destructive' : ''}`}>
+              ${totalRemainingAfterRecurring.toFixed(2)}
             </div>
             <p className="text-xs text-muted-foreground">
-              {totalRemaining < 0 ? "Over budget!" : "Available to spend"}
+              {totalRemainingAfterRecurring < 0 ? "Over budget!" : "Available to spend"}
             </p>
           </CardContent>
         </Card>

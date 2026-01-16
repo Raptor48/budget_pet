@@ -174,6 +174,34 @@ export interface IncomeUpdate {
   note?: string;
 }
 
+// Recurring Expenses Types
+export interface RecurringExpense {
+  id: number;
+  name: string;
+  category_name: string;
+  monthly_amount_cents: number;
+  due_day?: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RecurringExpenseCreate {
+  name: string;
+  category_name: string;
+  monthly_amount_cents: number;
+  due_day?: number;
+  is_active?: boolean;
+}
+
+export interface RecurringExpenseUpdate {
+  name?: string;
+  category_name?: string;
+  monthly_amount_cents?: number;
+  due_day?: number;
+  is_active?: boolean;
+}
+
 export interface DebtTotals {
   loans_balance_cents: number;
   cards_balance_cents: number;
@@ -181,6 +209,7 @@ export interface DebtTotals {
   loans_min_payment_cents: number;
   cards_min_payment_cents: number;
   min_payments_cents: number;
+  recurring_expenses_total_cents: number;
 }
 
 export interface LoanEstimatedClose {
@@ -277,4 +306,41 @@ export interface InterestSummary {
   
   // Account analytics
   account_analytics: AccountAnalytics[];
+}
+
+// Piggy Banks Types
+export interface PiggyBank {
+  id: number;
+  name: string;
+  target_amount_cents: number;
+  current_amount_cents: number;
+  color: string; // hex color
+  icon: string | null;
+  description: string | null;
+  deadline: string | null; // ISO date
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PiggyBankCreate {
+  name: string;
+  target_amount_cents: number;
+  current_amount_cents?: number;
+  color?: string;
+  icon?: string | null;
+  description?: string | null;
+  deadline?: string | null; // ISO date
+  is_active?: boolean;
+}
+
+export interface PiggyBankUpdate {
+  name?: string;
+  target_amount_cents?: number;
+  current_amount_cents?: number;
+  color?: string;
+  icon?: string | null;
+  description?: string | null;
+  deadline?: string | null; // ISO date
+  is_active?: boolean;
 }
