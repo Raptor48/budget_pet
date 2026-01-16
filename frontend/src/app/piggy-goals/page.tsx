@@ -3,13 +3,10 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AppLayout } from '@/components/layout/app-layout';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
 import { financeApi } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
-import { PiggyBank } from '@/types/api';
 import { PiggyBankCard } from './_components/piggy-bank-card';
 import { PiggyBankForm } from './_components/piggy-bank-form';
 import { Target, TrendingUp, CheckCircle2, Filter } from 'lucide-react';

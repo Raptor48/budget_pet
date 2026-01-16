@@ -10,7 +10,7 @@ import { RecentExpenses } from "@/components/dashboard/recent-expenses";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { format } from "date-fns";
 import { useState } from "react";
-import { DollarSign, TrendingUp, TrendingDown, CreditCard } from "lucide-react";
+import { DollarSign, TrendingDown, CreditCard } from "lucide-react";
 
 export function SimpleDashboard() {
   const currentDate = new Date();
