@@ -213,7 +213,7 @@ export function PiggyBankForm({ piggy, onSuccess, trigger }: PiggyBankFormProps)
             <div className="grid grid-cols-4 gap-2 max-h-48 overflow-y-auto">
               {ICON_OPTIONS.map((icon) => {
                 // Get icon component from lucide-react
-                const IconComponent = (LucideIcons as any)[icon.value] || Target;
+                const IconComponent = (LucideIcons as Record<string, React.ComponentType<{ className?: string }>>)[icon.value] || Target;
                 return (
                   <button
                     key={icon.value}
