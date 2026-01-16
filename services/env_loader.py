@@ -15,12 +15,8 @@ def load_env_multi():
                 load_dotenv(exe_dir / ".env")
         except Exception:
             pass
-        # 3) Папка рядом с локальной БД (AppData / Application Support)
-        try:
-            from bd import DB_FILE
-            load_dotenv(Path(DB_FILE).resolve().parent / ".env")
-        except Exception:
-            pass
+        # 3) Папка рядом с локальной БД (removed - using PostgreSQL now)
+        # This was for SQLite database location, no longer needed
         # 4) Поиск «вверх»
         try:
             env_path = find_dotenv(usecwd=True)
