@@ -49,13 +49,25 @@ async function apiRequest<T>(
 ): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
 
+  // Get token from localStorage for Safari compatibility (when cross-site tracking is enabled)
+  const token = typeof window !== 'undefined' 
+    ? localStorage.getItem('auth_token') 
+    : null;
+
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+    ...options.headers,
+  };
+
+  // Add Authorization header if token exists (for Safari with cross-site tracking)
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   try {
     const response = await fetch(url, {
       method: options.method || 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
+      headers,
       credentials: 'include', // Include cookies for cross-origin requests
       mode: 'cors', // Explicitly set CORS mode for Safari compatibility
       ...options,

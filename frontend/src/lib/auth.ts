@@ -18,6 +18,7 @@ export interface AuthResponse {
   success: boolean;
   message: string;
   user?: User;
+  token?: string;  // Token for Authorization header (Safari compatibility)
 }
 
 export interface AuthStatus {
@@ -43,17 +44,38 @@ export async function login(credentials: LoginData): Promise<AuthResponse> {
     throw new Error(error.detail || 'Login failed');
   }
 
-  return response.json();
+  const data = await response.json();
+  
+  // Save token to localStorage for Safari compatibility (when cross-site tracking is enabled)
+  if (data.token && typeof window !== 'undefined') {
+    localStorage.setItem('auth_token', data.token);
+  }
+
+  return data;
 }
 
 /**
  * Logout current user
  */
 export async function logout(): Promise<void> {
+  // Get token for Authorization header
+  const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+  
+  const headers: HeadersInit = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  
   const response = await fetch(`${API_BASE_URL}/api/auth/logout`, {
     method: 'POST',
+    headers,
     credentials: 'include',
   });
+
+  // Remove token from localStorage
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem('auth_token');
+  }
 
   if (!response.ok) {
     console.warn('Logout request failed, but continuing...');
@@ -64,7 +86,16 @@ export async function logout(): Promise<void> {
  * Get current user info
  */
 export async function getCurrentUser(): Promise<User> {
+  // Get token for Authorization header
+  const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+  
+  const headers: HeadersInit = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  
   const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
+    headers,
     credentials: 'include',
   });
 
@@ -81,7 +112,16 @@ export async function getCurrentUser(): Promise<User> {
  */
 export async function checkAuthStatus(): Promise<AuthStatus> {
   try {
+    // Get token for Authorization header
+    const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+    
+    const headers: HeadersInit = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    
     const response = await fetch(`${API_BASE_URL}/api/auth/status`, {
+      headers,
       credentials: 'include',
     });
 
