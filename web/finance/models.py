@@ -165,6 +165,70 @@ class IncomeOut(IncomeBase):
         from_attributes = True
 
 
+class RecurringExpenseBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    category_name: str = Field(..., min_length=1, max_length=255)
+    monthly_amount_cents: conint(ge=0) = Field(default=0)
+    due_day: Optional[conint(ge=1, le=31)] = None
+    is_active: bool = Field(default=True)
+
+
+class RecurringExpenseCreate(RecurringExpenseBase):
+    pass
+
+
+class RecurringExpenseUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    category_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    monthly_amount_cents: Optional[conint(ge=0)] = None
+    due_day: Optional[conint(ge=1, le=31)] = None
+    is_active: Optional[bool] = None
+
+
+class RecurringExpenseOut(RecurringExpenseBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PiggyBankBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    target_amount_cents: conint(ge=0) = Field(default=0)
+    current_amount_cents: conint(ge=0) = Field(default=0)
+    color: str = Field(default="#3b82f6", max_length=7)  # Hex color, default blue
+    icon: Optional[str] = Field(None, max_length=50)  # Icon name from lucide-react
+    description: Optional[str] = Field(None, max_length=500)
+    deadline: Optional[date] = None
+    is_active: bool = Field(default=True)
+
+
+class PiggyBankCreate(PiggyBankBase):
+    pass
+
+
+class PiggyBankUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    target_amount_cents: Optional[conint(ge=0)] = None
+    current_amount_cents: Optional[conint(ge=0)] = None
+    color: Optional[str] = Field(None, max_length=7)
+    icon: Optional[str] = Field(None, max_length=50)
+    description: Optional[str] = Field(None, max_length=500)
+    deadline: Optional[date] = None
+    is_active: Optional[bool] = None
+
+
+class PiggyBankOut(PiggyBankBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class LoanEstimatedClose(BaseModel):
     loan_id: int
     name: str
@@ -177,6 +241,7 @@ class DebtTotals(BaseModel):
     cards_balance_cents: int
     combined_balance_cents: int
     min_payments_cents: int
+    recurring_expenses_total_cents: int = 0
 
 
 class SummaryOut(BaseModel):

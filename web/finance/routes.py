@@ -10,6 +10,8 @@ from .models import (
     CreditCardCreate, CreditCardUpdate, CreditCardOut,
     PaymentCreate, PaymentOut,
     IncomeCreate, IncomeUpdate, IncomeOut,
+    RecurringExpenseCreate, RecurringExpenseUpdate, RecurringExpenseOut,
+    PiggyBankCreate, PiggyBankUpdate, PiggyBankOut,
     SummaryOut, AccountsOut, InterestSummary, AccountAnalytics, PaymentAnalytics
 )
 from .repo import get_finance_repo
@@ -173,6 +175,106 @@ async def delete_income(income_id: int):
     if not success:
         raise HTTPException(status_code=404, detail="Income entry not found")
     return {"message": "Income entry deleted successfully"}
+
+
+# Recurring Expenses endpoints
+@router.get("/recurring-expenses", response_model=List[RecurringExpenseOut])
+async def get_recurring_expenses(active_only: bool = Query(True, description="Filter by active status")):
+    """Get all recurring expenses."""
+    repo = get_finance_repo()
+    return await repo.get_recurring_expenses(active_only=active_only)
+
+
+@router.post("/recurring-expenses", response_model=RecurringExpenseOut)
+async def create_recurring_expense(expense: RecurringExpenseCreate):
+    """Create a new recurring expense."""
+    repo = get_finance_repo()
+    return await repo.create_recurring_expense(expense)
+
+
+@router.get("/recurring-expenses/{expense_id}", response_model=RecurringExpenseOut)
+async def get_recurring_expense(expense_id: int):
+    """Get a recurring expense by ID."""
+    repo = get_finance_repo()
+    expense = await repo.get_recurring_expense_by_id(expense_id)
+    if not expense:
+        raise HTTPException(status_code=404, detail="Recurring expense not found")
+    return expense
+
+
+@router.patch("/recurring-expenses/{expense_id}", response_model=RecurringExpenseOut)
+async def update_recurring_expense(expense_id: int, expense: RecurringExpenseUpdate):
+    """Update a recurring expense."""
+    repo = get_finance_repo()
+    updated_expense = await repo.update_recurring_expense(expense_id, expense)
+    if not updated_expense:
+        raise HTTPException(status_code=404, detail="Recurring expense not found")
+    return updated_expense
+
+
+@router.delete("/recurring-expenses/{expense_id}")
+async def delete_recurring_expense(expense_id: int):
+    """Delete a recurring expense."""
+    repo = get_finance_repo()
+    success = await repo.delete_recurring_expense(expense_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Recurring expense not found")
+    return {"message": "Recurring expense deleted successfully"}
+
+
+# Piggy Banks endpoints
+@router.get("/piggy-banks", response_model=List[PiggyBankOut])
+async def get_piggy_banks(active_only: bool = Query(True, description="Filter by active status")):
+    """Get all piggy banks."""
+    repo = get_finance_repo()
+    return await repo.get_piggy_banks(active_only=active_only)
+
+
+@router.post("/piggy-banks", response_model=PiggyBankOut)
+async def create_piggy_bank(piggy: PiggyBankCreate):
+    """Create a new piggy bank."""
+    repo = get_finance_repo()
+    return await repo.create_piggy_bank(piggy)
+
+
+@router.get("/piggy-banks/{piggy_id}", response_model=PiggyBankOut)
+async def get_piggy_bank(piggy_id: int):
+    """Get a piggy bank by ID."""
+    repo = get_finance_repo()
+    piggy = await repo.get_piggy_bank_by_id(piggy_id)
+    if not piggy:
+        raise HTTPException(status_code=404, detail="Piggy bank not found")
+    return piggy
+
+
+@router.patch("/piggy-banks/{piggy_id}", response_model=PiggyBankOut)
+async def update_piggy_bank(piggy_id: int, piggy: PiggyBankUpdate):
+    """Update a piggy bank."""
+    repo = get_finance_repo()
+    updated_piggy = await repo.update_piggy_bank(piggy_id, piggy)
+    if not updated_piggy:
+        raise HTTPException(status_code=404, detail="Piggy bank not found")
+    return updated_piggy
+
+
+@router.delete("/piggy-banks/{piggy_id}")
+async def delete_piggy_bank(piggy_id: int):
+    """Delete a piggy bank."""
+    repo = get_finance_repo()
+    success = await repo.delete_piggy_bank(piggy_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Piggy bank not found")
+    return {"message": "Piggy bank deleted successfully"}
+
+
+@router.post("/piggy-banks/{piggy_id}/add-amount", response_model=PiggyBankOut)
+async def add_to_piggy_bank(piggy_id: int, amount_cents: int = Query(..., ge=1, description="Amount to add in cents")):
+    """Add amount to piggy bank's current_amount_cents."""
+    repo = get_finance_repo()
+    updated_piggy = await repo.add_to_piggy_bank(piggy_id, amount_cents)
+    if not updated_piggy:
+        raise HTTPException(status_code=404, detail="Piggy bank not found")
+    return updated_piggy
 
 
 # Summary endpoint

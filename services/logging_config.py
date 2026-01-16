@@ -1,8 +1,9 @@
 import logging
 from pathlib import Path
-from bd import DB_FILE
+import os
 
-LOG_FILE = Path(DB_FILE).with_name("app.log")
+# Use project root or current directory for log file
+LOG_FILE = Path(os.getcwd()) / "app.log"
 
 def get_logger(name: str) -> logging.Logger:
     """Get configured logger for the application."""

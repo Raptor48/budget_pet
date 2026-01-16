@@ -11,12 +11,13 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { AppLayout } from '@/components/layout/app-layout';
 import { financeApi } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
-import { FinanceSummary, Loan, CreditCard, Income, PaymentCreate } from '@/types/api';
+import { FinanceSummary, Loan, CreditCard, Income, PaymentCreate, RecurringExpense } from '@/types/api';
 import { format } from 'date-fns';
-import { Plus, CreditCard as CreditCardIcon, Banknote, DollarSign, TrendingUp, Trash2 } from 'lucide-react';
+import { Plus, CreditCard as CreditCardIcon, Banknote, DollarSign, TrendingUp, Trash2, Repeat } from 'lucide-react';
 import { LoanForm } from './_components/loan-form';
 import { CardForm } from './_components/card-form';
 import { IncomeForm } from './_components/income-form';
+import { RecurringExpenseForm } from './_components/recurring-expense-form';
 import { MonthPicker } from './_components/month-picker';
 import { InterestAnalytics } from './_components/interest-analytics';
 
@@ -24,6 +25,7 @@ export default function FinancesPage() {
   const [summary, setSummary] = useState<FinanceSummary | null>(null);
   const [loans, setLoans] = useState<Loan[]>([]);
   const [cards, setCards] = useState<CreditCard[]>([]);
+  const [recurringExpenses, setRecurringExpenses] = useState<RecurringExpense[]>([]);
   const [income, setIncome] = useState<Income[]>([]);
   const [selectedMonth, setSelectedMonth] = useState<string>(format(new Date(), 'yyyy-MM'));
   const [loading, setLoading] = useState(true);
@@ -35,16 +37,18 @@ export default function FinancesPage() {
       setLoading(true);
       setError(null);
       
-      const [summaryData, loansData, cardsData, incomeData] = await Promise.all([
+      const [summaryData, loansData, cardsData, recurringExpensesData, incomeData] = await Promise.all([
         financeApi.getSummary(selectedMonth),
         financeApi.getLoans(true),
         financeApi.getCards(true),
+        financeApi.getRecurringExpenses(true),
         financeApi.getIncome(selectedMonth)
       ]);
       
       setSummary(summaryData);
       setLoans(loansData);
       setCards(cardsData);
+      setRecurringExpenses(recurringExpensesData);
       setIncome(incomeData);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to load data';
@@ -110,6 +114,17 @@ export default function FinancesPage() {
         await loadData();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to delete income entry');
+      }
+    }
+  };
+
+  const handleDeleteRecurringExpense = async (id: number) => {
+    if (confirm('Are you sure you want to delete this recurring expense?')) {
+      try {
+        await financeApi.deleteRecurringExpense(id);
+        await loadData();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to delete recurring expense');
       }
     }
   };
@@ -196,17 +211,22 @@ export default function FinancesPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {formatCurrency(summary.income_total_cents - summary.debt_totals.min_payments_cents)}
+                {formatCurrency(summary.income_total_cents - summary.debt_totals.min_payments_cents - summary.debt_totals.recurring_expenses_total_cents)}
+              </div>
+              <div className="text-xs text-muted-foreground mt-1">
+                After payments & subscriptions
               </div>
             </CardContent>
           </Card>
         </div>
       )}
 
-      {/* Loans and Credit Cards */}
+      {/* Loans, Recurring Expenses, and Credit Cards */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Loans */}
-        <Card>
+        {/* Left column: Loans and Recurring Expenses */}
+        <div className="space-y-6">
+          {/* Loans */}
+          <Card>
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -262,7 +282,57 @@ export default function FinancesPage() {
           </CardContent>
         </Card>
 
-        {/* Credit Cards */}
+        {/* Recurring Expenses */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Repeat className="h-5 w-5" />
+                Recurring Expenses
+              </div>
+              <RecurringExpenseForm onSuccess={loadData} />
+            </CardTitle>
+            <CardDescription>Monthly subscriptions and recurring payments</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Monthly</TableHead>
+                  <TableHead>Due Day</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {recurringExpenses.map((expense) => (
+                  <TableRow key={expense.id}>
+                    <TableCell className="font-medium">{expense.name}</TableCell>
+                    <TableCell>{expense.category_name}</TableCell>
+                    <TableCell>{formatCurrency(expense.monthly_amount_cents)}</TableCell>
+                    <TableCell>{expense.due_day ? `${expense.due_day}` : '-'}</TableCell>
+                    <TableCell>
+                      <div className="flex gap-2">
+                        <RecurringExpenseForm expense={expense} onSuccess={loadData} />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleDeleteRecurringExpense(expense.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+        </div>
+
+        {/* Right column: Credit Cards */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
