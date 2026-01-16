@@ -13,6 +13,8 @@ from .models import (
     CreditCardCreate, CreditCardUpdate, CreditCardOut,
     PaymentCreate, PaymentOut,
     IncomeCreate, IncomeUpdate, IncomeOut,
+    RecurringExpenseCreate, RecurringExpenseUpdate, RecurringExpenseOut,
+    PiggyBankCreate, PiggyBankUpdate, PiggyBankOut,
     SummaryOut, DebtTotals, LoanEstimatedClose, AccountsOut, AccountSummary,
     InterestSummary, AccountAnalytics, MonthlyInterest, PaymentAnalytics
 )
@@ -116,6 +118,52 @@ class FinanceRepository:
             """,
             """
             CREATE INDEX IF NOT EXISTS idx_finance_income_person ON finance_income(person)
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS finance_recurring_expenses (
+              id SERIAL PRIMARY KEY,
+              name TEXT NOT NULL,
+              category_name TEXT NOT NULL,
+              monthly_amount_cents BIGINT NOT NULL DEFAULT 0,
+              due_day SMALLINT CHECK (due_day >= 1 AND due_day <= 31),
+              is_active BOOLEAN NOT NULL DEFAULT TRUE,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_finance_recurring_expenses_active ON finance_recurring_expenses(is_active)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_finance_recurring_expenses_category ON finance_recurring_expenses(category_name)
+            """,
+            """
+            DO $$
+            BEGIN
+                -- Add due_day column to recurring expenses if it doesn't exist
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='finance_recurring_expenses' AND column_name='due_day') THEN
+                    ALTER TABLE finance_recurring_expenses ADD COLUMN due_day SMALLINT CHECK (due_day >= 1 AND due_day <= 31);
+                END IF;
+            END
+            $$
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS finance_piggy_banks (
+              id SERIAL PRIMARY KEY,
+              name TEXT NOT NULL,
+              target_amount_cents BIGINT NOT NULL DEFAULT 0,
+              current_amount_cents BIGINT NOT NULL DEFAULT 0,
+              color TEXT NOT NULL DEFAULT '#3b82f6',
+              icon TEXT,
+              description TEXT,
+              deadline DATE,
+              is_active BOOLEAN NOT NULL DEFAULT TRUE,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_finance_piggy_banks_active ON finance_piggy_banks(is_active)
             """,
             """
             CREATE TABLE IF NOT EXISTS peers (
@@ -632,6 +680,228 @@ class FinanceRepository:
             result = await conn.execute(query, income_id)
             return result == "DELETE 1"
 
+    # Recurring Expenses CRUD
+    async def get_recurring_expenses(self, active_only: bool = True) -> List[RecurringExpenseOut]:
+        """Get all recurring expenses, optionally filtered by active status."""
+        pool = await self.get_pool()
+        query = """
+            SELECT id, name, category_name, monthly_amount_cents, due_day, is_active, created_at, updated_at
+            FROM finance_recurring_expenses
+        """
+        if active_only:
+            query += " WHERE is_active = TRUE"
+        query += " ORDER BY created_at DESC"
+
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(query)
+            return [RecurringExpenseOut(**dict(row)) for row in rows]
+
+    async def create_recurring_expense(self, expense: RecurringExpenseCreate) -> RecurringExpenseOut:
+        """Create a new recurring expense."""
+        pool = await self.get_pool()
+        query = """
+            INSERT INTO finance_recurring_expenses (name, category_name, monthly_amount_cents, due_day, is_active)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id, name, category_name, monthly_amount_cents, due_day, is_active, created_at, updated_at
+        """
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                query,
+                expense.name, expense.category_name, expense.monthly_amount_cents, expense.due_day, expense.is_active
+            )
+            return RecurringExpenseOut(**dict(row))
+
+    async def update_recurring_expense(self, expense_id: int, expense: RecurringExpenseUpdate) -> Optional[RecurringExpenseOut]:
+        """Update a recurring expense."""
+        pool = await self.get_pool()
+        
+        # Build dynamic update query
+        updates = []
+        params = []
+        param_count = 1
+
+        if expense.name is not None:
+            updates.append(f"name = ${param_count}")
+            params.append(expense.name)
+            param_count += 1
+        if expense.category_name is not None:
+            updates.append(f"category_name = ${param_count}")
+            params.append(expense.category_name)
+            param_count += 1
+        if expense.monthly_amount_cents is not None:
+            updates.append(f"monthly_amount_cents = ${param_count}")
+            params.append(expense.monthly_amount_cents)
+            param_count += 1
+        if expense.due_day is not None:
+            updates.append(f"due_day = ${param_count}")
+            params.append(expense.due_day)
+            param_count += 1
+        if expense.is_active is not None:
+            updates.append(f"is_active = ${param_count}")
+            params.append(expense.is_active)
+            param_count += 1
+
+        if not updates:
+            return None
+
+        updates.append(f"updated_at = NOW()")
+        params.append(expense_id)
+
+        query = f"""
+            UPDATE finance_recurring_expenses 
+            SET {', '.join(updates)}
+            WHERE id = ${param_count}
+            RETURNING id, name, category_name, monthly_amount_cents, due_day, is_active, created_at, updated_at
+        """
+
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(query, *params)
+            return RecurringExpenseOut(**dict(row)) if row else None
+
+    async def get_recurring_expense_by_id(self, expense_id: int) -> Optional[RecurringExpenseOut]:
+        """Get recurring expense by ID."""
+        pool = await self.get_pool()
+        query = """
+            SELECT id, name, category_name, monthly_amount_cents, due_day, is_active, created_at, updated_at
+            FROM finance_recurring_expenses
+            WHERE id = $1
+        """
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(query, expense_id)
+            return RecurringExpenseOut(**dict(row)) if row else None
+
+    async def delete_recurring_expense(self, expense_id: int) -> bool:
+        """Delete a recurring expense."""
+        pool = await self.get_pool()
+        query = "DELETE FROM finance_recurring_expenses WHERE id = $1"
+        async with pool.acquire() as conn:
+            result = await conn.execute(query, expense_id)
+            return result == "DELETE 1"
+
+    # Piggy Banks CRUD
+    async def get_piggy_banks(self, active_only: bool = True) -> List[PiggyBankOut]:
+        """Get all piggy banks, optionally filtered by active status."""
+        pool = await self.get_pool()
+        query = """
+            SELECT id, name, target_amount_cents, current_amount_cents, color, icon, description, deadline, is_active, created_at, updated_at
+            FROM finance_piggy_banks
+        """
+        if active_only:
+            query += " WHERE is_active = TRUE"
+        query += " ORDER BY created_at DESC"
+
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(query)
+            return [PiggyBankOut(**dict(row)) for row in rows]
+
+    async def create_piggy_bank(self, piggy: PiggyBankCreate) -> PiggyBankOut:
+        """Create a new piggy bank."""
+        pool = await self.get_pool()
+        query = """
+            INSERT INTO finance_piggy_banks (name, target_amount_cents, current_amount_cents, color, icon, description, deadline, is_active)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING id, name, target_amount_cents, current_amount_cents, color, icon, description, deadline, is_active, created_at, updated_at
+        """
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                query,
+                piggy.name, piggy.target_amount_cents, piggy.current_amount_cents, piggy.color, piggy.icon,
+                piggy.description, piggy.deadline, piggy.is_active
+            )
+            return PiggyBankOut(**dict(row))
+
+    async def update_piggy_bank(self, piggy_id: int, piggy: PiggyBankUpdate) -> Optional[PiggyBankOut]:
+        """Update a piggy bank."""
+        pool = await self.get_pool()
+        
+        # Build dynamic update query
+        updates = []
+        params = []
+        param_count = 1
+
+        if piggy.name is not None:
+            updates.append(f"name = ${param_count}")
+            params.append(piggy.name)
+            param_count += 1
+        if piggy.target_amount_cents is not None:
+            updates.append(f"target_amount_cents = ${param_count}")
+            params.append(piggy.target_amount_cents)
+            param_count += 1
+        if piggy.current_amount_cents is not None:
+            updates.append(f"current_amount_cents = ${param_count}")
+            params.append(piggy.current_amount_cents)
+            param_count += 1
+        if piggy.color is not None:
+            updates.append(f"color = ${param_count}")
+            params.append(piggy.color)
+            param_count += 1
+        if piggy.icon is not None:
+            updates.append(f"icon = ${param_count}")
+            params.append(piggy.icon)
+            param_count += 1
+        if piggy.description is not None:
+            updates.append(f"description = ${param_count}")
+            params.append(piggy.description)
+            param_count += 1
+        if piggy.deadline is not None:
+            updates.append(f"deadline = ${param_count}")
+            params.append(piggy.deadline)
+            param_count += 1
+        if piggy.is_active is not None:
+            updates.append(f"is_active = ${param_count}")
+            params.append(piggy.is_active)
+            param_count += 1
+
+        if not updates:
+            return None
+
+        updates.append(f"updated_at = NOW()")
+        params.append(piggy_id)
+
+        query = f"""
+            UPDATE finance_piggy_banks 
+            SET {', '.join(updates)}
+            WHERE id = ${param_count}
+            RETURNING id, name, target_amount_cents, current_amount_cents, color, icon, description, deadline, is_active, created_at, updated_at
+        """
+
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(query, *params)
+            return PiggyBankOut(**dict(row)) if row else None
+
+    async def get_piggy_bank_by_id(self, piggy_id: int) -> Optional[PiggyBankOut]:
+        """Get piggy bank by ID."""
+        pool = await self.get_pool()
+        query = """
+            SELECT id, name, target_amount_cents, current_amount_cents, color, icon, description, deadline, is_active, created_at, updated_at
+            FROM finance_piggy_banks
+            WHERE id = $1
+        """
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(query, piggy_id)
+            return PiggyBankOut(**dict(row)) if row else None
+
+    async def delete_piggy_bank(self, piggy_id: int) -> bool:
+        """Delete a piggy bank."""
+        pool = await self.get_pool()
+        query = "DELETE FROM finance_piggy_banks WHERE id = $1"
+        async with pool.acquire() as conn:
+            result = await conn.execute(query, piggy_id)
+            return result == "DELETE 1"
+
+    async def add_to_piggy_bank(self, piggy_id: int, amount_cents: int) -> Optional[PiggyBankOut]:
+        """Add amount to piggy bank's current_amount_cents."""
+        pool = await self.get_pool()
+        query = """
+            UPDATE finance_piggy_banks 
+            SET current_amount_cents = current_amount_cents + $1, updated_at = NOW()
+            WHERE id = $2
+            RETURNING id, name, target_amount_cents, current_amount_cents, color, icon, description, deadline, is_active, created_at, updated_at
+        """
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(query, amount_cents, piggy_id)
+            return PiggyBankOut(**dict(row)) if row else None
+
     # Summary calculations
     async def get_summary(self, month: str) -> SummaryOut:
         """Get financial summary for a month."""
@@ -684,6 +954,14 @@ class FinanceRepository:
             cards_balance = cards_row["cards_balance"] if cards_row else 0
             cards_min_payment = cards_row["cards_min_payment"] if cards_row else 0
 
+            # Recurring expenses total
+            recurring_query = """
+                SELECT COALESCE(SUM(CASE WHEN is_active THEN monthly_amount_cents ELSE 0 END), 0) as recurring_total
+                FROM finance_recurring_expenses
+            """
+            recurring_row = await conn.fetchrow(recurring_query)
+            recurring_total = recurring_row["recurring_total"] if recurring_row else 0
+
             # Loans with estimated close dates
             loans_close_query = """
                 SELECT id, name, remaining_months
@@ -712,6 +990,7 @@ class FinanceRepository:
 
             debt_totals = DebtTotals(
                 loans_balance_cents=loans_balance,
+                recurring_expenses_total_cents=recurring_total,
                 cards_balance_cents=cards_balance,
                 combined_balance_cents=loans_balance + cards_balance,
                 loans_min_payment_cents=loans_min_payment,

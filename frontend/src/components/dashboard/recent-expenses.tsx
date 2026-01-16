@@ -40,8 +40,9 @@ export function RecentExpenses({ month }: RecentExpensesProps) {
     );
   }
 
-  // Показываем последние 10 расходов
-  const recentExpenses = expenses.slice(-10).reverse();
+  // API уже возвращает расходы отсортированные по date DESC, id DESC (от новых к старым)
+  // Берем первые 10 самых новых расходов
+  const recentExpenses = expenses.slice(0, 10);
 
   return (
     <div className="space-y-3">

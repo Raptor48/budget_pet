@@ -39,6 +39,7 @@ export function CategoriesPage() {
       limitsApi.create(category),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["limits"] });
+      queryClient.invalidateQueries({ queryKey: ["report"] });
       setNewCategory("");
       setNewLimit("");
       setIsAddDialogOpen(false);
@@ -51,6 +52,7 @@ export function CategoriesPage() {
       limitsApi.update(category, { default_limit: limit }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["limits"] });
+      queryClient.invalidateQueries({ queryKey: ["report"] });
       setEditingLimit("");
       setIsEditDialogOpen(false);
     },
@@ -62,6 +64,7 @@ export function CategoriesPage() {
       limitsApi.update(oldName, { category: newName }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["limits"] });
+      queryClient.invalidateQueries({ queryKey: ["report"] });
       setEditingCategoryName("");
       setIsEditDialogOpen(false);
     },
@@ -72,6 +75,7 @@ export function CategoriesPage() {
     mutationFn: (category: string) => limitsApi.delete(category),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["limits"] });
+      queryClient.invalidateQueries({ queryKey: ["report"] });
     },
   });
 
