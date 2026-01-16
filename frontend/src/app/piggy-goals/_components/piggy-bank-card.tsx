@@ -43,10 +43,11 @@ export function PiggyBankCard({ piggy, onUpdate }: PiggyBankCardProps) {
   }
 
   // Get icon component
-  const getIconComponent = () => {
+  const getIconComponent = (): React.ComponentType<{ className?: string; style?: React.CSSProperties }> => {
     if (!piggy.icon) return Icons.PiggyBank;
     const IconName = piggy.icon as keyof typeof Icons;
-    return Icons[IconName] || Icons.PiggyBank;
+    const Icon = Icons[IconName] as React.ComponentType<{ className?: string; style?: React.CSSProperties }> | undefined;
+    return Icon || Icons.PiggyBank;
   };
   const IconComponent = getIconComponent();
 
