@@ -19,6 +19,12 @@ import {
   Income,
   IncomeCreate,
   IncomeUpdate,
+  RecurringExpense,
+  RecurringExpenseCreate,
+  RecurringExpenseUpdate,
+  PiggyBank,
+  PiggyBankCreate,
+  PiggyBankUpdate,
   FinanceSummary,
   Account,
   InterestSummary,
@@ -29,9 +35,11 @@ import {
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
 
 class ApiError extends Error {
-  constructor(public status: number, message: string) {
+  public detail?: string;
+  constructor(public status: number, message: string, detail?: string) {
     super(message);
     this.name = 'ApiError';
+    this.detail = detail || message;
   }
 }
 
@@ -53,7 +61,8 @@ async function apiRequest<T>(
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
-      throw new ApiError(response.status, errorData.detail || 'Unknown error');
+      const errorMessage = errorData.detail || errorData.message || 'Unknown error';
+      throw new ApiError(response.status, errorMessage, errorData.detail);
     }
 
     return response.json();
@@ -226,6 +235,49 @@ export const financeApi = {
 
   deleteIncome: (id: number): Promise<void> =>
     apiRequest(`/api/finances/income/${id}`, { method: 'DELETE' }),
+
+  // Recurring Expenses
+  getRecurringExpenses: (activeOnly?: boolean): Promise<RecurringExpense[]> =>
+    apiRequest(`/api/finances/recurring-expenses${activeOnly !== undefined ? `?active_only=${activeOnly}` : ''}`),
+
+  createRecurringExpense: (expense: RecurringExpenseCreate): Promise<RecurringExpense> =>
+    apiRequest('/api/finances/recurring-expenses', {
+      method: 'POST',
+      body: JSON.stringify(expense),
+    }),
+
+  updateRecurringExpense: (id: number, expense: RecurringExpenseUpdate): Promise<RecurringExpense> =>
+    apiRequest(`/api/finances/recurring-expenses/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(expense),
+    }),
+
+  deleteRecurringExpense: (id: number): Promise<void> =>
+    apiRequest(`/api/finances/recurring-expenses/${id}`, { method: 'DELETE' }),
+
+  // Piggy Banks
+  getPiggyBanks: (activeOnly?: boolean): Promise<PiggyBank[]> =>
+    apiRequest(`/api/finances/piggy-banks${activeOnly !== undefined ? `?active_only=${activeOnly}` : ''}`),
+
+  createPiggyBank: (piggy: PiggyBankCreate): Promise<PiggyBank> =>
+    apiRequest('/api/finances/piggy-banks', {
+      method: 'POST',
+      body: JSON.stringify(piggy),
+    }),
+
+  updatePiggyBank: (id: number, piggy: PiggyBankUpdate): Promise<PiggyBank> =>
+    apiRequest(`/api/finances/piggy-banks/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(piggy),
+    }),
+
+  deletePiggyBank: (id: number): Promise<void> =>
+    apiRequest(`/api/finances/piggy-banks/${id}`, { method: 'DELETE' }),
+
+  addToPiggyBank: (id: number, amountCents: number): Promise<PiggyBank> =>
+    apiRequest(`/api/finances/piggy-banks/${id}/add-amount?amount_cents=${amountCents}`, {
+      method: 'POST',
+    }),
 
   // Accounts
   getAccounts: (): Promise<{ loans: Account[]; cards: Account[] }> =>

@@ -11,7 +11,8 @@ import {
   Settings,
   Wallet,
   CreditCard,
-  LogOut
+  LogOut,
+  Target
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 
@@ -37,6 +38,11 @@ const navigation = [
     icon: CreditCard,
   },
   {
+    name: "Piggy & Goals",
+    href: "/piggy-goals",
+    icon: Target,
+  },
+  {
     name: "Reports",
     href: "/reports",
     icon: PieChart,
@@ -59,7 +65,7 @@ export function Sidebar() {
   return (
     <div className="flex flex-col w-64 bg-card border-r border-border">
       <div className="flex items-center justify-center h-16 px-4 border-b border-border">
-        <h1 className="text-xl font-bold text-primary">Budget Pet</h1>
+        <h1 className="text-xl font-bold text-primary">Family Budget</h1>
       </div>
 
       <nav className="flex-1 px-4 py-6 space-y-2">
