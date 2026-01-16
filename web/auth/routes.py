@@ -24,7 +24,7 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "XmMYS7r4TeYcNEp")
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(login_data: LoginRequest, response: Response):
+async def login(login_data: LoginRequest, request: Request, response: Response):
     """Login endpoint - creates session cookie."""
     
     # Check credentials
@@ -43,7 +43,12 @@ async def login(login_data: LoginRequest, response: Response):
     
     # Set secure cookie (30 days)
     # Use environment-based settings for flexibility
-    is_production = os.getenv("RAILWAY_ENVIRONMENT") == "production"
+    # More reliable production detection for Safari compatibility
+    is_production = (
+        os.getenv("RAILWAY_ENVIRONMENT") == "production" or 
+        os.getenv("RAILWAY") == "true" or
+        request.url.scheme == "https"
+    )
     
     response.set_cookie(
         key="session_token",
@@ -52,7 +57,8 @@ async def login(login_data: LoginRequest, response: Response):
         httponly=True,
         secure=is_production,  # HTTPS in production, HTTP in development
         samesite="none" if is_production else "lax",  # Cross-origin for production
-        domain=None  # Let browser set domain automatically
+        domain=None,  # Let browser set domain automatically
+        path="/"  # Explicitly set path for Safari compatibility
     )
     
     return LoginResponse(

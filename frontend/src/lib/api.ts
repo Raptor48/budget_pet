@@ -51,11 +51,13 @@ async function apiRequest<T>(
 
   try {
     const response = await fetch(url, {
+      method: options.method || 'GET',
       headers: {
         'Content-Type': 'application/json',
         ...options.headers,
       },
       credentials: 'include', // Include cookies for cross-origin requests
+      mode: 'cors', // Explicitly set CORS mode for Safari compatibility
       ...options,
     });
 
@@ -74,6 +76,21 @@ async function apiRequest<T>(
     
     // Network error or fetch failed
     const networkError = error instanceof Error ? error.message : 'Network error';
+    
+    // Safari-specific error handling
+    if (error instanceof TypeError && networkError.includes('Failed to fetch')) {
+      const isSafari = typeof navigator !== 'undefined' && 
+        /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+      
+      if (isSafari) {
+        console.error('Safari network error:', { url, error: networkError, apiBaseUrl: API_BASE_URL });
+        throw new ApiError(
+          0, 
+          `Safari network error. Please check: 1) CORS settings, 2) SSL certificate, 3) Try disabling "Prevent cross-site tracking" in Safari settings. API URL: ${API_BASE_URL || 'NOT SET'}`
+        );
+      }
+    }
+    
     console.error('API request failed:', { url, error: networkError, apiBaseUrl: API_BASE_URL });
     throw new ApiError(0, `Failed to fetch: ${networkError}. API URL: ${API_BASE_URL || 'NOT SET'}`);
   }
