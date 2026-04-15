@@ -1,3 +1,4 @@
+import { getAuthHeaders } from '@/lib/auth';
 import {
   Expense,
   ExpenseCreate,
@@ -55,6 +56,7 @@ async function apiRequest<T>(
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    ...(getAuthHeaders() as Record<string, string>),
     ...(options.headers as Record<string, string> || {}),
   };
 

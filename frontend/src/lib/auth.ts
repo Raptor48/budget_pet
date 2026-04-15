@@ -1,10 +1,13 @@
 /**
  * Authentication utilities for frontend.
- * Auth state is managed exclusively via httpOnly cookies set by the server.
- * No tokens are stored in localStorage or sessionStorage.
+ * Primary: httpOnly cookie set by server.
+ * Fallback: Bearer token stored in sessionStorage for cross-origin cookie restrictions
+ * (e.g. Safari ITP, Chrome third-party cookie blocking).
+ * sessionStorage is cleared automatically when the browser tab/session closes.
  */
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
+const SESSION_TOKEN_KEY = 'session_token';
 
 export interface User {
   username: string;
@@ -27,6 +30,33 @@ export interface AuthStatus {
   user?: User;
 }
 
+function getStoredToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return sessionStorage.getItem(SESSION_TOKEN_KEY);
+}
+
+function setStoredToken(token: string): void {
+  if (typeof window !== 'undefined') {
+    sessionStorage.setItem(SESSION_TOKEN_KEY, token);
+  }
+}
+
+function clearStoredToken(): void {
+  if (typeof window !== 'undefined') {
+    sessionStorage.removeItem(SESSION_TOKEN_KEY);
+    // Also clear legacy localStorage token if present
+    localStorage.removeItem('auth_token');
+  }
+}
+
+export function getAuthHeaders(): HeadersInit {
+  const token = getStoredToken();
+  if (token) {
+    return { 'Authorization': `Bearer ${token}` };
+  }
+  return {};
+}
+
 export async function login(credentials: LoginData): Promise<AuthResponse> {
   const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
     method: 'POST',
@@ -40,19 +70,29 @@ export async function login(credentials: LoginData): Promise<AuthResponse> {
     throw new Error(error.detail || 'Login failed');
   }
 
-  return response.json();
+  const data = await response.json();
+
+  // Store token for Bearer fallback when cross-origin cookies are blocked
+  if (data.token) {
+    setStoredToken(data.token);
+  }
+
+  return { success: data.success, message: data.message, user: data.user };
 }
 
 export async function logout(): Promise<void> {
   await fetch(`${API_BASE_URL}/api/auth/logout`, {
     method: 'POST',
     credentials: 'include',
+    headers: getAuthHeaders(),
   });
+  clearStoredToken();
 }
 
 export async function getCurrentUser(): Promise<User> {
   const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
     credentials: 'include',
+    headers: getAuthHeaders(),
   });
 
   if (!response.ok) {
