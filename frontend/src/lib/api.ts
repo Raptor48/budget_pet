@@ -53,20 +53,10 @@ async function apiRequest<T>(
 ): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
 
-  // Get token from localStorage for Safari compatibility (when cross-site tracking is enabled)
-  const token = typeof window !== 'undefined' 
-    ? localStorage.getItem('auth_token') 
-    : null;
-
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> || {}),
   };
-
-  // Add Authorization header if token exists (for Safari with cross-site tracking)
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
 
   try {
     const response = await fetch(url, {
@@ -363,4 +353,25 @@ export const plaidApi = {
       method: 'PATCH',
       body: JSON.stringify({ mappings }),
     }),
+};
+
+export interface UserPublic {
+  id: number;
+  username: string;
+  is_owner: boolean;
+  created_at: string;
+}
+
+export const usersApi = {
+  list: (): Promise<UserPublic[]> =>
+    apiRequest('/api/auth/users'),
+
+  create: (data: { username: string; password: string }): Promise<UserPublic> =>
+    apiRequest('/api/auth/users', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  delete: (id: number): Promise<void> =>
+    apiRequest(`/api/auth/users/${id}`, { method: 'DELETE' }),
 };

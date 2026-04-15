@@ -12,7 +12,8 @@ import {
   Wallet,
   CreditCard,
   LogOut,
-  Target
+  Target,
+  Users,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 
@@ -21,36 +22,49 @@ const navigation = [
     name: "Dashboard",
     href: "/",
     icon: LayoutDashboard,
+    ownerOnly: false,
   },
   {
     name: "Expenses",
     href: "/expenses",
     icon: Receipt,
+    ownerOnly: false,
   },
   {
     name: "Categories",
     href: "/categories",
     icon: Wallet,
+    ownerOnly: false,
   },
   {
     name: "Finances",
     href: "/finances",
     icon: CreditCard,
+    ownerOnly: false,
   },
   {
     name: "Piggy & Goals",
     href: "/piggy-goals",
     icon: Target,
+    ownerOnly: false,
   },
   {
     name: "Reports",
     href: "/reports",
     icon: PieChart,
+    ownerOnly: false,
   },
   {
     name: "Settings",
     href: "/settings",
     icon: Settings,
+    ownerOnly: false,
+  },
+  {
+    name: "Users",
+    href: "/settings/users",
+    icon: Users,
+    ownerOnly: true,
   },
 ];
 
@@ -70,6 +84,7 @@ export function Sidebar() {
 
       <nav className="flex-1 px-4 py-6 space-y-2">
         {navigation.map((item) => {
+          if (item.ownerOnly && !user?.is_owner) return null;
           const Icon = item.icon;
           const isActive = pathname === item.href;
 

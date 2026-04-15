@@ -1,6 +1,6 @@
 """
 Authentication module for budget app.
-Simple session-based authentication with admin credentials.
+Session-based authentication backed by PostgreSQL.
 """
 
 from .routes import router as auth_router

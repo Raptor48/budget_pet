@@ -1,55 +1,52 @@
 """
 Authentication middleware for FastAPI.
-Protects all API routes except auth endpoints.
+Protects all /api/* routes except auth and health endpoints.
+Session lookup is backed by PostgreSQL via AuthRepository.
 """
 
-from fastapi import Request, HTTPException
+from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from .routes import active_sessions
+from .users_repo import get_auth_repo
+
+_SKIP_PREFIXES = ("/api/auth/",)
+_SKIP_EXACT = {"/api/healthz"}
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
-    """Middleware to protect API routes with session authentication."""
-    
     async def dispatch(self, request: Request, call_next):
-        # Skip auth for non-API routes
-        if not request.url.path.startswith("/api/"):
+        path = request.url.path
+
+        # Only protect /api/* routes
+        if not path.startswith("/api/"):
             return await call_next(request)
-        
-        # Skip auth for auth endpoints
-        if request.url.path.startswith("/api/auth/"):
+
+        # Skip auth endpoints and health check
+        if any(path.startswith(p) for p in _SKIP_PREFIXES):
             return await call_next(request)
-        
-        # Skip auth for health check
-        if request.url.path == "/api/healthz":
+        if path in _SKIP_EXACT:
             return await call_next(request)
-        
-        # Skip auth for CORS preflight requests
+
+        # CORS preflight
         if request.method == "OPTIONS":
             return await call_next(request)
-        
-        # Check session from cookie OR Authorization header (Safari compatibility)
-        session_token = request.cookies.get("session_token")
-        
-        # Fallback to Authorization header for Safari with cross-site tracking enabled
-        if not session_token:
-            auth_header = request.headers.get("Authorization")
-            if auth_header and auth_header.startswith("Bearer "):
-                session_token = auth_header.replace("Bearer ", "").strip()
-        
-        if not session_token:
+
+        token = request.cookies.get("session_token")
+        if not token:
             return JSONResponse(
                 status_code=401,
-                content={"detail": "No session token found in cookies or Authorization header"}
+                content={"detail": "Not authenticated"},
             )
-        
-        if session_token not in active_sessions:
+
+        repo = get_auth_repo()
+        user = await repo.get_session_user(token)
+        if not user:
             return JSONResponse(
                 status_code=401,
-                content={"detail": "Invalid or expired session token"}
+                content={"detail": "Session expired or invalid"},
             )
-        
-        # Continue to protected route
+
+        # Attach user to request state for downstream handlers
+        request.state.user = user
         return await call_next(request)

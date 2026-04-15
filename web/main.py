@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, Query, status
+from fastapi import FastAPI, HTTPException, Depends, Header, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
 import os
@@ -47,15 +47,21 @@ app.add_middleware(AuthMiddleware)
 # Global services
 logger = get_logger_service()
 
-# Admin key for sync endpoints (optional)
+# Admin key for sync endpoints — must be set in env; passed as X-Admin-Key header
 ADMIN_KEY = os.getenv("ADMIN_KEY")
 
-def require_admin_key(x_admin_key: Optional[str] = None):
-    """Require admin key for sensitive endpoints."""
-    if ADMIN_KEY and x_admin_key != ADMIN_KEY:
+
+def require_admin_key(x_admin_key: Optional[str] = Header(default=None, alias="X-Admin-Key")):
+    """Require X-Admin-Key header for sensitive sync endpoints."""
+    if not ADMIN_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Sync disabled: ADMIN_KEY not configured",
+        )
+    if x_admin_key != ADMIN_KEY:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin key required"
+            detail="Invalid or missing X-Admin-Key header",
         )
 
 @app.on_event("startup")
@@ -69,6 +75,15 @@ async def startup_event():
         conn = get_db_connection()
         conn.close()
         logger.info("Startup: PostgreSQL connection successful")
+
+        # Validate required auth env vars
+        from web.auth.routes import validate_admin_credentials
+        validate_admin_credentials()
+
+        # Run auth migrations (users + sessions tables)
+        from web.auth.db_migration import run_migrations
+        await run_migrations()
+        logger.info("Startup: Auth migrations applied")
         
         # Initialize finance tables
         finance_repo = get_finance_repo()
