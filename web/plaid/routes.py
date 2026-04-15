@@ -63,6 +63,16 @@ async def delete_item(item_id: str):
     return {"message": "Bank connection removed"}
 
 
+@router.post("/items/{item_id}/reset-cursor")
+async def reset_cursor(item_id: str):
+    """Reset sync cursor for an item so the next sync re-imports all transactions."""
+    repo = get_plaid_repo()
+    ok = await repo.reset_cursor(item_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return {"message": "Cursor reset. Next sync will re-import all transactions."}
+
+
 @router.post("/sync", response_model=List[SyncResult])
 async def sync_now():
     """Manually trigger synchronisation for all connected items."""

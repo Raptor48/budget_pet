@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
-  Building2, RefreshCw, Trash2, CheckCircle, AlertCircle, Clock
+  Building2, RefreshCw, Trash2, CheckCircle, AlertCircle, Clock, RotateCcw
 } from "lucide-react";
 import { plaidApi } from "@/lib/api";
 import { PlaidCategoryMapEntry } from "@/types/api";
@@ -228,6 +228,11 @@ export function PlaidBankConnections() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["plaid-items"] }),
   });
 
+  const resetCursorMutation = useMutation({
+    mutationFn: plaidApi.resetCursor,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["plaid-items"] }),
+  });
+
   const lastSync = syncLog[0];
 
   return (
@@ -272,15 +277,26 @@ export function PlaidBankConnections() {
                         : "Never synced"}
                     </p>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-destructive hover:text-destructive"
-                    onClick={() => deleteMutation.mutate(item.item_id)}
-                    disabled={deleteMutation.isPending}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      title="Reset sync cursor (re-import all transactions on next sync)"
+                      onClick={() => resetCursorMutation.mutate(item.item_id)}
+                      disabled={resetCursorMutation.isPending}
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => deleteMutation.mutate(item.item_id)}
+                      disabled={deleteMutation.isPending}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -295,7 +311,7 @@ export function PlaidBankConnections() {
             <p className="text-sm font-medium">Sync Now</p>
             <p className="text-sm text-muted-foreground">
               Manually pull latest transactions, update balances and discover new categories.
-              Balance sync matches accounts by name — make sure your card/loan names in Finances match the account name in your bank.
+              Finance accounts are auto-created from Plaid on first sync.
             </p>
           </div>
           <Button

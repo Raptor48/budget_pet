@@ -175,6 +175,14 @@ class PlaidRepository:
                 cursor, item_id
             )
 
+    async def reset_cursor(self, item_id: str) -> bool:
+        """Set cursor to NULL so the next sync re-fetches all transactions from scratch."""
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                "UPDATE plaid_items SET cursor = NULL WHERE item_id = $1", item_id
+            )
+        return result == "UPDATE 1"
+
     # ------------------------------------------------------------------
     # Sync log
     # ------------------------------------------------------------------
