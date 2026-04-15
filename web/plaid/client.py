@@ -117,11 +117,12 @@ def get_liabilities(access_token: str) -> dict:
         request = LiabilitiesGetRequest(access_token=access_token)
         response = client.liabilities_get(request)
         liabilities = response.get("liabilities", {})
+        # Include accounts so sync_liabilities can resolve account_id → name
         return {
             "credit": liabilities.get("credit") or [],
             "student": liabilities.get("student") or [],
-            "mortgage": liabilities.get("mortgage") or [],
+            "accounts": response.get("accounts") or [],
         }
     except Exception as e:
         logger.warning("Liabilities fetch failed (item may not have liabilities product): %s", e)
-        return {"credit": [], "student": [], "mortgage": []}
+        return {"credit": [], "student": [], "accounts": []}

@@ -320,7 +320,7 @@ export function PlaidBankConnections() {
                   : <AlertCircle className="h-4 w-4" />}
                 <AlertDescription>
                   {r.status === "ok"
-                    ? `Synced: +${r.transactions_added} transactions, ${r.balances_updated} balances updated`
+                    ? `Synced: +${r.transactions_added} expenses, +${r.income_added ?? 0} income, ${r.balances_updated} balances updated`
                     : `Error: ${r.error_msg}`}
                 </AlertDescription>
               </Alert>
@@ -335,7 +335,7 @@ export function PlaidBankConnections() {
               {lastSync.status}
             </Badge>
             Last auto-sync: {new Date(lastSync.synced_at).toLocaleString()} —
-            +{lastSync.transactions_added} txn, {lastSync.balances_updated} balances
+            +{lastSync.transactions_added} expenses, +{lastSync.income_added ?? 0} income, {lastSync.balances_updated} balances
           </div>
         )}
 

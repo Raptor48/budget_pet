@@ -206,14 +206,24 @@ class PlaidRepository:
                 ON CONFLICT (plaid_category) DO UPDATE SET budget_category = EXCLUDED.budget_category
             """, [(m["plaid_category"], m["budget_category"]) for m in mappings])
 
-    def map_plaid_category(self, plaid_categories: list, category_map: Dict[str, str]) -> str:
-        """Map Plaid transaction categories to budget category name."""
-        if not plaid_categories:
-            return DEFAULT_BUDGET_CATEGORY
-        # Try most-specific first, then parent
+    def map_plaid_category(
+        self,
+        plaid_categories: list,
+        category_map: Dict[str, str],
+        pfc_category: Optional[str] = None,
+    ) -> str:
+        """Map Plaid transaction categories to budget category name.
+
+        Priority:
+        1. Legacy category array (most-specific first)
+        2. personal_finance_category.detailed (PFC) — used when legacy is empty
+        3. DEFAULT_BUDGET_CATEGORY
+        """
         for cat in plaid_categories:
-            if cat in category_map:
+            if cat and cat in category_map:
                 return category_map[cat]
+        if pfc_category and pfc_category in category_map:
+            return category_map[pfc_category]
         return DEFAULT_BUDGET_CATEGORY
 
     # ------------------------------------------------------------------
@@ -253,6 +263,15 @@ class PlaidRepository:
         if isinstance(txn_date, str):
             txn_date = date.fromisoformat(txn_date)
 
+        pfc_primary = None
+        if pfc is not None:
+            if isinstance(pfc, dict):
+                pfc_primary = pfc.get("primary")
+            elif hasattr(pfc, "to_dict"):
+                pfc_primary = pfc.to_dict().get("primary")
+            else:
+                pfc_primary = getattr(pfc, "primary", None)
+
         return {
             "transaction_id": raw.get("transaction_id", ""),
             "amount": raw.get("amount", 0),
@@ -261,6 +280,7 @@ class PlaidRepository:
             "plaid_cats": plaid_cats,
             "plaid_category_raw": plaid_category_raw,
             "plaid_pfc_category": plaid_pfc_category,
+            "plaid_pfc_primary": pfc_primary,
             "is_pending": is_pending,
             "account_id": account_id,
         }
@@ -322,7 +342,9 @@ class PlaidRepository:
                 if amount <= 0:
                     continue
 
-                budget_category = self.map_plaid_category(fields["plaid_cats"], category_map)
+                budget_category = self.map_plaid_category(
+                    fields["plaid_cats"], category_map, pfc_category=fields["plaid_pfc_category"]
+                )
 
                 try:
                     await conn.execute("""
@@ -407,14 +429,7 @@ class PlaidRepository:
                     continue
 
                 # Filter out non-income by personal_finance_category primary
-                pfc_primary = None
-                pfc = txn.get("personal_finance_category")
-                if pfc is not None:
-                    if hasattr(pfc, "primary"):
-                        pfc_primary = pfc.primary
-                    elif isinstance(pfc, dict):
-                        pfc_primary = pfc.get("primary")
-
+                pfc_primary = fields["plaid_pfc_primary"]
                 if pfc_primary and pfc_primary in non_income_pfc:
                     continue
 
@@ -427,7 +442,9 @@ class PlaidRepository:
                         INSERT INTO finance_income
                             (person, amount_cents, occurred_at, note, plaid_transaction_id)
                         VALUES ($1, $2, $3, $4, $5)
-                        ON CONFLICT (plaid_transaction_id) DO NOTHING
+                        ON CONFLICT (plaid_transaction_id) DO UPDATE SET
+                            amount_cents = EXCLUDED.amount_cents,
+                            note = EXCLUDED.note
                     """, "Plaid", amount_cents, str(txn_date), note, fields["transaction_id"])
                     added += 1
                 except Exception as e:
@@ -478,15 +495,25 @@ class PlaidRepository:
 
     async def sync_liabilities(self, liabilities: dict) -> int:
         """
-        Update credit card details (APR, min_payment, due_date, credit_limit)
-        and loan details from Plaid Liabilities API data.
-        Matches by account_id stored in plaid_account_id column (if available)
-        or falls back to name matching.
+        Update credit card details (APR, min_payment, due_date) and loan details
+        from Plaid Liabilities API data.
+
+        Matching strategy (for each liability):
+        1. Match by plaid_account_id if already stored.
+        2. Fall back to case-insensitive name match using account name from Plaid.
+           On a name-based match, plaid_account_id is stored so future syncs use ID.
+
         Returns count of updated records.
         """
         updated = 0
+        # Build map: plaid_account_id -> account_name from the accounts list
+        account_name_map: Dict[str, str] = {
+            a.get("account_id", ""): (a.get("name") or "")
+            for a in liabilities.get("accounts", [])
+        }
+
         async with self._pool.acquire() as conn:
-            # Ensure plaid_account_id columns exist on finance tables
+            # Ensure columns exist (idempotent migrations)
             for sql in [
                 "ALTER TABLE finance_credit_cards ADD COLUMN IF NOT EXISTS plaid_account_id TEXT",
                 "ALTER TABLE finance_loans ADD COLUMN IF NOT EXISTS plaid_account_id TEXT",
@@ -495,17 +522,15 @@ class PlaidRepository:
             ]:
                 await conn.execute(sql)
 
-            # Sync credit card liabilities
+            # --- Credit card liabilities ---
             for card_liability in liabilities.get("credit", []):
                 account_id = card_liability.get("account_id", "")
                 aprs = card_liability.get("aprs") or []
                 min_payment = card_liability.get("minimum_payment_amount")
-                last_payment_date = card_liability.get("last_payment_date")
                 next_due_date = card_liability.get("next_payment_due_date")
                 last_stmt_balance = card_liability.get("last_statement_balance")
-                credit_limit = card_liability.get("nominal_apr")  # fallback
 
-                # Get APR: prefer purchase APR
+                # Prefer purchase APR; fall back to first available
                 apr = None
                 for apr_entry in aprs:
                     apr_type = apr_entry.get("apr_type", "")
@@ -515,10 +540,9 @@ class PlaidRepository:
                 min_payment_cents = int(round(min_payment * 100)) if min_payment is not None else None
                 last_stmt_cents = int(round(last_stmt_balance * 100)) if last_stmt_balance is not None else None
 
-                # Build update fields
-                set_parts = ["last_synced_at = now()"]
-                params: list = []
-                idx = 1
+                set_parts = ["last_synced_at = now()", "plaid_account_id = $1"]
+                params: list = [account_id]
+                idx = 2
 
                 if apr is not None:
                     set_parts.append(f"apr_percent = ${idx}")
@@ -535,32 +559,41 @@ class PlaidRepository:
                 if next_due_date:
                     set_parts.append(f"due_day = ${idx}")
                     try:
-                        from datetime import date as dt_date
-                        params.append(dt_date.fromisoformat(str(next_due_date)).day)
+                        params.append(date.fromisoformat(str(next_due_date)).day)
                     except Exception:
                         params.append(None)
                     idx += 1
 
-                params.append(account_id)
-                result = await conn.execute(f"""
-                    UPDATE finance_credit_cards
-                    SET {', '.join(set_parts)}, plaid_account_id = ${idx}
-                    WHERE plaid_account_id = ${idx} AND is_active = TRUE
-                """, *params)
-
+                # Attempt 1: match by stored plaid_account_id
+                result = await conn.execute(
+                    f"UPDATE finance_credit_cards SET {', '.join(set_parts)}"
+                    " WHERE plaid_account_id = $1 AND is_active = TRUE",
+                    *params,
+                )
                 if result != "UPDATE 0":
                     updated += 1
+                    continue
 
-            # Sync loan liabilities (student loans)
+                # Attempt 2: match by name and store plaid_account_id for future syncs
+                acct_name = account_name_map.get(account_id, "")
+                if acct_name:
+                    result = await conn.execute(
+                        f"UPDATE finance_credit_cards SET {', '.join(set_parts)}"
+                        f" WHERE LOWER(name) = LOWER(${idx}) AND is_active = TRUE",
+                        *params, acct_name,
+                    )
+                    if result != "UPDATE 0":
+                        updated += 1
+
+            # --- Loan / student loan liabilities ---
             for loan in liabilities.get("student", []):
                 account_id = loan.get("account_id", "")
                 interest_rate = loan.get("interest_rate_percentage")
                 min_payment = loan.get("minimum_payment_amount")
-                outstanding = loan.get("outstanding_interest_amount")
 
-                set_parts = ["last_synced_at = now()"]
-                params = []
-                idx = 1
+                set_parts = ["last_synced_at = now()", "plaid_account_id = $1"]
+                params = [account_id]
+                idx = 2
 
                 if interest_rate is not None:
                     set_parts.append(f"apr_percent = ${idx}")
@@ -571,15 +604,26 @@ class PlaidRepository:
                     params.append(int(round(min_payment * 100)))
                     idx += 1
 
-                params.append(account_id)
-                result = await conn.execute(f"""
-                    UPDATE finance_loans
-                    SET {', '.join(set_parts)}, plaid_account_id = ${idx}
-                    WHERE plaid_account_id = ${idx} AND is_active = TRUE
-                """, *params)
-
+                # Attempt 1: match by stored plaid_account_id
+                result = await conn.execute(
+                    f"UPDATE finance_loans SET {', '.join(set_parts)}"
+                    " WHERE plaid_account_id = $1 AND is_active = TRUE",
+                    *params,
+                )
                 if result != "UPDATE 0":
                     updated += 1
+                    continue
+
+                # Attempt 2: match by name
+                acct_name = account_name_map.get(account_id, "")
+                if acct_name:
+                    result = await conn.execute(
+                        f"UPDATE finance_loans SET {', '.join(set_parts)}"
+                        f" WHERE LOWER(name) = LOWER(${idx}) AND is_active = TRUE",
+                        *params, acct_name,
+                    )
+                    if result != "UPDATE 0":
+                        updated += 1
 
         return updated
 

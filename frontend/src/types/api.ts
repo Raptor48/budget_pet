@@ -368,6 +368,7 @@ export interface PlaidItem {
 export interface PlaidSyncResult {
   item_id: string;
   transactions_added: number;
+  income_added: number;
   balances_updated: number;
   status: string;
   error_msg: string | null;
@@ -378,6 +379,7 @@ export interface PlaidSyncLogEntry {
   item_id: string;
   synced_at: string;
   transactions_added: number;
+  income_added: number;
   balances_updated: number;
   status: string;
   error_msg: string | null;
