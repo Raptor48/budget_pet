@@ -110,6 +110,14 @@ class PlaidRepository:
             await conn.execute(
                 "ALTER TABLE plaid_sync_log ADD COLUMN IF NOT EXISTS income_added INT DEFAULT 0"
             )
+            # Migration: add Plaid linking columns to finance tables
+            for sql in [
+                "ALTER TABLE finance_credit_cards ADD COLUMN IF NOT EXISTS plaid_account_id TEXT",
+                "ALTER TABLE finance_loans ADD COLUMN IF NOT EXISTS plaid_account_id TEXT",
+                "ALTER TABLE finance_credit_cards ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMPTZ",
+                "ALTER TABLE finance_loans ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMPTZ",
+            ]:
+                await conn.execute(sql)
         logger.info("Plaid tables initialised")
 
     # ------------------------------------------------------------------
@@ -456,15 +464,81 @@ class PlaidRepository:
     # Balance sync into finance tables
     # ------------------------------------------------------------------
 
+    async def provision_finance_accounts(self, accounts: list) -> int:
+        """
+        Auto-create finance_credit_cards / finance_loans entries for Plaid accounts
+        that don't yet exist. Uses plaid_account_id as the primary key and falls back
+        to name matching to avoid creating duplicates for manually-entered records.
+        Returns count of newly created entries.
+        """
+        created = 0
+        async with self._pool.acquire() as conn:
+            for acct in accounts:
+                account_id = acct.get("account_id", "")
+                name = acct.get("name") or acct.get("official_name") or ""
+                acct_type = acct.get("type", "")
+                subtype = acct.get("subtype", "")
+
+                if not account_id or not name:
+                    continue
+
+                if acct_type == "credit":
+                    # Check if already exists by plaid_account_id or name
+                    exists = await conn.fetchval("""
+                        SELECT 1 FROM finance_credit_cards
+                        WHERE plaid_account_id = $1 OR LOWER(name) = LOWER($2)
+                        LIMIT 1
+                    """, account_id, name)
+                    if not exists:
+                        await conn.execute("""
+                            INSERT INTO finance_credit_cards
+                                (name, category_name, plaid_account_id, is_active)
+                            VALUES ($1, $2, $3, TRUE)
+                        """, name, "Credit Card", account_id)
+                        created += 1
+                        logger.info("Auto-provisioned credit card from Plaid: %s", name)
+                    else:
+                        # Ensure plaid_account_id is set if record was created manually
+                        await conn.execute("""
+                            UPDATE finance_credit_cards
+                            SET plaid_account_id = $1
+                            WHERE LOWER(name) = LOWER($2) AND plaid_account_id IS NULL
+                        """, account_id, name)
+
+                elif acct_type == "loan" or subtype in ("student", "mortgage", "auto", "consumer"):
+                    exists = await conn.fetchval("""
+                        SELECT 1 FROM finance_loans
+                        WHERE plaid_account_id = $1 OR LOWER(name) = LOWER($2)
+                        LIMIT 1
+                    """, account_id, name)
+                    if not exists:
+                        category = "Student Loan" if subtype == "student" else "Loan"
+                        await conn.execute("""
+                            INSERT INTO finance_loans
+                                (name, category_name, plaid_account_id, is_active)
+                            VALUES ($1, $2, $3, TRUE)
+                        """, name, category, account_id)
+                        created += 1
+                        logger.info("Auto-provisioned loan from Plaid: %s", name)
+                    else:
+                        await conn.execute("""
+                            UPDATE finance_loans
+                            SET plaid_account_id = $1
+                            WHERE LOWER(name) = LOWER($2) AND plaid_account_id IS NULL
+                        """, account_id, name)
+
+        return created
+
     async def sync_balances(self, accounts: list) -> int:
         """
-        Update current_balance_cents in finance_credit_cards and finance_loans
-        based on Plaid account name matching.
+        Update current_balance_cents in finance_credit_cards and finance_loans.
+        Matches by plaid_account_id first (fast path), then falls back to name.
         Returns count of updated records.
         """
         updated = 0
         async with self._pool.acquire() as conn:
             for acct in accounts:
+                account_id = acct.get("account_id", "")
                 name = acct.get("name", "")
                 balances = acct.get("balances", {})
                 current = balances.get("current")
@@ -473,21 +547,33 @@ class PlaidRepository:
                 balance_cents = int(round(current * 100))
                 acct_type = acct.get("type", "")
 
-                if acct_type in ("credit", "loan"):
+                if acct_type == "credit":
                     result = await conn.execute("""
                         UPDATE finance_credit_cards
                         SET current_balance_cents = $1, updated_at = now()
-                        WHERE LOWER(name) = LOWER($2) AND is_active = TRUE
-                    """, balance_cents, name)
+                        WHERE plaid_account_id = $2 AND is_active = TRUE
+                    """, balance_cents, account_id)
+                    if result == "UPDATE 0":
+                        result = await conn.execute("""
+                            UPDATE finance_credit_cards
+                            SET current_balance_cents = $1, updated_at = now()
+                            WHERE LOWER(name) = LOWER($2) AND is_active = TRUE
+                        """, balance_cents, name)
                     if result != "UPDATE 0":
                         updated += 1
-                        continue
 
+                elif acct_type == "loan":
                     result = await conn.execute("""
                         UPDATE finance_loans
                         SET current_balance_cents = $1, updated_at = now()
-                        WHERE LOWER(name) = LOWER($2) AND is_active = TRUE
-                    """, balance_cents, name)
+                        WHERE plaid_account_id = $2 AND is_active = TRUE
+                    """, balance_cents, account_id)
+                    if result == "UPDATE 0":
+                        result = await conn.execute("""
+                            UPDATE finance_loans
+                            SET current_balance_cents = $1, updated_at = now()
+                            WHERE LOWER(name) = LOWER($2) AND is_active = TRUE
+                        """, balance_cents, name)
                     if result != "UPDATE 0":
                         updated += 1
 
@@ -513,15 +599,6 @@ class PlaidRepository:
         }
 
         async with self._pool.acquire() as conn:
-            # Ensure columns exist (idempotent migrations)
-            for sql in [
-                "ALTER TABLE finance_credit_cards ADD COLUMN IF NOT EXISTS plaid_account_id TEXT",
-                "ALTER TABLE finance_loans ADD COLUMN IF NOT EXISTS plaid_account_id TEXT",
-                "ALTER TABLE finance_credit_cards ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMPTZ",
-                "ALTER TABLE finance_loans ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMPTZ",
-            ]:
-                await conn.execute(sql)
-
             # --- Credit card liabilities ---
             for card_liability in liabilities.get("credit", []):
                 account_id = card_liability.get("account_id", "")

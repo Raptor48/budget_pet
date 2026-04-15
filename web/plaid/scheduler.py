@@ -55,6 +55,8 @@ async def sync_all_items() -> List[dict]:
 
             # --- Balance sync ---
             accounts = get_account_balances(access_token)
+            # Auto-create finance_credit_cards / finance_loans for new Plaid accounts
+            await repo.provision_finance_accounts(accounts)
             balances_updated = await repo.sync_balances(accounts)
 
             # --- Liabilities sync (APR, min payment, due date) ---
