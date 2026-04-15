@@ -34,10 +34,23 @@ async def sync_all_items() -> List[dict]:
             # --- Transactions sync ---
             category_map = await repo.get_category_map()
             txn_data = get_transactions_sync(access_token, cursor)
-            all_txns = txn_data["added"]
+            added_txns = txn_data["added"]
+            modified_txns = txn_data["modified"]
+            removed_txns = txn_data["removed"]
 
-            transactions_added = await repo.import_transactions(all_txns, category_map)
-            income_added = await repo.import_income(all_txns)
+            # Import new transactions
+            transactions_added = await repo.import_transactions(added_txns, category_map)
+            income_added = await repo.import_income(added_txns)
+
+            # Update modified transactions (ON CONFLICT DO UPDATE handles field refresh)
+            if modified_txns:
+                transactions_added += await repo.import_transactions(modified_txns, category_map)
+                income_added += await repo.import_income(modified_txns)
+
+            # Delete transactions removed by Plaid
+            if removed_txns:
+                await repo.remove_transactions(removed_txns)
+
             await repo.update_cursor(item_id, txn_data["next_cursor"])
 
             # --- Balance sync ---
@@ -49,8 +62,10 @@ async def sync_all_items() -> List[dict]:
             await repo.sync_liabilities(liabilities)
 
             logger.info(
-                "Plaid sync OK: item=%s txn_added=%d income_added=%d balances_updated=%d",
-                item_id, transactions_added, income_added, balances_updated
+                "Plaid sync OK: item=%s txn_added=%d income_added=%d balances_updated=%d "
+                "modified=%d removed=%d",
+                item_id, transactions_added, income_added, balances_updated,
+                len(modified_txns), len(removed_txns),
             )
         except Exception as e:
             status = "error"
