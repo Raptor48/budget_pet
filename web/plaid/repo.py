@@ -256,6 +256,27 @@ class PlaidRepository:
             "account_id": account_id,
         }
 
+    async def _discover_categories(self, transactions: list) -> None:
+        """
+        Collect unique Plaid category strings from transactions and insert them
+        into plaid_category_map with budget_category='Uncategorized' if not already present.
+        This ensures categories appear in the UI after the first sync.
+        """
+        seen: set[str] = set()
+        for txn in transactions:
+            cats = txn.get("category") or []
+            for cat in cats:
+                if cat:
+                    seen.add(cat)
+        if not seen:
+            return
+        async with self._pool.acquire() as conn:
+            await conn.executemany("""
+                INSERT INTO plaid_category_map (plaid_category, budget_category)
+                VALUES ($1, $2)
+                ON CONFLICT (plaid_category) DO NOTHING
+            """, [(cat, DEFAULT_BUDGET_CATEGORY) for cat in seen])
+
     async def import_transactions(self, transactions: list, category_map: Dict[str, str]) -> int:
         """
         Import Plaid debit transactions into the expenses table.
@@ -266,6 +287,9 @@ class PlaidRepository:
         """
         if not transactions:
             return 0
+
+        # Auto-populate category map with any new Plaid categories seen in this batch
+        await self._discover_categories(transactions)
 
         plaid_env = os.getenv("PLAID_ENV", "sandbox").lower()
         source = "plaid_sandbox" if plaid_env == "sandbox" else "plaid"
