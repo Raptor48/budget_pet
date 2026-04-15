@@ -21,6 +21,7 @@ from web.schemas import (
 from web.deps import get_logger_service
 from web.finance import api_router as finance_api_router, get_finance_repo
 from web.auth import auth_router, AuthMiddleware
+from web.plaid import plaid_router, init_plaid_repo, start_scheduler
 
 # Initialize FastAPI app
 app = FastAPI(title="Budget API", version="1.0.0")
@@ -73,6 +74,14 @@ async def startup_event():
         finance_repo = get_finance_repo()
         await finance_repo.init_tables()
         logger.info("Startup: Finance tables initialized")
+
+        # Initialize Plaid tables and scheduler (only if credentials are configured)
+        if os.getenv("PLAID_CLIENT_ID") and os.getenv("PLAID_ENCRYPTION_KEY"):
+            await init_plaid_repo()
+            start_scheduler()
+            logger.info("Startup: Plaid integration initialized")
+        else:
+            logger.info("Startup: Plaid not configured (PLAID_CLIENT_ID or PLAID_ENCRYPTION_KEY missing)")
     except Exception as e:
         logger.error("Startup: PostgreSQL connection failed: %s", e)
 
@@ -284,3 +293,4 @@ async def sync_push():
 # Include routers
 app.include_router(auth_router)
 app.include_router(finance_api_router)
+app.include_router(plaid_router)

@@ -106,6 +106,33 @@ Telegram пользователь
    bot.py → ответ пользователю + maybe_notify_thresholds()
 ```
 
+## Plaid Bank Integration
+
+```
+Settings UI (Next.js)
+      │
+      │ POST /api/plaid/link-token
+      ▼
+   FastAPI → Plaid API → link_token
+      │
+      │ (Plaid Link UI открывается в браузере)
+      │
+      │ POST /api/plaid/exchange-token {public_token}
+      ▼
+   FastAPI → Plaid API → access_token
+      │
+      │ зашифровать Fernet → сохранить в plaid_items
+      ▼
+   PostgreSQL
+
+   APScheduler (03:00 daily)
+      │
+      │ Plaid Transactions Sync API → новые транзакции → expenses
+      │ Plaid Balance API → балансы → finance_credit_cards / finance_loans
+      ▼
+   PostgreSQL
+```
+
 ## Важные ограничения
 
 - **Сессии в памяти** — горизонтальное масштабирование невозможно; при рестарте сервиса все пользователи разлогиниваются

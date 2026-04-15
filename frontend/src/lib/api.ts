@@ -29,7 +29,11 @@ import {
   Account,
   InterestSummary,
   AccountAnalytics,
-  PaymentAnalytics
+  PaymentAnalytics,
+  PlaidItem,
+  PlaidSyncResult,
+  PlaidSyncLogEntry,
+  PlaidCategoryMapEntry,
 } from '@/types/api';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
@@ -321,4 +325,37 @@ export const financeApi = {
 
   getPaymentAnalytics: (id: number): Promise<PaymentAnalytics> =>
     apiRequest(`/api/finances/analytics/payment/${id}`),
+};
+
+// Plaid API
+export const plaidApi = {
+  getLinkToken: (): Promise<{ link_token: string; expiration: string }> =>
+    apiRequest('/api/plaid/link-token', { method: 'POST' }),
+
+  exchangeToken: (publicToken: string, institutionName?: string): Promise<PlaidItem> =>
+    apiRequest('/api/plaid/exchange-token', {
+      method: 'POST',
+      body: JSON.stringify({ public_token: publicToken, institution_name: institutionName }),
+    }),
+
+  getItems: (): Promise<PlaidItem[]> =>
+    apiRequest('/api/plaid/items'),
+
+  deleteItem: (itemId: string): Promise<{ message: string }> =>
+    apiRequest(`/api/plaid/items/${itemId}`, { method: 'DELETE' }),
+
+  syncNow: (): Promise<PlaidSyncResult[]> =>
+    apiRequest('/api/plaid/sync', { method: 'POST' }),
+
+  getSyncLog: (): Promise<PlaidSyncLogEntry[]> =>
+    apiRequest('/api/plaid/sync/log'),
+
+  getCategoryMap: (): Promise<PlaidCategoryMapEntry[]> =>
+    apiRequest('/api/plaid/category-map'),
+
+  updateCategoryMap: (mappings: PlaidCategoryMapEntry[]): Promise<{ message: string }> =>
+    apiRequest('/api/plaid/category-map', {
+      method: 'PATCH',
+      body: JSON.stringify({ mappings }),
+    }),
 };
