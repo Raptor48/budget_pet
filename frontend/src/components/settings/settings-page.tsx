@@ -9,6 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { healthApi } from "@/lib/api";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
+import { PlaidBankConnections } from "./plaid-bank-connections";
 import {
   Settings as SettingsIcon,
   Palette,
@@ -189,6 +190,9 @@ export function SettingsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Bank Connections (Plaid) */}
+      <PlaidBankConnections />
 
       {/* Data Management */}
       <Card>

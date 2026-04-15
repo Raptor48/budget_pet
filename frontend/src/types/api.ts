@@ -344,3 +344,35 @@ export interface PiggyBankUpdate {
   deadline?: string | null; // ISO date
   is_active?: boolean;
 }
+
+// Plaid types
+export interface PlaidItem {
+  id: number;
+  item_id: string;
+  institution_name: string | null;
+  connected_at: string;
+  last_synced_at: string | null;
+}
+
+export interface PlaidSyncResult {
+  item_id: string;
+  transactions_added: number;
+  balances_updated: number;
+  status: string;
+  error_msg: string | null;
+}
+
+export interface PlaidSyncLogEntry {
+  id: number;
+  item_id: string;
+  synced_at: string;
+  transactions_added: number;
+  balances_updated: number;
+  status: string;
+  error_msg: string | null;
+}
+
+export interface PlaidCategoryMapEntry {
+  plaid_category: string;
+  budget_category: string;
+}
