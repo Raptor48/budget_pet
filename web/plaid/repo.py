@@ -223,30 +223,39 @@ class PlaidRepository:
     @staticmethod
     def _extract_txn_fields(txn) -> dict:
         """Extract all relevant fields from a Plaid transaction object."""
-        # Plaid SDK objects support dict-like .get() access
-        merchant_name = txn.get("merchant_name") or txn.get("name") or ""
-        plaid_cats = txn.get("category") or []
+        # Convert SDK object to plain dict for reliable field access.
+        # Plaid v9+ models have .to_dict(); fall back to dict-like .get().
+        if hasattr(txn, "to_dict"):
+            raw: dict = txn.to_dict()
+        else:
+            raw = txn  # already a dict
+
+        merchant_name = raw.get("merchant_name") or raw.get("name") or ""
+        plaid_cats = raw.get("category") or []
         plaid_category_raw = json.dumps(plaid_cats) if plaid_cats else None
 
-        # personal_finance_category is a nested object or dict
-        pfc = txn.get("personal_finance_category")
+        # personal_finance_category: SDK returns nested object or dict
+        pfc = raw.get("personal_finance_category")
         plaid_pfc_category = None
         if pfc is not None:
-            if hasattr(pfc, "detailed"):
-                plaid_pfc_category = pfc.detailed
-            elif isinstance(pfc, dict):
+            if isinstance(pfc, dict):
                 plaid_pfc_category = pfc.get("detailed")
+            elif hasattr(pfc, "to_dict"):
+                plaid_pfc_category = pfc.to_dict().get("detailed")
+            else:
+                # Direct attribute access as last resort
+                plaid_pfc_category = getattr(pfc, "detailed", None)
 
-        is_pending = bool(txn.get("pending", False))
-        account_id = txn.get("account_id")
+        is_pending = bool(raw.get("pending", False))
+        account_id = raw.get("account_id")
 
-        txn_date = txn.get("date")
+        txn_date = raw.get("date")
         if isinstance(txn_date, str):
             txn_date = date.fromisoformat(txn_date)
 
         return {
-            "transaction_id": txn.get("transaction_id", ""),
-            "amount": txn.get("amount", 0),
+            "transaction_id": raw.get("transaction_id", ""),
+            "amount": raw.get("amount", 0),
             "date": txn_date,
             "merchant_name": merchant_name,
             "plaid_cats": plaid_cats,
@@ -264,10 +273,19 @@ class PlaidRepository:
         """
         seen: set[str] = set()
         for txn in transactions:
-            cats = txn.get("category") or []
+            raw = txn.to_dict() if hasattr(txn, "to_dict") else txn
+            cats = raw.get("category") or []
             for cat in cats:
                 if cat:
                     seen.add(cat)
+            # Also discover from personal_finance_category (PFC)
+            pfc = raw.get("personal_finance_category")
+            if pfc:
+                pfc_dict = pfc if isinstance(pfc, dict) else (pfc.to_dict() if hasattr(pfc, "to_dict") else {})
+                for key in ("primary", "detailed"):
+                    val = pfc_dict.get(key)
+                    if val:
+                        seen.add(val)
         if not seen:
             return
         async with self._pool.acquire() as conn:
