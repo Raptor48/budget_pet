@@ -13,7 +13,7 @@ from web.finance.calculations import (
     generate_interest_summary
 )
 from web.finance.models import (
-    LoanOut, CreditCardOut, PaymentOut, InterestSummary
+    LoanOut, CreditCardOut, PaymentOut
 )
 
 

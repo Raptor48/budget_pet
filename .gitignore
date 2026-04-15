@@ -12,6 +12,7 @@ env/
 
 # Sensitive
 .env
+.env.local
 budget.db
 
 # OS junk

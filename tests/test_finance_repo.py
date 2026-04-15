@@ -2,7 +2,6 @@
 Tests for finance repository (loans, cards, payments, income).
 """
 import pytest
-import asyncio
 from decimal import Decimal
 from datetime import date
 from web.finance.repo import FinanceRepository
