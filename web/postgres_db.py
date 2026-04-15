@@ -65,7 +65,8 @@ def get_expenses_for_month(month: str) -> List[Tuple[int, str, float, str]]:
             cursor.execute("""
                 SELECT id, category, amount, date 
                 FROM expenses 
-                WHERE date LIKE %s OR date LIKE %s
+                WHERE (date LIKE %s OR date LIKE %s)
+                  AND COALESCE(source, 'manual') != 'plaid_sandbox'
                 ORDER BY date DESC, id DESC
             """, (f"{year}-{month_num.zfill(2)}-%", f"{month_num.zfill(2)}-%{year}"))
             rows = cursor.fetchall()
@@ -176,7 +177,8 @@ def get_month_report(month: Optional[str] = None) -> Dict[str, Dict[str, float]]
             cursor.execute("""
                 SELECT category, SUM(amount) as spent 
                 FROM expenses 
-                WHERE date LIKE %s OR date LIKE %s
+                WHERE (date LIKE %s OR date LIKE %s)
+                  AND COALESCE(source, 'manual') != 'plaid_sandbox'
                 GROUP BY category
             """, (f"{year}-{month_num.zfill(2)}-%", f"{month_num.zfill(2)}-%{year}"))
             expenses = {row[0]: float(row[1]) for row in cursor.fetchall()}

@@ -179,19 +179,26 @@ class PlaidRepository:
     async def import_transactions(self, transactions: list, category_map: Dict[str, str]) -> int:
         """
         Import Plaid transactions into the legacy expenses table.
-        Skips duplicates (identified by plaid_transaction_id stored in a note column
-        or by checking date+amount+category).
+        Skips duplicates (by plaid_transaction_id).
+        Marks rows with source='plaid_sandbox' when PLAID_ENV=sandbox,
+        otherwise source='plaid'. Sandbox rows are excluded from finance stats.
         Returns count of newly added rows.
         """
         if not transactions:
             return 0
 
+        plaid_env = os.getenv("PLAID_ENV", "sandbox").lower()
+        source = "plaid_sandbox" if plaid_env == "sandbox" else "plaid"
+
         added = 0
         async with self._pool.acquire() as conn:
-            # Ensure expenses table has plaid_transaction_id column
             await conn.execute("""
                 ALTER TABLE expenses
                 ADD COLUMN IF NOT EXISTS plaid_transaction_id TEXT UNIQUE
+            """)
+            await conn.execute("""
+                ALTER TABLE expenses
+                ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual'
             """)
 
             for txn in transactions:
@@ -210,10 +217,10 @@ class PlaidRepository:
 
                 try:
                     await conn.execute("""
-                        INSERT INTO expenses (category, amount, date, plaid_transaction_id)
-                        VALUES ($1, $2, $3, $4)
+                        INSERT INTO expenses (category, amount, date, plaid_transaction_id, source)
+                        VALUES ($1, $2, $3, $4, $5)
                         ON CONFLICT (plaid_transaction_id) DO NOTHING
-                    """, budget_category, float(amount), str(txn_date), txn_id)
+                    """, budget_category, float(amount), str(txn_date), txn_id, source)
                     added += 1
                 except Exception as e:
                     logger.warning("Failed to import transaction %s: %s", txn_id, e)
