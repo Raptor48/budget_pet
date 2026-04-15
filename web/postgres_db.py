@@ -63,14 +63,13 @@ def get_expenses_for_month(month: str) -> List[Tuple[int, str, float, str]]:
             # month format: YYYY-MM, find dates like YYYY-MM-DD or MM-DD-YYYY
             year, month_num = month.split('-')
             cursor.execute("""
-                SELECT id, category, amount, date 
+                SELECT id, category, amount, date, COALESCE(source, 'manual') as source
                 FROM expenses 
-                WHERE (date LIKE %s OR date LIKE %s)
-                  AND COALESCE(source, 'manual') != 'plaid_sandbox'
+                WHERE date LIKE %s OR date LIKE %s
                 ORDER BY date DESC, id DESC
             """, (f"{year}-{month_num.zfill(2)}-%", f"{month_num.zfill(2)}-%{year}"))
             rows = cursor.fetchall()
-            return [(int(r[0]), r[1], float(r[2]), r[3]) for r in rows]
+            return [(int(r[0]), r[1], float(r[2]), r[3], r[4]) for r in rows]
 
 def add_expense(category: str, amount: float, date: Optional[str] = None) -> Tuple[bool, float]:
     """Add expense. Returns (exceeded, remaining_after)."""

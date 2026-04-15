@@ -16,6 +16,7 @@ class ExpenseUpdate(BaseModel):
 class Expense(ExpenseBase):
     id: int
     date: str
+    source: str = "manual"
 
     class Config:
         from_attributes = True

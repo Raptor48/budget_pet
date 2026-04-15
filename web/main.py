@@ -94,24 +94,27 @@ async def health_check():
 @app.get("/expenses", response_model=List[Expense])
 async def get_expenses(
     month: str = Query(..., description="Month in YYYY-MM format"),
-    query: Optional[str] = Query(None, description="Search query for filtering")
+    query: Optional[str] = Query(None, description="Search query for filtering"),
+    source: Optional[str] = Query(None, description="Filter by source: manual, plaid, plaid_sandbox")
 ):
     """Get expenses for a specific month with optional filtering."""
     try:
         expenses = get_expenses_for_month(month)
 
-        # Apply search filter if provided
         if query:
             expenses = [e for e in expenses if matches(e, query)]
 
-        # Convert to Expense objects
+        if source:
+            expenses = [e for e in expenses if e[4] == source]
+
         result = []
-        for expense_id, category, amount, date in expenses:
+        for expense_id, category, amount, date, src in expenses:
             result.append(Expense(
                 id=expense_id,
                 category=category,
                 amount=float(amount),
-                date=date
+                date=date,
+                source=src
             ))
 
         return result

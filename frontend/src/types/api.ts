@@ -1,8 +1,11 @@
+export type ExpenseSource = "manual" | "plaid" | "plaid_sandbox";
+
 export interface Expense {
   id: number;
   category: string;
   amount: number;
   date: string;
+  source: ExpenseSource;
 }
 
 export interface ExpenseCreate {
