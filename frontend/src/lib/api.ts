@@ -341,6 +341,9 @@ export const plaidApi = {
   deleteItem: (itemId: string): Promise<{ message: string }> =>
     apiRequest(`/api/plaid/items/${itemId}`, { method: 'DELETE' }),
 
+  resetCursor: (itemId: string): Promise<{ message: string }> =>
+    apiRequest(`/api/plaid/items/${itemId}/reset-cursor`, { method: 'POST' }),
+
   syncNow: (): Promise<PlaidSyncResult[]> =>
     apiRequest('/api/plaid/sync', { method: 'POST' }),
 
