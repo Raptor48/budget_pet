@@ -6,6 +6,10 @@ export interface Expense {
   amount: number;
   date: string;
   source: ExpenseSource;
+  merchant_name?: string | null;
+  plaid_category_raw?: string | null;
+  plaid_pfc_category?: string | null;
+  is_pending?: boolean;
 }
 
 export interface ExpenseCreate {
@@ -39,7 +43,6 @@ export interface ReportItem {
   budget: number;
   spent: number;
   remaining: number;
-  rolled_over: number;
 }
 
 export interface ReportResponse {
@@ -111,6 +114,8 @@ export interface CreditCard {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  last_synced_at?: string | null;
+  plaid_account_id?: string | null;
 }
 
 export interface CreditCardCreate {
@@ -154,13 +159,16 @@ export interface PaymentCreate {
   note?: string;
 }
 
+export type IncomePerson = 'Denis' | 'Taya' | 'Plaid';
+
 export interface Income {
   id: number;
-  person: 'Denis' | 'Taya';
+  person: IncomePerson;
   amount_cents: number;
   occurred_at: string;
   note?: string;
   created_at: string;
+  plaid_transaction_id?: string | null;
 }
 
 export interface IncomeCreate {

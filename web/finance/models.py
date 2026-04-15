@@ -140,18 +140,19 @@ class PaymentOut(BaseModel):
 
 
 class IncomeBase(BaseModel):
-    person: Literal["Denis", "Taya"]
+    person: Literal["Denis", "Taya", "Plaid"]
     amount_cents: conint(ge=0)
     occurred_at: date
     note: Optional[str] = Field(None, max_length=500)
 
 
 class IncomeCreate(IncomeBase):
-    occurred_at: Optional[date] = None  # Defaults to today if not provided
+    # Allows "Denis", "Taya", or "Plaid"; defaults occurred_at to today
+    occurred_at: Optional[date] = None
 
 
 class IncomeUpdate(BaseModel):
-    person: Optional[Literal["Denis", "Taya"]] = None
+    person: Optional[Literal["Denis", "Taya", "Plaid"]] = None
     amount_cents: Optional[conint(ge=0)] = None
     occurred_at: Optional[date] = None
     note: Optional[str] = Field(None, max_length=500)
@@ -160,6 +161,7 @@ class IncomeUpdate(BaseModel):
 class IncomeOut(IncomeBase):
     id: int
     created_at: datetime
+    plaid_transaction_id: Optional[str] = None
 
     class Config:
         from_attributes = True

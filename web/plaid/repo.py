@@ -2,6 +2,7 @@
 Plaid database repository (asyncpg).
 """
 import os
+import json
 import logging
 from datetime import date, datetime
 from typing import Optional, List, Dict, Any
@@ -59,6 +60,7 @@ class PlaidRepository:
                     synced_at           TIMESTAMPTZ DEFAULT now(),
                     transactions_added  INT DEFAULT 0,
                     balances_updated    INT DEFAULT 0,
+                    income_added        INT DEFAULT 0,
                     status              TEXT,
                     error_msg           TEXT
                 )
@@ -69,6 +71,45 @@ class PlaidRepository:
                     budget_category TEXT NOT NULL
                 )
             """)
+            # Migrations: extend expenses table with Plaid-enriched fields
+            for col_sql in [
+                "ALTER TABLE expenses ADD COLUMN IF NOT EXISTS plaid_transaction_id TEXT UNIQUE",
+                "ALTER TABLE expenses ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual'",
+                "ALTER TABLE expenses ADD COLUMN IF NOT EXISTS merchant_name TEXT",
+                "ALTER TABLE expenses ADD COLUMN IF NOT EXISTS plaid_category_raw TEXT",
+                "ALTER TABLE expenses ADD COLUMN IF NOT EXISTS plaid_pfc_category TEXT",
+                "ALTER TABLE expenses ADD COLUMN IF NOT EXISTS is_pending BOOLEAN DEFAULT FALSE",
+                "ALTER TABLE expenses ADD COLUMN IF NOT EXISTS plaid_account_id TEXT",
+            ]:
+                await conn.execute(col_sql)
+            # Migration: extend finance_income with plaid_transaction_id
+            await conn.execute(
+                "ALTER TABLE finance_income ADD COLUMN IF NOT EXISTS plaid_transaction_id TEXT UNIQUE"
+            )
+            # Migration: widen person CHECK constraint to include 'Plaid'
+            await conn.execute("""
+                DO $$
+                BEGIN
+                    ALTER TABLE finance_income DROP CONSTRAINT IF EXISTS finance_income_person_check;
+                EXCEPTION WHEN OTHERS THEN NULL;
+                END $$;
+            """)
+            await conn.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint
+                        WHERE conname = 'finance_income_person_check_v2'
+                    ) THEN
+                        ALTER TABLE finance_income ADD CONSTRAINT finance_income_person_check_v2
+                            CHECK (person IN ('Denis', 'Taya', 'Plaid'));
+                    END IF;
+                END $$;
+            """)
+            # Migration: add income_added column to plaid_sync_log if missing
+            await conn.execute(
+                "ALTER TABLE plaid_sync_log ADD COLUMN IF NOT EXISTS income_added INT DEFAULT 0"
+            )
         logger.info("Plaid tables initialised")
 
     # ------------------------------------------------------------------
@@ -131,12 +172,15 @@ class PlaidRepository:
     # ------------------------------------------------------------------
 
     async def log_sync(self, item_id: str, transactions_added: int,
-                       balances_updated: int, status: str, error_msg: Optional[str] = None) -> None:
+                       balances_updated: int, status: str,
+                       error_msg: Optional[str] = None,
+                       income_added: int = 0) -> None:
         async with self._pool.acquire() as conn:
             await conn.execute("""
-                INSERT INTO plaid_sync_log (item_id, transactions_added, balances_updated, status, error_msg)
-                VALUES ($1, $2, $3, $4, $5)
-            """, item_id, transactions_added, balances_updated, status, error_msg)
+                INSERT INTO plaid_sync_log
+                    (item_id, transactions_added, income_added, balances_updated, status, error_msg)
+                VALUES ($1, $2, $3, $4, $5, $6)
+            """, item_id, transactions_added, income_added, balances_updated, status, error_msg)
 
     async def get_sync_log(self, limit: int = 50) -> List[dict]:
         async with self._pool.acquire() as conn:
@@ -176,12 +220,48 @@ class PlaidRepository:
     # Transaction import into expenses table
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _extract_txn_fields(txn) -> dict:
+        """Extract all relevant fields from a Plaid transaction object."""
+        # Plaid SDK objects support dict-like .get() access
+        merchant_name = txn.get("merchant_name") or txn.get("name") or ""
+        plaid_cats = txn.get("category") or []
+        plaid_category_raw = json.dumps(plaid_cats) if plaid_cats else None
+
+        # personal_finance_category is a nested object or dict
+        pfc = txn.get("personal_finance_category")
+        plaid_pfc_category = None
+        if pfc is not None:
+            if hasattr(pfc, "detailed"):
+                plaid_pfc_category = pfc.detailed
+            elif isinstance(pfc, dict):
+                plaid_pfc_category = pfc.get("detailed")
+
+        is_pending = bool(txn.get("pending", False))
+        account_id = txn.get("account_id")
+
+        txn_date = txn.get("date")
+        if isinstance(txn_date, str):
+            txn_date = date.fromisoformat(txn_date)
+
+        return {
+            "transaction_id": txn.get("transaction_id", ""),
+            "amount": txn.get("amount", 0),
+            "date": txn_date,
+            "merchant_name": merchant_name,
+            "plaid_cats": plaid_cats,
+            "plaid_category_raw": plaid_category_raw,
+            "plaid_pfc_category": plaid_pfc_category,
+            "is_pending": is_pending,
+            "account_id": account_id,
+        }
+
     async def import_transactions(self, transactions: list, category_map: Dict[str, str]) -> int:
         """
-        Import Plaid transactions into the legacy expenses table.
-        Skips duplicates (by plaid_transaction_id).
-        Marks rows with source='plaid_sandbox' when PLAID_ENV=sandbox,
-        otherwise source='plaid'. Sandbox rows are excluded from finance stats.
+        Import Plaid debit transactions into the expenses table.
+        Enriches rows with merchant_name, plaid_category_raw, plaid_pfc_category,
+        is_pending, plaid_account_id. Skips duplicates by plaid_transaction_id.
+        Marks source='plaid_sandbox' when PLAID_ENV=sandbox, otherwise 'plaid'.
         Returns count of newly added rows.
         """
         if not transactions:
@@ -192,38 +272,95 @@ class PlaidRepository:
 
         added = 0
         async with self._pool.acquire() as conn:
-            await conn.execute("""
-                ALTER TABLE expenses
-                ADD COLUMN IF NOT EXISTS plaid_transaction_id TEXT UNIQUE
-            """)
-            await conn.execute("""
-                ALTER TABLE expenses
-                ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual'
-            """)
-
             for txn in transactions:
-                # Skip positive amounts (income/refunds) — only import debits
-                amount = txn.get("amount", 0)
+                fields = self._extract_txn_fields(txn)
+                amount = fields["amount"]
+
+                # Only import debits (positive amount in Plaid = money leaving account)
                 if amount <= 0:
                     continue
 
-                txn_id = txn.get("transaction_id", "")
-                txn_date = txn.get("date")
-                if isinstance(txn_date, str):
-                    txn_date = date.fromisoformat(txn_date)
-
-                plaid_cats = txn.get("category") or []
-                budget_category = self.map_plaid_category(plaid_cats, category_map)
+                budget_category = self.map_plaid_category(fields["plaid_cats"], category_map)
 
                 try:
                     await conn.execute("""
-                        INSERT INTO expenses (category, amount, date, plaid_transaction_id, source)
-                        VALUES ($1, $2, $3, $4, $5)
-                        ON CONFLICT (plaid_transaction_id) DO NOTHING
-                    """, budget_category, float(amount), str(txn_date), txn_id, source)
+                        INSERT INTO expenses (
+                            category, amount, date, plaid_transaction_id, source,
+                            merchant_name, plaid_category_raw, plaid_pfc_category,
+                            is_pending, plaid_account_id
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                        ON CONFLICT (plaid_transaction_id) DO UPDATE SET
+                            is_pending = EXCLUDED.is_pending,
+                            merchant_name = EXCLUDED.merchant_name,
+                            plaid_category_raw = EXCLUDED.plaid_category_raw,
+                            plaid_pfc_category = EXCLUDED.plaid_pfc_category
+                    """,
+                        budget_category, float(amount), str(fields["date"]),
+                        fields["transaction_id"], source,
+                        fields["merchant_name"], fields["plaid_category_raw"],
+                        fields["plaid_pfc_category"], fields["is_pending"],
+                        fields["account_id"]
+                    )
                     added += 1
                 except Exception as e:
-                    logger.warning("Failed to import transaction %s: %s", txn_id, e)
+                    logger.warning("Failed to import transaction %s: %s", fields["transaction_id"], e)
+
+        return added
+
+    async def import_income(self, transactions: list) -> int:
+        """
+        Import Plaid credit transactions (amount < 0) into finance_income as person='Plaid'.
+        Skips refunds/returns by checking personal_finance_category when available.
+        Skips duplicates by plaid_transaction_id.
+        Returns count of newly added income rows.
+        """
+        if not transactions:
+            return 0
+
+        # Categories that are NOT income (refunds, cashback, adjustments)
+        non_income_pfc = {
+            "GENERAL_MERCHANDISE", "FOOD_AND_DRINK", "TRAVEL", "ENTERTAINMENT",
+            "PERSONAL_CARE", "GENERAL_SERVICES", "HOME_IMPROVEMENT",
+            "MEDICAL", "RENT_AND_UTILITIES", "LOAN_PAYMENTS",
+        }
+
+        added = 0
+        async with self._pool.acquire() as conn:
+            for txn in transactions:
+                fields = self._extract_txn_fields(txn)
+                amount = fields["amount"]
+
+                # Only credits (negative amount = money coming in)
+                if amount >= 0:
+                    continue
+
+                # Filter out non-income by personal_finance_category primary
+                pfc_primary = None
+                pfc = txn.get("personal_finance_category")
+                if pfc is not None:
+                    if hasattr(pfc, "primary"):
+                        pfc_primary = pfc.primary
+                    elif isinstance(pfc, dict):
+                        pfc_primary = pfc.get("primary")
+
+                if pfc_primary and pfc_primary in non_income_pfc:
+                    continue
+
+                amount_cents = int(round(abs(amount) * 100))
+                txn_date = fields["date"] or date.today()
+                note = fields["merchant_name"] or fields["transaction_id"]
+
+                try:
+                    await conn.execute("""
+                        INSERT INTO finance_income
+                            (person, amount_cents, occurred_at, note, plaid_transaction_id)
+                        VALUES ($1, $2, $3, $4, $5)
+                        ON CONFLICT (plaid_transaction_id) DO NOTHING
+                    """, "Plaid", amount_cents, str(txn_date), note, fields["transaction_id"])
+                    added += 1
+                except Exception as e:
+                    logger.warning("Failed to import income %s: %s", fields["transaction_id"], e)
 
         return added
 
@@ -249,7 +386,6 @@ class PlaidRepository:
                 acct_type = acct.get("type", "")
 
                 if acct_type in ("credit", "loan"):
-                    # Try credit cards
                     result = await conn.execute("""
                         UPDATE finance_credit_cards
                         SET current_balance_cents = $1, updated_at = now()
@@ -259,7 +395,6 @@ class PlaidRepository:
                         updated += 1
                         continue
 
-                    # Try loans
                     result = await conn.execute("""
                         UPDATE finance_loans
                         SET current_balance_cents = $1, updated_at = now()
@@ -267,6 +402,113 @@ class PlaidRepository:
                     """, balance_cents, name)
                     if result != "UPDATE 0":
                         updated += 1
+
+        return updated
+
+    async def sync_liabilities(self, liabilities: dict) -> int:
+        """
+        Update credit card details (APR, min_payment, due_date, credit_limit)
+        and loan details from Plaid Liabilities API data.
+        Matches by account_id stored in plaid_account_id column (if available)
+        or falls back to name matching.
+        Returns count of updated records.
+        """
+        updated = 0
+        async with self._pool.acquire() as conn:
+            # Ensure plaid_account_id columns exist on finance tables
+            for sql in [
+                "ALTER TABLE finance_credit_cards ADD COLUMN IF NOT EXISTS plaid_account_id TEXT",
+                "ALTER TABLE finance_loans ADD COLUMN IF NOT EXISTS plaid_account_id TEXT",
+                "ALTER TABLE finance_credit_cards ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMPTZ",
+                "ALTER TABLE finance_loans ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMPTZ",
+            ]:
+                await conn.execute(sql)
+
+            # Sync credit card liabilities
+            for card_liability in liabilities.get("credit", []):
+                account_id = card_liability.get("account_id", "")
+                aprs = card_liability.get("aprs") or []
+                min_payment = card_liability.get("minimum_payment_amount")
+                last_payment_date = card_liability.get("last_payment_date")
+                next_due_date = card_liability.get("next_payment_due_date")
+                last_stmt_balance = card_liability.get("last_statement_balance")
+                credit_limit = card_liability.get("nominal_apr")  # fallback
+
+                # Get APR: prefer purchase APR
+                apr = None
+                for apr_entry in aprs:
+                    apr_type = apr_entry.get("apr_type", "")
+                    if "purchase" in apr_type.lower() or apr is None:
+                        apr = apr_entry.get("apr_percentage")
+
+                min_payment_cents = int(round(min_payment * 100)) if min_payment is not None else None
+                last_stmt_cents = int(round(last_stmt_balance * 100)) if last_stmt_balance is not None else None
+
+                # Build update fields
+                set_parts = ["last_synced_at = now()"]
+                params: list = []
+                idx = 1
+
+                if apr is not None:
+                    set_parts.append(f"apr_percent = ${idx}")
+                    params.append(float(apr))
+                    idx += 1
+                if min_payment_cents is not None:
+                    set_parts.append(f"min_payment_cents = ${idx}")
+                    params.append(min_payment_cents)
+                    idx += 1
+                if last_stmt_cents is not None:
+                    set_parts.append(f"current_balance_cents = ${idx}")
+                    params.append(last_stmt_cents)
+                    idx += 1
+                if next_due_date:
+                    set_parts.append(f"due_day = ${idx}")
+                    try:
+                        from datetime import date as dt_date
+                        params.append(dt_date.fromisoformat(str(next_due_date)).day)
+                    except Exception:
+                        params.append(None)
+                    idx += 1
+
+                params.append(account_id)
+                result = await conn.execute(f"""
+                    UPDATE finance_credit_cards
+                    SET {', '.join(set_parts)}, plaid_account_id = ${idx}
+                    WHERE plaid_account_id = ${idx} AND is_active = TRUE
+                """, *params)
+
+                if result != "UPDATE 0":
+                    updated += 1
+
+            # Sync loan liabilities (student loans)
+            for loan in liabilities.get("student", []):
+                account_id = loan.get("account_id", "")
+                interest_rate = loan.get("interest_rate_percentage")
+                min_payment = loan.get("minimum_payment_amount")
+                outstanding = loan.get("outstanding_interest_amount")
+
+                set_parts = ["last_synced_at = now()"]
+                params = []
+                idx = 1
+
+                if interest_rate is not None:
+                    set_parts.append(f"apr_percent = ${idx}")
+                    params.append(float(interest_rate))
+                    idx += 1
+                if min_payment is not None:
+                    set_parts.append(f"min_payment_cents = ${idx}")
+                    params.append(int(round(min_payment * 100)))
+                    idx += 1
+
+                params.append(account_id)
+                result = await conn.execute(f"""
+                    UPDATE finance_loans
+                    SET {', '.join(set_parts)}, plaid_account_id = ${idx}
+                    WHERE plaid_account_id = ${idx} AND is_active = TRUE
+                """, *params)
+
+                if result != "UPDATE 0":
+                    updated += 1
 
         return updated
 

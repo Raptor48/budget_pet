@@ -9,11 +9,11 @@ logger = logging.getLogger(__name__)
 
 async def sync_all_items() -> List[dict]:
     """
-    Sync transactions and balances for every connected Plaid item.
+    Sync transactions, income and balances for every connected Plaid item.
     Called both by the scheduler and by the manual /api/plaid/sync endpoint.
     """
     from .repo import get_plaid_repo
-    from .client import get_transactions_sync, get_account_balances
+    from .client import get_transactions_sync, get_account_balances, get_liabilities
 
     repo = get_plaid_repo()
     items = await repo.get_all_items_with_tokens()
@@ -25,6 +25,7 @@ async def sync_all_items() -> List[dict]:
         cursor = item.get("cursor")
 
         transactions_added = 0
+        income_added = 0
         balances_updated = 0
         status = "ok"
         error_msg = None
@@ -33,26 +34,34 @@ async def sync_all_items() -> List[dict]:
             # --- Transactions sync ---
             category_map = await repo.get_category_map()
             txn_data = get_transactions_sync(access_token, cursor)
-            transactions_added = await repo.import_transactions(txn_data["added"], category_map)
+            all_txns = txn_data["added"]
+
+            transactions_added = await repo.import_transactions(all_txns, category_map)
+            income_added = await repo.import_income(all_txns)
             await repo.update_cursor(item_id, txn_data["next_cursor"])
 
             # --- Balance sync ---
             accounts = get_account_balances(access_token)
             balances_updated = await repo.sync_balances(accounts)
 
+            # --- Liabilities sync (APR, min payment, due date) ---
+            liabilities = get_liabilities(access_token)
+            await repo.sync_liabilities(liabilities)
+
             logger.info(
-                "Plaid sync OK: item=%s txn_added=%d balances_updated=%d",
-                item_id, transactions_added, balances_updated
+                "Plaid sync OK: item=%s txn_added=%d income_added=%d balances_updated=%d",
+                item_id, transactions_added, income_added, balances_updated
             )
         except Exception as e:
             status = "error"
             error_msg = str(e)
             logger.error("Plaid sync failed for item %s: %s", item_id, e)
 
-        await repo.log_sync(item_id, transactions_added, balances_updated, status, error_msg)
+        await repo.log_sync(item_id, transactions_added, balances_updated, status, error_msg, income_added)
         results.append({
             "item_id": item_id,
             "transactions_added": transactions_added,
+            "income_added": income_added,
             "balances_updated": balances_updated,
             "status": status,
             "error_msg": error_msg,

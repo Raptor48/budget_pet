@@ -10,7 +10,7 @@ import { RecentExpenses } from "@/components/dashboard/recent-expenses";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { format } from "date-fns";
 import { useState } from "react";
-import { DollarSign, TrendingDown, CreditCard } from "lucide-react";
+import { DollarSign, TrendingDown, CreditCard, TrendingUp } from "lucide-react";
 
 export function SimpleDashboard() {
   const currentDate = new Date();
@@ -90,7 +90,7 @@ export function SimpleDashboard() {
     );
   }
 
-  // Вычисляем общие метрики
+  // Budget metrics from report
   const totalBudget = Object.values(report?.report || {}).reduce(
     (sum, item) => sum + item.budget, 0
   );
@@ -100,10 +100,17 @@ export function SimpleDashboard() {
   const totalRemaining = Object.values(report?.report || {}).reduce(
     (sum, item) => sum + item.remaining, 0
   );
-  
-  // Subtract recurring expenses from remaining budget
-  const recurringExpensesTotal = financeSummary?.debt_totals.recurring_expenses_total_cents || 0;
-  const totalRemainingAfterRecurring = totalRemaining - (recurringExpensesTotal / 100);
+
+  const recurringTotal = (financeSummary?.debt_totals.recurring_expenses_total_cents ?? 0) / 100;
+  const minPaymentsTotal = (financeSummary?.debt_totals.min_payments_cents ?? 0) / 100;
+  // Budget Remaining = budget remaining minus recurring subscriptions (not yet in expenses)
+  const budgetRemaining = totalRemaining - recurringTotal;
+
+  // Net Income = total income - min debt payments - recurring expenses
+  const incomeTotalCents = financeSummary?.income_total_cents ?? 0;
+  const netIncome = incomeTotalCents / 100 - minPaymentsTotal - recurringTotal;
+
+  const incomeByPerson: Record<string, number> = financeSummary?.income_by_person ?? {};
 
   const budgetUsage = totalBudget > 0 ? (totalSpent / totalBudget) * 100 : 0;
 
@@ -205,20 +212,49 @@ export function SimpleDashboard() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Remaining</CardTitle>
-            {totalRemainingAfterRecurring < 0 ? (
+            <CardTitle className="text-sm font-medium">Budget Remaining</CardTitle>
+            {budgetRemaining < 0 ? (
               <TrendingDown className="h-4 w-4 text-destructive" />
             ) : (
               <DollarSign className="h-4 w-4 text-muted-foreground" />
             )}
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-bold ${totalRemainingAfterRecurring < 0 ? 'text-destructive' : ''}`}>
-              ${totalRemainingAfterRecurring.toFixed(2)}
+            <div className={`text-2xl font-bold ${budgetRemaining < 0 ? 'text-destructive' : ''}`}>
+              ${budgetRemaining.toFixed(2)}
             </div>
             <p className="text-xs text-muted-foreground">
-              {totalRemainingAfterRecurring < 0 ? "Over budget!" : "Available to spend"}
+              {budgetRemaining < 0 ? "Over budget!" : "After recurring expenses"}
             </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Net Income</CardTitle>
+            {netIncome < 0 ? (
+              <TrendingDown className="h-4 w-4 text-destructive" />
+            ) : (
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            )}
+          </CardHeader>
+          <CardContent>
+            <div className={`text-2xl font-bold ${netIncome < 0 ? 'text-destructive' : 'text-green-600'}`}>
+              ${netIncome.toFixed(2)}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Income − debt payments − recurring
+            </p>
+            {Object.keys(incomeByPerson).length > 0 && (
+              <div className="mt-2 space-y-0.5">
+                {Object.entries(incomeByPerson).map(([person, cents]) => (
+                  <div key={person} className="flex justify-between text-xs text-muted-foreground">
+                    <span>{person}:</span>
+                    <span>${((cents as number) / 100).toFixed(0)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -302,53 +338,33 @@ export function SimpleDashboard() {
               {Object.entries(report?.report || {}).map(([category, data]) => {
                 const usage = data.budget > 0 ? (data.spent / data.budget) * 100 : 0;
                 const isOver = data.remaining < 0;
-                
-                // Debug logging
-                console.log(`Category ${category}:`, {
-                  spent: data.spent,
-                  budget: data.budget,
-                  remaining: data.remaining,
-                  usage: usage,
-                  isOver: isOver
-                });
-                
-                // Определяем цвет столбца
-                let barColor = 'bg-primary'; // по умолчанию синий
+
+                let barColor = 'bg-primary';
                 if (usage >= 100 || isOver) {
-                  barColor = 'bg-red-600'; // ярко красный при 100% или превышении
+                  barColor = 'bg-red-600';
                 } else if (usage > 50) {
-                  barColor = 'bg-red-400'; // светло красный при >50%
+                  barColor = 'bg-red-400';
                 }
 
                 return (
                   <div key={category} className="flex flex-col items-center min-w-[60px]">
-                    {/* Лимит сверху */}
                     <div className="text-xs text-muted-foreground text-center mb-2">
                       ${data.budget.toFixed(0)}
                     </div>
-                    
-                    {/* Компактный прогресс-бар с названием категории внутри */}
                     <div className="relative w-12 h-32 bg-slate-200 rounded-2xl flex items-center justify-center border-2 border-slate-400">
-                      {/* Прогресс-бар */}
                       <div
                         className={`absolute bottom-0 left-0 right-0 rounded-2xl transition-all duration-300 ${barColor}`}
                         style={{ height: `${Math.min(usage, 100)}%` }}
                       />
-                      {/* Текст с условным цветом */}
-                      <span 
+                      <span
                         className={`relative z-10 text-xs font-bold text-center ${
                           usage > 50 ? 'text-white' : 'text-slate-800'
                         }`}
-                        style={{ 
-                          writingMode: 'vertical-rl',
-                          textOrientation: 'mixed'
-                        }}
+                        style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
                       >
                         {category}
                       </span>
                     </div>
-                    
-                    {/* Потрачено снизу */}
                     <div className="text-xs text-center mt-2">
                       <span className={`font-medium ${isOver ? 'text-red-600' : ''}`}>
                         ${data.spent.toFixed(0)}
@@ -356,10 +372,6 @@ export function SimpleDashboard() {
                       <span className="text-muted-foreground ml-1">
                         ({usage.toFixed(0)}%)
                       </span>
-                      {/* Debug info */}
-                      <div className="text-xs text-gray-500 mt-1">
-                        {isOver ? 'OVER' : usage >= 100 ? 'FULL' : usage > 50 ? 'HIGH' : 'OK'}
-                      </div>
                     </div>
                   </div>
                 );

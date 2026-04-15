@@ -569,7 +569,8 @@ class FinanceRepository:
         pool = await self.get_pool()
         
         query = """
-            SELECT id, person, amount_cents, occurred_at, note, created_at
+            SELECT id, person, amount_cents, occurred_at, note, created_at,
+                   plaid_transaction_id
             FROM finance_income
             WHERE 1=1
         """
@@ -609,7 +610,8 @@ class FinanceRepository:
         query = """
             INSERT INTO finance_income (person, amount_cents, occurred_at, note)
             VALUES ($1, $2, $3, $4)
-            RETURNING id, person, amount_cents, occurred_at, note, created_at
+            RETURNING id, person, amount_cents, occurred_at, note, created_at,
+                      plaid_transaction_id
         """
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -653,7 +655,8 @@ class FinanceRepository:
             UPDATE finance_income 
             SET {', '.join(updates)}
             WHERE id = ${param_count}
-            RETURNING id, person, amount_cents, occurred_at, note, created_at
+            RETURNING id, person, amount_cents, occurred_at, note, created_at,
+                      plaid_transaction_id
         """
 
         async with pool.acquire() as conn:
@@ -664,7 +667,8 @@ class FinanceRepository:
         """Get income entry by ID."""
         pool = await self.get_pool()
         query = """
-            SELECT id, person, amount_cents, occurred_at, note, created_at
+            SELECT id, person, amount_cents, occurred_at, note, created_at,
+                   plaid_transaction_id
             FROM finance_income
             WHERE id = $1
         """

@@ -3,7 +3,7 @@
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface ExpenseBarChartProps {
-  data: Record<string, { spent: number; budget: number; remaining: number; rolled_over: number }>;
+  data: Record<string, { spent: number; budget: number; remaining: number }>;
 }
 
 export function ExpenseBarChart({ data }: ExpenseBarChartProps) {

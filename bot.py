@@ -209,8 +209,9 @@ def _build_income_keyboard():
         
         rows = []
         for entry in income:
+            icon = "🏦" if entry.get('person') == "Plaid" else "💵"
             rows.append([InlineKeyboardButton(
-                f"💵 {entry['person']} - ${entry['amount_cents']/100:.2f} ({entry['occurred_at']})", 
+                f"{icon} {entry['person']} - ${entry['amount_cents']/100:.2f} ({entry['occurred_at']})",
                 callback_data=f"income:{entry['id']}"
             )])
         
@@ -413,15 +414,24 @@ async def on_btn(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             text = f"📊 <b>Finance Summary - {month}</b>\n\n"
             text += f"💰 <b>Total Income:</b> ${summary['income_total_cents']/100:.2f}\n"
-            text += f"   • Denis: ${summary['income_by_person']['Denis']/100:.2f}\n"
-            text += f"   • Taya: ${summary['income_by_person']['Taya']/100:.2f}\n\n"
+            # Show all income sources dynamically (Denis, Taya, Plaid, etc.)
+            for person, cents in summary.get('income_by_person', {}).items():
+                icon = "🏦" if person == "Plaid" else "👤"
+                text += f"   {icon} {person}: ${cents/100:.2f}\n"
+            text += "\n"
             text += f"💳 <b>Total Debt:</b> ${summary['debt_totals']['combined_balance_cents']/100:.2f}\n"
             text += f"   • Loans: ${summary['debt_totals']['loans_balance_cents']/100:.2f}\n"
             text += f"   • Cards: ${summary['debt_totals']['cards_balance_cents']/100:.2f}\n\n"
-            text += f"💸 <b>Min Payments:</b> ${summary['debt_totals']['min_payments_cents']/100:.2f}\n\n"
-            
-            net_income = summary['income_total_cents'] - summary['debt_totals']['min_payments_cents']
-            text += f"📈 <b>Net Income:</b> ${net_income/100:.2f}\n"
+            text += f"💸 <b>Min Payments:</b> ${summary['debt_totals']['min_payments_cents']/100:.2f}\n"
+            recurring_total = summary['debt_totals'].get('recurring_expenses_total_cents', 0)
+            text += f"🔄 <b>Recurring Expenses:</b> ${recurring_total/100:.2f}\n\n"
+
+            # Net Income = total income - min payments - recurring
+            net_income = (summary['income_total_cents']
+                          - summary['debt_totals']['min_payments_cents']
+                          - recurring_total)
+            net_sign = "📈" if net_income >= 0 else "📉"
+            text += f"{net_sign} <b>Net Income:</b> ${net_income/100:.2f}\n"
             
             if summary['loans_estimated_close']:
                 text += f"\n🏦 <b>Estimated Loan Closures:</b>\n"
