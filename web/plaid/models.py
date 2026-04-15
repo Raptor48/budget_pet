@@ -22,6 +22,7 @@ class PlaidSyncLogEntry(BaseModel):
     item_id: str
     synced_at: datetime
     transactions_added: int
+    income_added: int = 0
     balances_updated: int
     status: str
     error_msg: Optional[str] = None
@@ -47,6 +48,7 @@ class ExchangeTokenRequest(BaseModel):
 class SyncResult(BaseModel):
     item_id: str
     transactions_added: int
+    income_added: int = 0
     balances_updated: int
     status: str
     error_msg: Optional[str] = None
