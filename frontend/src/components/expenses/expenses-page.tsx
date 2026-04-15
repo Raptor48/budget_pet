@@ -11,10 +11,11 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { expensesApi, limitsApi } from "@/lib/api";
-import { Plus, Trash2, Search, Edit } from "lucide-react";
+import { Plus, Trash2, Search, Edit, AlertCircle } from "lucide-react";
 import { format } from "date-fns";
 import { safeFormatDate } from "@/lib/date-utils";
 import { Expense, ExpenseSource } from "@/types/api";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 function SourceBadge({ source }: { source: ExpenseSource }) {
   if (source === "plaid") {
@@ -24,6 +25,36 @@ function SourceBadge({ source }: { source: ExpenseSource }) {
     return <Badge variant="outline" className="text-orange-600 border-orange-300 bg-orange-50">Test</Badge>;
   }
   return <Badge variant="outline" className="text-gray-500">Manual</Badge>;
+}
+
+function CategoryCell({ expense }: { expense: Expense }) {
+  const isUncategorized = expense.category === "Uncategorized";
+  const plaidCats: string[] = expense.plaid_category_raw
+    ? JSON.parse(expense.plaid_category_raw)
+    : [];
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="flex items-center gap-1">
+        <Badge variant="secondary">{expense.category}</Badge>
+        {isUncategorized && (expense.source === "plaid" || expense.source === "plaid_sandbox") && (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger>
+                <AlertCircle className="h-3.5 w-3.5 text-amber-500" />
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>No category mapping set. Go to Settings → Bank Connections.</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+      </div>
+      {plaidCats.length > 0 && (
+        <span className="text-xs text-muted-foreground">{plaidCats.join(" › ")}</span>
+      )}
+    </div>
+  );
 }
 
 export function ExpensesPage() {
@@ -352,6 +383,11 @@ export function ExpensesPage() {
           </CardTitle>
           <CardDescription>
             {expenses?.length || 0} expenses found
+            {expenses && expenses.length > 0 && (
+              <span className="ml-2 font-medium text-foreground">
+                — Total: ${expenses.reduce((s, e) => s + e.amount, 0).toFixed(2)}
+              </span>
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -364,6 +400,7 @@ export function ExpensesPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Date</TableHead>
+                  <TableHead>Merchant</TableHead>
                   <TableHead>Category</TableHead>
                   <TableHead>Source</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
@@ -372,12 +409,18 @@ export function ExpensesPage() {
               </TableHeader>
               <TableBody>
                 {expenses.map((expense: Expense) => (
-                  <TableRow key={expense.id}>
-                    <TableCell>
+                  <TableRow key={expense.id} className={expense.is_pending ? "opacity-60" : ""}>
+                    <TableCell className="whitespace-nowrap">
                       {safeFormatDate(expense.date, "MMM dd, yyyy")}
+                      {expense.is_pending && (
+                        <span className="ml-1 text-xs text-amber-600">(pending)</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="max-w-[160px] truncate" title={expense.merchant_name ?? ""}>
+                      {expense.merchant_name || <span className="text-muted-foreground">—</span>}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="secondary">{expense.category}</Badge>
+                      <CategoryCell expense={expense} />
                     </TableCell>
                     <TableCell>
                       <SourceBadge source={expense.source} />

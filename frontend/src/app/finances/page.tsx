@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { AppLayout } from '@/components/layout/app-layout';
 import { financeApi } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
-import { FinanceSummary, Loan, CreditCard, Income, PaymentCreate, RecurringExpense } from '@/types/api';
+import { FinanceSummary, Loan, CreditCard, Income, IncomePerson, PaymentCreate, RecurringExpense } from '@/types/api';
 import { format } from 'date-fns';
 import { Plus, CreditCard as CreditCardIcon, Banknote, DollarSign, TrendingUp, Trash2, Repeat } from 'lucide-react';
 import { LoanForm } from './_components/loan-form';
@@ -360,7 +360,18 @@ export default function FinancesPage() {
                 {cards.map((card) => (
                   <TableRow key={card.id}>
                     <TableCell className="font-medium">{card.name}</TableCell>
-                    <TableCell>{formatCurrency(card.current_balance_cents)}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-col">
+                        <span>{formatCurrency(card.current_balance_cents)}</span>
+                        {card.plaid_account_id && (
+                          <span className="text-xs text-blue-500">
+                            {card.last_synced_at
+                              ? `Plaid · ${format(new Date(card.last_synced_at), 'MMM d')}`
+                              : 'Plaid linked'}
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell>{formatCurrency(card.min_payment_cents)}</TableCell>
                     <TableCell>{card.apr_percent}%</TableCell>
                     <TableCell>{card.due_day ? `${card.due_day}` : '-'}</TableCell>
@@ -414,30 +425,40 @@ export default function FinancesPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {income.map((entry) => (
-                <TableRow key={entry.id}>
-                  <TableCell>{formatDate(entry.occurred_at)}</TableCell>
-                  <TableCell>
-                    <Badge variant={entry.person === 'Denis' ? 'default' : 'secondary'}>
-                      {entry.person}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="font-medium">{formatCurrency(entry.amount_cents)}</TableCell>
-                  <TableCell>{entry.note || '-'}</TableCell>
-                  <TableCell>
-                    <div className="flex gap-2">
-                      <IncomeForm income={entry} onSuccess={loadData} />
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleDeleteIncome(entry.id)}
+              {income.map((entry) => {
+                const isPlaid = entry.person === 'Plaid';
+                return (
+                  <TableRow key={entry.id}>
+                    <TableCell>{formatDate(entry.occurred_at)}</TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={entry.person === 'Denis' ? 'default' : entry.person === 'Taya' ? 'secondary' : 'outline'}
+                        className={isPlaid ? 'text-blue-600 border-blue-300 bg-blue-50' : ''}
                       >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
+                        {entry.person}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="font-medium">{formatCurrency(entry.amount_cents)}</TableCell>
+                    <TableCell className="max-w-[200px] truncate" title={entry.note ?? ""}>{entry.note || '-'}</TableCell>
+                    <TableCell>
+                      {isPlaid ? (
+                        <Badge variant="outline" className="text-xs text-muted-foreground">Auto-imported</Badge>
+                      ) : (
+                        <div className="flex gap-2">
+                          <IncomeForm income={entry} onSuccess={loadData} />
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleDeleteIncome(entry.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </CardContent>

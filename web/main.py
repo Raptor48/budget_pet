@@ -105,16 +105,20 @@ async def get_expenses(
             expenses = [e for e in expenses if matches(e, query)]
 
         if source:
-            expenses = [e for e in expenses if e[4] == source]
+            expenses = [e for e in expenses if e[4] == source]  # index 4 = source
 
         result = []
-        for expense_id, category, amount, date, src in expenses:
+        for expense_id, category, amount, date, src, merchant_name, plaid_cat_raw, plaid_pfc, is_pending in expenses:
             result.append(Expense(
                 id=expense_id,
                 category=category,
                 amount=float(amount),
                 date=date,
-                source=src
+                source=src,
+                merchant_name=merchant_name,
+                plaid_category_raw=plaid_cat_raw,
+                plaid_pfc_category=plaid_pfc,
+                is_pending=bool(is_pending) if is_pending is not None else False,
             ))
 
         return result

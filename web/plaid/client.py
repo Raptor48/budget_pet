@@ -11,6 +11,7 @@ from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUse
 from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
 from plaid.model.transactions_sync_request import TransactionsSyncRequest
 from plaid.model.accounts_balance_get_request import AccountsBalanceGetRequest
+from plaid.model.liabilities_get_request import LiabilitiesGetRequest
 from plaid.model.products import Products
 from plaid.model.country_code import CountryCode
 
@@ -44,7 +45,7 @@ def create_link_token(user_id: str = "default-user") -> dict:
     """Create a Plaid Link token to initialize the Plaid Link UI."""
     client = get_plaid_client()
     request = LinkTokenCreateRequest(
-        products=[Products("transactions")],
+        products=[Products("transactions"), Products("liabilities")],
         client_name="Budget Pet",
         country_codes=[CountryCode("US")],
         language="en",
@@ -102,3 +103,25 @@ def get_account_balances(access_token: str) -> list:
     request = AccountsBalanceGetRequest(access_token=access_token)
     response = client.accounts_balance_get(request)
     return response["accounts"]
+
+
+def get_liabilities(access_token: str) -> dict:
+    """
+    Fetch liabilities data: credit cards and loans with APR, min_payment,
+    last_payment_date, next_payment_due_date, last_statement_balance.
+    Returns dict with 'credit' and 'student' lists (mortgage if applicable).
+    Returns empty dict if the item does not have liabilities product.
+    """
+    client = get_plaid_client()
+    try:
+        request = LiabilitiesGetRequest(access_token=access_token)
+        response = client.liabilities_get(request)
+        liabilities = response.get("liabilities", {})
+        return {
+            "credit": liabilities.get("credit") or [],
+            "student": liabilities.get("student") or [],
+            "mortgage": liabilities.get("mortgage") or [],
+        }
+    except Exception as e:
+        logger.warning("Liabilities fetch failed (item may not have liabilities product): %s", e)
+        return {"credit": [], "student": [], "mortgage": []}
