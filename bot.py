@@ -8,6 +8,7 @@ import os, re, logging
 from datetime import datetime
 # --- telegram imports
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.error import NetworkError, TimedOut
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
 
 # --- API client imports (replacing GitHub I/O) ------------------------------
@@ -580,6 +581,17 @@ async def text_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "• Использовать команды /help"
             )
 
+# --- Error handler ---
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle errors from Telegram polling (e.g. Bad Gateway, timeouts)."""
+    error = context.error
+    if isinstance(error, (NetworkError, TimedOut)):
+        log.warning("Telegram network error (will retry): %s", error)
+    else:
+        log.error("Unhandled exception: %s", error, exc_info=error)
+
+
 # --- Main ---
 
 if __name__ == "__main__":
@@ -596,9 +608,10 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("report", report_cmd))
     app.add_handler(CallbackQueryHandler(on_btn))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_add))
+    app.add_error_handler(error_handler)
 
-    log.info("🚀 Starting API-based Telegram bot...")
-    log.info("🌐 API URL: %s", os.getenv("API_BASE_URL", "https://fastapi-production-eadf.up.railway.app"))
+    log.info("Starting API-based Telegram bot...")
+    log.info("API URL: %s", os.getenv("API_BASE_URL", "https://fastapi-production-eadf.up.railway.app"))
     
     app.run_polling(
         allowed_updates=Update.ALL_TYPES,

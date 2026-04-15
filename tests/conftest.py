@@ -1,57 +1,8 @@
 """
 Pytest configuration and fixtures.
 """
-import os
 import pytest
-import asyncio
-from typing import AsyncGenerator
-import asyncpg
 from decimal import Decimal
-
-# Test database configuration
-TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/budget_pet_test")
-
-
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create event loop for async tests."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
-
-
-@pytest.fixture(scope="session")
-async def db_pool() -> AsyncGenerator[asyncpg.Pool, None]:
-    """Create database connection pool for tests."""
-    pool = await asyncpg.create_pool(TEST_DATABASE_URL, min_size=1, max_size=5)
-    yield pool
-    await pool.close()
-
-
-@pytest.fixture(scope="function")
-async def clean_db(db_pool: asyncpg.Pool):
-    """Clean database before each test."""
-    async with db_pool.acquire() as conn:
-        # Truncate all tables
-        tables = [
-            "finance_payments",
-            "finance_income",
-            "finance_loans",
-            "finance_credit_cards",
-            "expenses",
-            "monthly_budgets",
-            "category_limits",
-            "settings",
-            "peers",
-            "budget_alerts"
-        ]
-        for table in tables:
-            await conn.execute(f"TRUNCATE TABLE {table} CASCADE")
-    yield
-    # Cleanup after test
-    async with db_pool.acquire() as conn:
-        for table in tables:
-            await conn.execute(f"TRUNCATE TABLE {table} CASCADE")
 
 
 @pytest.fixture
