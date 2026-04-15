@@ -1,12 +1,12 @@
 import re
 
-def matches(expense: tuple[int, str, float, str], query: str) -> bool:
+def matches(expense: tuple, query: str) -> bool:
     """
     Check if expense matches the search query.
     Supports: amount ranges (100..300), amount ops (>100, <=200), date ranges, date equals/prefix, category substring.
 
     Args:
-        expense: tuple (id, category, amount, date)
+        expense: tuple (id, category, amount, date, source)
         query: search query string
 
     Returns:
@@ -15,7 +15,7 @@ def matches(expense: tuple[int, str, float, str], query: str) -> bool:
     if not query.strip():
         return True
 
-    _, category, amount, date = expense
+    _, category, amount, date, *_ = expense
     tokens = query.split()
     category_lower = category.lower()
     ok_all = True

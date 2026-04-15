@@ -120,8 +120,13 @@ export const healthApi = {
 
 // Expenses API
 export const expensesApi = {
-  getAll: (month?: string, query?: string): Promise<Expense[]> =>
-    apiRequest(`/expenses${month ? `?month=${month}${query ? `&query=${query}` : ''}` : ''}`),
+  getAll: (month?: string, query?: string, source?: string): Promise<Expense[]> => {
+    if (!month) return apiRequest('/expenses');
+    const params = new URLSearchParams({ month });
+    if (query) params.set('query', query);
+    if (source) params.set('source', source);
+    return apiRequest(`/expenses?${params.toString()}`);
+  },
 
   create: (expense: ExpenseCreate): Promise<ExpenseResponse> =>
     apiRequest('/expenses', {

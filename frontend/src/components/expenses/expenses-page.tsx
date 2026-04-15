@@ -14,11 +14,22 @@ import { expensesApi, limitsApi } from "@/lib/api";
 import { Plus, Trash2, Search, Edit } from "lucide-react";
 import { format } from "date-fns";
 import { safeFormatDate } from "@/lib/date-utils";
-import { Expense } from "@/types/api";
+import { Expense, ExpenseSource } from "@/types/api";
+
+function SourceBadge({ source }: { source: ExpenseSource }) {
+  if (source === "plaid") {
+    return <Badge variant="outline" className="text-blue-600 border-blue-300 bg-blue-50">Plaid</Badge>;
+  }
+  if (source === "plaid_sandbox") {
+    return <Badge variant="outline" className="text-orange-600 border-orange-300 bg-orange-50">Test</Badge>;
+  }
+  return <Badge variant="outline" className="text-gray-500">Manual</Badge>;
+}
 
 export function ExpensesPage() {
   const [selectedMonth, setSelectedMonth] = useState(format(new Date(), "yyyy-MM"));
   const [searchQuery, setSearchQuery] = useState("");
+  const [sourceFilter, setSourceFilter] = useState<ExpenseSource | "all">("all");
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
@@ -28,8 +39,12 @@ export function ExpensesPage() {
 
   // Получаем расходы
   const { data: expenses, isLoading } = useQuery({
-    queryKey: ["expenses", selectedMonth, searchQuery],
-    queryFn: () => expensesApi.getAll(selectedMonth, searchQuery || undefined),
+    queryKey: ["expenses", selectedMonth, searchQuery, sourceFilter],
+    queryFn: () => expensesApi.getAll(
+      selectedMonth,
+      searchQuery || undefined,
+      sourceFilter !== "all" ? sourceFilter : undefined
+    ),
   });
 
   // Получаем категории
@@ -278,7 +293,7 @@ export function ExpensesPage() {
           <CardTitle>Filters</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex gap-4 items-end">
+          <div className="flex flex-wrap gap-4 items-end">
             <div className="grid gap-2">
               <Label htmlFor="month">Month</Label>
               <Select value={selectedMonth} onValueChange={setSelectedMonth}>
@@ -307,6 +322,24 @@ export function ExpensesPage() {
                 />
               </div>
             </div>
+            <div className="grid gap-2">
+              <Label>Source</Label>
+              <div className="flex gap-1">
+                {(["all", "manual", "plaid", "plaid_sandbox"] as const).map((s) => (
+                  <Button
+                    key={s}
+                    variant={sourceFilter === s ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setSourceFilter(s)}
+                  >
+                    {s === "all" && "All"}
+                    {s === "manual" && "Manual"}
+                    {s === "plaid" && "Plaid"}
+                    {s === "plaid_sandbox" && "Test"}
+                  </Button>
+                ))}
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -332,6 +365,7 @@ export function ExpensesPage() {
                 <TableRow>
                   <TableHead>Date</TableHead>
                   <TableHead>Category</TableHead>
+                  <TableHead>Source</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
                   <TableHead className="w-20">Actions</TableHead>
                 </TableRow>
@@ -344,6 +378,9 @@ export function ExpensesPage() {
                     </TableCell>
                     <TableCell>
                       <Badge variant="secondary">{expense.category}</Badge>
+                    </TableCell>
+                    <TableCell>
+                      <SourceBadge source={expense.source} />
                     </TableCell>
                     <TableCell className="text-right font-mono">
                       ${expense.amount.toFixed(2)}
