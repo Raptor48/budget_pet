@@ -15,6 +15,7 @@ class LoginResponse(BaseModel):
     success: bool
     message: str
     user: dict | None = None
+    token: str | None = None  # Bearer fallback for cross-origin cookie restrictions
 
 
 class UserCreate(BaseModel):

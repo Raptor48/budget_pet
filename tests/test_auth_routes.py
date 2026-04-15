@@ -64,7 +64,7 @@ class TestLogin:
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert "token" not in data  # token must NOT be in response body
+        assert "token" in data  # token included as Bearer fallback for cross-origin
         assert "session_token" in response.cookies
         repo.ensure_owner_exists.assert_called_once()
         repo.create_session.assert_called_once()

@@ -57,6 +57,14 @@ def _clear_failed_attempts(ip: str) -> None:
     _failed_attempts.pop(ip, None)
 
 
+def _extract_bearer(request: Request) -> Optional[str]:
+    """Extract Bearer token from Authorization header (cross-origin fallback)."""
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        return auth_header[7:].strip()
+    return None
+
+
 def _get_client_ip(request: Request) -> str:
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded:
@@ -109,6 +117,7 @@ async def login(login_data: LoginRequest, request: Request, response: Response):
             success=True,
             message="Login successful",
             user={"username": user["username"], "is_owner": user["is_owner"]},
+            token=token,
         )
 
     # 2. Regular DB auth
@@ -125,12 +134,13 @@ async def login(login_data: LoginRequest, request: Request, response: Response):
         success=True,
         message="Login successful",
         user={"username": user["username"], "is_owner": user["is_owner"]},
+        token=token,
     )
 
 
 @router.post("/logout")
 async def logout(request: Request, response: Response):
-    token = request.cookies.get("session_token")
+    token = request.cookies.get("session_token") or _extract_bearer(request)
     if token:
         repo = get_auth_repo()
         await repo.delete_session(token)
@@ -140,7 +150,7 @@ async def logout(request: Request, response: Response):
 
 @router.get("/me")
 async def get_current_user(request: Request):
-    token = request.cookies.get("session_token")
+    token = request.cookies.get("session_token") or _extract_bearer(request)
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     repo = get_auth_repo()
@@ -155,7 +165,7 @@ async def get_current_user(request: Request):
 
 @router.get("/status")
 async def auth_status(request: Request):
-    token = request.cookies.get("session_token")
+    token = request.cookies.get("session_token") or _extract_bearer(request)
     if not token:
         return {"authenticated": False}
     repo = get_auth_repo()
@@ -169,7 +179,7 @@ async def auth_status(request: Request):
 
 async def _require_owner(request: Request) -> dict:
     """Return current user if they are an owner, else raise 403."""
-    token = request.cookies.get("session_token")
+    token = request.cookies.get("session_token") or _extract_bearer(request)
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     repo = get_auth_repo()

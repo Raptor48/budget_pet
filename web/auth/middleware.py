@@ -33,6 +33,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         token = request.cookies.get("session_token")
+        # Fallback: Authorization: Bearer header for cross-origin cookie restrictions
+        if not token:
+            auth_header = request.headers.get("Authorization")
+            if auth_header and auth_header.startswith("Bearer "):
+                token = auth_header[7:].strip()
+
         if not token:
             return JSONResponse(
                 status_code=401,
