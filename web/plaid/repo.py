@@ -332,6 +332,35 @@ class PlaidRepository:
 
         return added
 
+    async def remove_transactions(self, removed: list) -> int:
+        """
+        Delete Plaid-removed transactions from expenses and finance_income.
+        Plaid 'removed' items contain only transaction_id.
+        Returns total count of deleted rows across both tables.
+        """
+        if not removed:
+            return 0
+
+        ids = [txn.get("transaction_id", "") for txn in removed if txn.get("transaction_id")]
+        if not ids:
+            return 0
+
+        deleted = 0
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                "DELETE FROM expenses WHERE plaid_transaction_id = ANY($1::text[])", ids
+            )
+            deleted += int(result.split()[-1])
+
+            result = await conn.execute(
+                "DELETE FROM finance_income WHERE plaid_transaction_id = ANY($1::text[])", ids
+            )
+            deleted += int(result.split()[-1])
+
+        if deleted:
+            logger.info("Removed %d Plaid-deleted transaction(s) from DB", deleted)
+        return deleted
+
     async def import_income(self, transactions: list) -> int:
         """
         Import Plaid credit transactions (amount < 0) into finance_income as person='Plaid'.
