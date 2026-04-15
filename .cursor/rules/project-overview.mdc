@@ -1,0 +1,43 @@
+---
+description: Budget Pet project structure, stack, conventions and docs reference
+alwaysApply: true
+---
+
+# Budget Pet — Project Context
+
+## Stack
+
+| Layer | Tech |
+|-------|------|
+| Backend | Python 3.11, FastAPI, Uvicorn |
+| Frontend | Next.js 15, React 19, TypeScript 5, Tailwind CSS 4, TanStack Query |
+| Bot | python-telegram-bot 22 |
+| DB | PostgreSQL on Railway (`psycopg2` legacy + `asyncpg` finance/plaid) |
+| Hosting | Railway (3 services: FastAPI, Next.js, telegram bot) |
+
+## Key Conventions
+
+- **Two DB drivers** — `web/postgres_db.py` (psycopg2, sync) for legacy routes; `web/finance/repo.py` and `web/plaid/repo.py` (asyncpg, async) for finance/plaid. Never mix them.
+- **Auth** — Sessions in memory. `/api/*` protected by `AuthMiddleware` (cookie or `Authorization: Bearer`). Legacy routes `/expenses`, `/limits`, `/report` are intentionally unprotected (bot compatibility).
+- **`expenses.source`** — `manual` | `plaid` | `plaid_sandbox`. Rows with `plaid_sandbox` are excluded from all reports and statistics.
+- **Every new feature** — separate module, not inside large existing files.
+- **Docs are source of truth** — always check `docs/` before implementing. Key files: `docs/architecture.md`, `docs/api.md`, `docs/plaid.md`, `docs/bot.md`.
+
+## Repo Structure
+
+```
+budget_pet/
+├── web/            # FastAPI app (main.py, auth/, finance/, plaid/)
+├── services/       # Shared adapters (bot_adapter, finance_adapter, search_filter)
+├── frontend/src/   # Next.js (app/, components/, lib/, types/)
+├── bot.py          # Telegram bot entry point
+├── tests/          # pytest
+└── docs/           # Full documentation in Russian
+```
+
+## Plaid Integration
+
+- Products: `transactions` + `liabilities`
+- Expenses synced to `expenses` table with full metadata (merchant_name, plaid_category_raw, plaid_pfc_category, is_pending)
+- Income (amount < 0) synced to `finance_income` with `person='Plaid'`
+- Liabilities sync updates APR, min_payment, due_day on credit cards and loans

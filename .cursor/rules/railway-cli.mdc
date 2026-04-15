@@ -1,0 +1,46 @@
+---
+description: Railway CLI is available — use it for logs, deploy, variables and DB access
+alwaysApply: true
+---
+
+# Railway CLI
+
+Railway CLI is installed and authenticated. Use it to interact with production services without opening the dashboard.
+
+## Common Commands
+
+```bash
+# View logs (most useful for debugging)
+railway logs --service FastAPI --lines 50
+railway logs --service "telegram bot" --lines 50
+railway logs --service "Next.js" --lines 50
+
+# Deploy manually
+railway up --service FastAPI
+
+# Inspect environment variables
+railway variables --service FastAPI
+railway variables --service "telegram bot"
+
+# Connect to production PostgreSQL
+railway connect Postgres
+
+# Run a one-off command in service context
+railway run --service FastAPI python -c "..."
+```
+
+## Services
+
+| Railway Service | What it runs |
+|----------------|-------------|
+| `FastAPI` | `uvicorn web.main:app` |
+| `Next.js` | Next.js frontend |
+| `telegram bot` | `python bot.py` |
+| `Postgres` | PostgreSQL database |
+
+## When to Use
+
+- **Crash / bot down** → `railway logs --service "telegram bot"` first
+- **DB migration needed** → `railway connect Postgres` then run SQL
+- **Env var change** → Railway Dashboard → Service → Variables (CLI read-only for secrets)
+- **Force redeploy** → `railway up --service <name>`

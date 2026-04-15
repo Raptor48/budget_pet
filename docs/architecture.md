@@ -25,20 +25,21 @@
 │  DELETE    /limits/{cat}       GET    /api/finances/income   │
 │  GET       /report             POST   /api/finances/payments │
 │  DELETE    /categories/{name}  GET    /api/finances/accounts │
-│  GET       /sync/status        ... и другие                  │
-│  GET       /healthz                                          │
+│  GET       /healthz            ... и другие                  │
 │                                                              │
-│  Auth routes:                                                │
-│  POST /api/auth/login                                        │
-│  POST /api/auth/logout                                       │
-│  GET  /api/auth/me                                           │
-│  GET  /api/auth/status                                       │
+│  Plaid routes (с auth):        Auth routes:                  │
+│  POST /api/plaid/link-token    POST /api/auth/login          │
+│  POST /api/plaid/exchange-token POST /api/auth/logout        │
+│  POST /api/plaid/sync          GET  /api/auth/me             │
+│  GET  /api/plaid/items         GET  /api/auth/status         │
+│  GET  /api/plaid/sync/log                                    │
+│  GET/PATCH /api/plaid/category-map                           │
 └──────────────┬───────────────────────────┬───────────────────┘
                │                           │
                ▼                           ▼
      ┌─────────────────┐       ┌─────────────────────┐
      │  psycopg2 (sync) │       │   asyncpg (async)   │
-     │  Legacy таблицы  │       │   Finance таблицы   │
+     │  Legacy таблицы  │       │   Finance + Plaid   │
      └────────┬─────────┘       └──────────┬──────────┘
               │                            │
               └──────────────┬─────────────┘
@@ -64,7 +65,40 @@
 | Слой | Драйвер | Таблицы | Используется в |
 |------|---------|---------|----------------|
 | Legacy | psycopg2 (sync) | `expenses`, `category_limits`, `monthly_budgets` | `web/postgres_db.py` → legacy routes |
-| Finance | asyncpg (async) | `finance_loans`, `finance_credit_cards`, `finance_payments`, `finance_income`, `finance_recurring`, `piggy_banks`, `peers`, `budget_alerts` | `web/finance/repo.py` → `/api/finances/*` |
+| Finance + Plaid | asyncpg (async) | `finance_loans`, `finance_credit_cards`, `finance_payments`, `finance_income`, `finance_recurring_expenses`, `piggy_banks`, `peers`, `budget_alerts`, `plaid_items`, `plaid_sync_log`, `plaid_category_map` | `web/finance/repo.py`, `web/plaid/repo.py` → `/api/finances/*`, `/api/plaid/*` |
+
+## Схема таблицы `expenses`
+
+```sql
+expenses (
+  id                    SERIAL PRIMARY KEY,
+  category              TEXT NOT NULL,
+  amount                NUMERIC NOT NULL,
+  date                  TEXT NOT NULL,
+  -- Plaid-related (заполняются только для автоимпорта):
+  plaid_transaction_id  TEXT UNIQUE,
+  source                TEXT NOT NULL DEFAULT 'manual',  -- manual|plaid|plaid_sandbox
+  merchant_name         TEXT,
+  plaid_category_raw    TEXT,     -- JSON: ["Food and Drink","Restaurants"]
+  plaid_pfc_category    TEXT,     -- personal_finance_category.detailed
+  is_pending            BOOLEAN DEFAULT FALSE,
+  plaid_account_id      TEXT
+)
+```
+
+## Схема таблицы `finance_income`
+
+```sql
+finance_income (
+  id                    SERIAL PRIMARY KEY,
+  person                TEXT CHECK (person IN ('Denis','Taya','Plaid')),
+  amount_cents          BIGINT NOT NULL,
+  occurred_at           DATE NOT NULL,
+  note                  TEXT,
+  created_at            TIMESTAMPTZ DEFAULT NOW(),
+  plaid_transaction_id  TEXT UNIQUE  -- заполнено для Plaid-доходов
+)
+```
 
 ## Telegram Bot
 
@@ -73,7 +107,7 @@
 - **`services/bot_adapter.py`** → `AsyncBudgetApiClient` (aiohttp) — для legacy операций (расходы, лимиты, отчёты, уведомления)
 - **`services/finance_adapter.py`** (requests, sync) — для финансовых операций; при первом вызове делает `POST /api/auth/login` и кэширует сессионный токен; при 401 автоматически перелогинивается
 
-## Поток данных (добавление расхода)
+## Поток данных: добавление расхода вручную
 
 ```
 Telegram пользователь
@@ -86,10 +120,7 @@ Telegram пользователь
       ▼
    services/bot_adapter.py
       │
-      │ POST /expenses {category, amount}
-      ▼
-   AsyncBudgetApiClient._request()  [aiohttp]
-      │
+      │ POST /expenses {category, amount, source="manual"}
       ▼
    FastAPI POST /expenses
       │
@@ -97,7 +128,7 @@ Telegram пользователь
    web/postgres_db.add_expense()   [psycopg2]
       │
       ▼
-   PostgreSQL → INSERT expenses
+   PostgreSQL → INSERT expenses (source='manual')
       │
       │ (exceeded, remaining)
       ◄──────────────────────────────
@@ -106,14 +137,15 @@ Telegram пользователь
    bot.py → ответ пользователю + maybe_notify_thresholds()
 ```
 
-## Plaid Bank Integration
+## Поток данных: Plaid Bank Sync
 
 ```
 Settings UI (Next.js)
       │
       │ POST /api/plaid/link-token
       ▼
-   FastAPI → Plaid API → link_token
+   FastAPI → Plaid API (transactions + liabilities products)
+      │        → link_token
       │
       │ (Plaid Link UI открывается в браузере)
       │
@@ -121,20 +153,44 @@ Settings UI (Next.js)
       ▼
    FastAPI → Plaid API → access_token
       │
-      │ зашифровать Fernet → сохранить в plaid_items
+      │ Fernet encrypt → сохранить в plaid_items
       ▼
    PostgreSQL
 
-   APScheduler (03:00 daily)
+   APScheduler (03:00 daily) / POST /api/plaid/sync
       │
-      │ Plaid Transactions Sync API → новые транзакции → expenses
-      │ Plaid Balance API → балансы → finance_credit_cards / finance_loans
+      ├─ transactions/sync
+      │     ├─ amount > 0 → INSERT expenses
+      │     │     (merchant_name, plaid_category_raw, plaid_pfc_category,
+      │     │      is_pending, plaid_account_id, source)
+      │     └─ amount < 0 → INSERT finance_income (person='Plaid')
+      │
+      ├─ accounts/balance/get
+      │     └─ UPDATE finance_credit_cards / finance_loans (current_balance_cents)
+      │
+      └─ liabilities/get
+            ├─ credit cards → UPDATE apr_percent, min_payment_cents, due_day
+            └─ student loans → UPDATE apr_percent, min_payment_cents
+      │
       ▼
    PostgreSQL
+      │
+      └─ INSERT plaid_sync_log (transactions_added, income_added, balances_updated)
 ```
+
+## Математика дашборда
+
+| Метрика | Формула |
+|---------|---------|
+| Budget Remaining | `SUM(budget - spent)` по всем категориям − `recurring_expenses_total` |
+| Net Income | `income_total` − `min_payments` − `recurring_expenses_total` |
+| Payments & Subscriptions | `min_payments + recurring_expenses_total` |
+
+> Строки `source = 'plaid_sandbox'` исключаются из всех расчётов `SUM(spent)`.
 
 ## Важные ограничения
 
 - **Сессии в памяти** — горизонтальное масштабирование невозможно; при рестарте сервиса все пользователи разлогиниваются
-- **Legacy API без аутентификации** — `/expenses`, `/limits`, `/report` не защищены `AuthMiddleware`; это сделано намеренно для совместимости с ботом, который обращается к ним без токена
+- **Legacy API без аутентификации** — `/expenses`, `/limits`, `/report` не защищены `AuthMiddleware`; это сделано намеренно для совместимости с ботом
 - **Два DB-драйвера** — psycopg2 (sync, блокирующий) в legacy routes и asyncpg в финансовом модуле; смешивание не рекомендуется
+- **Liabilities matching** — сопоставление карт/займов с Plaid идёт по `plaid_account_id`; карты добавленные вручную до подключения Plaid не имеют `plaid_account_id` и не обновляются через Liabilities API автоматически

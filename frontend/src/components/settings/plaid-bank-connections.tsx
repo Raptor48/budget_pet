@@ -87,6 +87,14 @@ function CategoryMapEditor() {
 
   const displayMap = isEditing ? editedMap : mappings;
 
+  const addRow = () => {
+    setEditedMap([...editedMap, { plaid_category: "", budget_category: "" }]);
+  };
+
+  const removeRow = (i: number) => {
+    setEditedMap(editedMap.filter((_, idx) => idx !== i));
+  };
+
   if (isLoading) return <p className="text-sm text-muted-foreground">Loading mappings...</p>;
 
   return (
@@ -95,6 +103,11 @@ function CategoryMapEditor() {
         <p className="text-sm text-muted-foreground">
           Map Plaid categories to your budget categories. Transactions without a mapping
           go to <strong>Uncategorized</strong>.
+          {!isEditing && mappings.length === 0 && (
+            <span className="block mt-1 italic">
+              No mappings yet. Run a sync first — Plaid categories will be discovered automatically.
+            </span>
+          )}
         </p>
         {!isEditing ? (
           <Button
@@ -114,21 +127,34 @@ function CategoryMapEditor() {
         )}
       </div>
 
-      {displayMap.length === 0 ? (
-        <p className="text-sm text-muted-foreground italic">No mappings configured yet. They will appear after the first sync.</p>
-      ) : (
+      {displayMap.length === 0 && !isEditing ? null : (
         <div className="rounded-md border overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-muted/50">
               <tr>
                 <th className="text-left px-3 py-2 font-medium">Plaid Category</th>
                 <th className="text-left px-3 py-2 font-medium">Budget Category</th>
+                {isEditing && <th className="w-8" />}
               </tr>
             </thead>
             <tbody>
               {displayMap.map((m, i) => (
-                <tr key={m.plaid_category} className="border-t">
-                  <td className="px-3 py-2 text-muted-foreground">{m.plaid_category}</td>
+                <tr key={i} className="border-t">
+                  <td className="px-3 py-2 text-muted-foreground">
+                    {isEditing ? (
+                      <input
+                        className="w-full bg-background border rounded px-2 py-1 text-sm"
+                        value={editedMap[i]?.plaid_category ?? ""}
+                        onChange={(e) => {
+                          const updated = [...editedMap];
+                          updated[i] = { ...updated[i], plaid_category: e.target.value };
+                          setEditedMap(updated);
+                        }}
+                      />
+                    ) : (
+                      m.plaid_category
+                    )}
+                  </td>
                   <td className="px-3 py-2">
                     {isEditing ? (
                       <input
@@ -144,10 +170,29 @@ function CategoryMapEditor() {
                       m.budget_category
                     )}
                   </td>
+                  {isEditing && (
+                    <td className="px-2 py-2">
+                      <button
+                        type="button"
+                        className="text-muted-foreground hover:text-destructive transition-colors text-xs"
+                        onClick={() => removeRow(i)}
+                        title="Remove row"
+                      >
+                        ✕
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
           </table>
+          {isEditing && (
+            <div className="border-t px-3 py-2">
+              <Button size="sm" variant="ghost" onClick={addRow} className="text-xs h-7">
+                + Add row
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -249,7 +294,8 @@ export function PlaidBankConnections() {
           <div className="space-y-0.5">
             <p className="text-sm font-medium">Sync Now</p>
             <p className="text-sm text-muted-foreground">
-              Manually pull latest transactions and update balances.
+              Manually pull latest transactions, update balances and discover new categories.
+              Balance sync matches accounts by name — make sure your card/loan names in Finances match the account name in your bank.
             </p>
           </div>
           <Button
