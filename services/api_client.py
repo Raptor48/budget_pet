@@ -2,7 +2,7 @@
 Async API client for communicating with FastAPI backend (used by Telegram bot).
 """
 import aiohttp
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Tuple, Any
 from datetime import datetime
 import os
 import logging
