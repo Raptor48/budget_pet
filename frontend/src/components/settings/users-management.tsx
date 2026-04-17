@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { usersApi, UserPublic } from '@/lib/api';
+import { usersApi, membersApi, UserPublic } from '@/lib/api';
 import { useAuth } from '@/contexts/auth-context';
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
@@ -15,7 +15,13 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
 import { Users, Trash2, UserPlus, AlertCircle } from 'lucide-react';
 
-export function UsersManagement() {
+type Props = {
+  /** When true, hide owner-only actions (create/delete) and fall back to the
+   * public family-members endpoint which every signed-in user can access. */
+  readOnly?: boolean;
+};
+
+export function UsersManagement({ readOnly = false }: Props) {
   const { user: currentUser } = useAuth();
   const queryClient = useQueryClient();
 
@@ -23,10 +29,30 @@ export function UsersManagement() {
   const [newPassword, setNewPassword] = useState('');
   const [formError, setFormError] = useState('');
 
-  const { data: users = [], isLoading, error } = useQuery({
+  // Owners use /api/auth/users (full rows with is_owner + created_at). Other
+  // family members fall back to /api/auth/members, which exposes just id and
+  // username so the page can still render without a 403.
+  const ownerQuery = useQuery({
     queryKey: ['users'],
     queryFn: usersApi.list,
+    enabled: !readOnly,
   });
+  const memberQuery = useQuery({
+    queryKey: ['family-members'],
+    queryFn: membersApi.list,
+    enabled: readOnly,
+  });
+
+  const users: UserPublic[] = readOnly
+    ? (memberQuery.data ?? []).map((m) => ({
+        id: m.id,
+        username: m.username,
+        is_owner: false,
+        created_at: '',
+      }))
+    : (ownerQuery.data ?? []);
+  const isLoading = readOnly ? memberQuery.isLoading : ownerQuery.isLoading;
+  const error = readOnly ? memberQuery.error : ownerQuery.error;
 
   const createMutation = useMutation({
     mutationFn: usersApi.create,
@@ -59,6 +85,7 @@ export function UsersManagement() {
   };
 
   const canDelete = (u: UserPublic) => {
+    if (readOnly) return false;
     if (u.username === currentUser?.username) return false;
     if (u.is_owner && users.filter((x) => x.is_owner).length <= 1) return false;
     return true;
@@ -114,9 +141,11 @@ export function UsersManagement() {
                           <span className="ml-2 text-xs text-muted-foreground">(you)</span>
                         )}
                       </p>
-                      <p className="text-xs text-muted-foreground">
-                        Joined {new Date(u.created_at).toLocaleDateString()}
-                      </p>
+                      {u.created_at ? (
+                        <p className="text-xs text-muted-foreground">
+                          Joined {new Date(u.created_at).toLocaleDateString()}
+                        </p>
+                      ) : null}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -143,9 +172,10 @@ export function UsersManagement() {
         </CardContent>
       </Card>
 
-      <Separator />
+      {readOnly ? null : <Separator />}
 
-      {/* Add new user */}
+      {/* Add new user — owner only */}
+      {readOnly ? null : (
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -210,6 +240,7 @@ export function UsersManagement() {
           </form>
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }
