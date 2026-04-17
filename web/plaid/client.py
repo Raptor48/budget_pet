@@ -69,11 +69,11 @@ def _pfc_version_model() -> PersonalFinanceCategoryVersion:
 
 
 def _transactions_sync_request_options() -> TransactionsSyncRequestOptions:
-    # min_last_updated_datetime: required for Capital One (ins_128026) balance
-    # refresh on some sync paths; ignored elsewhere (see Plaid Balance API docs).
+    # Do not pass min_last_updated_datetime here: it is not part of the official
+    # /transactions/sync options schema; Plaid returns UNKNOWN_FIELDS for it
+    # (see https://plaid.com/docs/errors/invalid-request/#unknown_fields ).
     return TransactionsSyncRequestOptions(
         personal_finance_category_version=_pfc_version_model(),
-        min_last_updated_datetime=get_balance_min_last_updated_datetime(),
     )
 
 

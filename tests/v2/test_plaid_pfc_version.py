@@ -62,7 +62,8 @@ async def test_transactions_sync_request_includes_pfc_version():
     ver = getattr(opts, "personal_finance_category_version", None)
     assert ver is not None
     assert getattr(ver, "value", str(ver)) == "v2"
-    assert getattr(opts, "min_last_updated_datetime", None) is not None
+    # /transactions/sync must not include min_last_updated_datetime (UNKNOWN_FIELDS).
+    assert getattr(opts, "min_last_updated_datetime", None) is None
 
 
 def test_get_account_balance_request_includes_min_last_updated():
