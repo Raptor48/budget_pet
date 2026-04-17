@@ -186,6 +186,16 @@ async def plaid_webhook(request: Request):
 
     if wtype == "ITEM" and wcode == "ITEM_LOGIN_REQUIRED" and item_id:
         await repo.set_item_login_required(str(item_id), True)
+    elif wtype == "ITEM" and wcode == "PENDING_DISCONNECT" and item_id:
+        # Item will be disconnected soon (e.g. BofA API migration, consent expiry).
+        # Flag it as login_required so the UI shows "Fix connection" prompt.
+        await repo.set_item_login_required(str(item_id), True)
+        logger.warning("PENDING_DISCONNECT received for item %s — user must re-authenticate", item_id)
+    elif wtype == "ITEM" and wcode in ("PENDING_EXPIRATION", "USER_PERMISSION_REVOKED") and item_id:
+        # OAuth consent is expiring (EU institutions, Capital One, PNC, etc.)
+        # or user revoked access at their bank's portal.
+        await repo.set_item_login_required(str(item_id), True)
+        logger.warning("Webhook %s received for item %s — item flagged for re-auth", wcode, item_id)
     elif wtype == "TRANSACTIONS" and wcode == "SYNC_UPDATES_AVAILABLE" and item_id:
         await repo.set_sync_updates_pending(str(item_id), True)
         schedule_debounced_sync_item(str(item_id))

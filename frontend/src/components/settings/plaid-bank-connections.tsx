@@ -44,10 +44,15 @@ function ConnectBankButton({
     onSuccess: async (publicToken, metadata) => {
       try {
         await plaidApi.exchangeToken(publicToken, metadata.institution?.name ?? undefined);
+        localStorage.removeItem("plaid_link_token");
         onSuccess();
       } catch (e) {
         console.error("Failed to exchange Plaid token:", e);
       }
+    },
+    onExit: () => {
+      localStorage.removeItem("plaid_link_token");
+      setLinkToken(null);
     },
   });
 
@@ -55,6 +60,8 @@ function ConnectBankButton({
     setLoading(true);
     try {
       const { link_token } = await plaidApi.getLinkToken(itemId);
+      // Store token for OAuth redirect resume (needed when bank redirects to /oauth page)
+      localStorage.setItem("plaid_link_token", link_token);
       setLinkToken(link_token);
     } catch (e) {
       console.error("Failed to get link token:", e);
