@@ -106,9 +106,12 @@ export function MonthYearPicker({
   };
 
   return (
-    <div className="flex gap-2" aria-busy={isLoading}>
+    <div
+      className="flex w-full min-w-0 flex-col gap-2 sm:flex-row sm:gap-2"
+      aria-busy={isLoading}
+    >
       <Select value={String(selected.month)} onValueChange={handleMonthChange}>
-        <SelectTrigger className="w-[130px]">
+        <SelectTrigger className="h-9 w-full min-w-0 sm:w-[130px]">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -127,7 +130,7 @@ export function MonthYearPicker({
         </SelectContent>
       </Select>
       <Select value={String(selected.year)} onValueChange={handleYearChange}>
-        <SelectTrigger className="w-[90px]">
+        <SelectTrigger className="h-9 w-full min-w-0 sm:w-[90px]">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
