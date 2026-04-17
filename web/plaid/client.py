@@ -15,6 +15,7 @@ from plaid.model.institutions_get_by_id_request_options import InstitutionsGetBy
 from plaid.model.investments_holdings_get_request import InvestmentsHoldingsGetRequest
 from plaid.model.item_get_request import ItemGetRequest
 from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
+from plaid.model.item_webhook_update_request import ItemWebhookUpdateRequest
 from plaid.model.liabilities_get_request import LiabilitiesGetRequest
 from plaid.model.link_token_create_request import LinkTokenCreateRequest
 from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
@@ -35,19 +36,22 @@ _ENV_MAP = {
     "production": plaid.Environment.Production,
 }
 
-# Plaid products requested at link time
+# Only transactions is required — every connected institution must support it.
 _PRODUCTS = [
     Products("transactions"),
+]
+
+# liabilities moves to required_if_supported so that banks without liabilities
+# (credit unions, investment-only accounts, etc.) are still shown in Link.
+# investments stays disabled by default until Plaid approves the product.
+# recurring_transactions is NOT a link product — data comes from /transactions/recurring/get.
+_REQUIRED_IF_SUPPORTED = [
     Products("liabilities"),
 ]
-# investments is optional — not all institutions support it, and it requires
-# explicit approval from Plaid for production accounts.
-# Disable by setting PLAID_ENABLE_INVESTMENTS=false in env.
-# recurring_transactions is NOT a link product — data comes from /transactions/recurring/get
-# which only requires the base "transactions" product
 
 
 def _get_optional_products() -> list:
+    """Return investments as optional_products when PLAID_ENABLE_INVESTMENTS is true."""
     enable_investments = os.getenv("PLAID_ENABLE_INVESTMENTS", "true").strip().lower()
     if enable_investments in ("1", "true", "yes"):
         return [Products("investments")]
@@ -124,6 +128,7 @@ def create_link_token(
         optional = _get_optional_products()
         request = LinkTokenCreateRequest(
             products=_PRODUCTS,
+            required_if_supported_products=_REQUIRED_IF_SUPPORTED,
             **({"optional_products": optional} if optional else {}),
             **common,
         )
@@ -278,6 +283,26 @@ def get_institution_metadata(institution_id: str) -> dict:
     except Exception as exc:
         logger.warning("institutions_get_by_id failed for %s: %s", institution_id, exc)
         return {"logo": None, "color": None}
+
+
+def update_item_webhook(access_token: str, webhook_url: str) -> bool:
+    """
+    Update the webhook URL for an existing Plaid Item via /item/webhook/update.
+    Must be called after token exchange so existing items pick up the new URL.
+    Returns True on success, False on error.
+    """
+    client = get_plaid_client()
+    try:
+        request = ItemWebhookUpdateRequest(
+            access_token=access_token,
+            webhook=webhook_url,
+        )
+        client.item_webhook_update(request)
+        logger.info("Webhook updated for item (access_token prefix: %s...)", access_token[:8])
+        return True
+    except Exception as exc:
+        logger.warning("item_webhook_update failed: %s", exc)
+        return False
 
 
 def get_investment_holdings(access_token: str) -> dict:
