@@ -214,8 +214,167 @@ export default function RecurringPage() {
     });
   };
 
+  const renderMobileCards = (rows: RecurringStream[]) => {
+    if (rows.length === 0) {
+      return (
+        <div className="rounded-lg border border-dashed py-12 text-center text-sm text-muted-foreground">
+          No recurring streams for this tab.
+        </div>
+      );
+    }
+    return (
+      <div className="space-y-2">
+        {rows.map((row) => {
+          const title = row.user_label?.trim() || row.description || row.merchant_name || "—";
+          const pct = parsePriceChangePct(row.price_change_pct);
+          const showPriceWarning = pct != null && pct > 10;
+          const annual = annualCostCents(row);
+          const isEditing = editingId === row.id;
+
+          return (
+            <div
+              key={row.id}
+              id={`recurring-row-${row.id}`}
+              className={cn(
+                "rounded-lg border border-border/80 bg-card p-3 shadow-sm",
+                streamHighlight === String(row.id) &&
+                  "ring-2 ring-primary ring-offset-2 ring-offset-background",
+              )}
+            >
+              {isEditing ? (
+                <div className="flex flex-col gap-2">
+                  <Label className="sr-only" htmlFor={`m-label-${row.id}`}>
+                    Label
+                  </Label>
+                  <Input
+                    id={`m-label-${row.id}`}
+                    value={draftLabel}
+                    onChange={(e) => setDraftLabel(e.target.value)}
+                    placeholder="Custom label"
+                  />
+                  <Label className="sr-only" htmlFor={`m-cat-${row.id}`}>
+                    Category
+                  </Label>
+                  <Select value={draftCategoryId} onValueChange={setDraftCategoryId}>
+                    <SelectTrigger id={`m-cat-${row.id}`} className="h-9 w-full min-w-0">
+                      <SelectValue placeholder="Category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Uncategorized</SelectItem>
+                      {categories.map((c) => (
+                        <SelectItem key={c.id} value={String(c.id)}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <div className="flex justify-end gap-1 pt-1">
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => saveEdit(row.id)}
+                      disabled={updateMutation.isPending}
+                      aria-label="Save"
+                    >
+                      <Check className="size-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      onClick={cancelEdit}
+                      disabled={updateMutation.isPending}
+                      aria-label="Cancel"
+                    >
+                      <X className="size-4" />
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <p className="line-clamp-2 text-sm font-medium leading-snug">{title}</p>
+                      {row.user_label?.trim() && row.description !== row.user_label ? (
+                        <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{row.description}</p>
+                      ) : null}
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0"
+                      onClick={() => startEdit(row)}
+                      disabled={editingId != null && editingId !== row.id}
+                    >
+                      <Pencil className="size-3.5" />
+                      Edit
+                    </Button>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    <span>{formatFrequency(row.frequency)}</span>
+                    {row.pfc_primary ? (
+                      <span className="max-w-[55%] truncate" title={row.pfc_primary}>
+                        {row.pfc_primary}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-sm tabular-nums">
+                      <div className="flex justify-between gap-2">
+                        <span className="text-muted-foreground">Avg</span>
+                        <PlaidTxnAmount
+                          cents={row.average_amount_cents ?? 0}
+                          size="sm"
+                          tone="flow"
+                        />
+                      </div>
+                      <div className="flex justify-between gap-2">
+                        <span className="text-muted-foreground">Last</span>
+                        <PlaidTxnAmount
+                          cents={row.last_amount_cents ?? 0}
+                          size="sm"
+                          tone="flow"
+                        />
+                      </div>
+                      {annual != null ? (
+                        <div className="flex justify-between gap-2 text-muted-foreground">
+                          <span className="text-[11px]">Annual (est.)</span>
+                          <PlaidTxnAmount cents={annual} size="sm" tone="flow" />
+                        </div>
+                      ) : null}
+                    </div>
+                    <Badge variant="outline" className={cn("shrink-0 text-[10px]", statusBadgeClass(row.status))}>
+                      {friendlyStatus(row.status)}
+                    </Badge>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {showPriceWarning ? (
+                      <Badge
+                        className="border-orange-500/60 bg-orange-500/15 text-[10px] text-orange-800 dark:text-orange-200"
+                        variant="outline"
+                      >
+                        Price +{pct!.toFixed(0)}%
+                      </Badge>
+                    ) : null}
+                    {priceAlertIds.has(row.id) && !showPriceWarning ? (
+                      <Badge variant="outline" className="text-[10px]">
+                        Price watch
+                      </Badge>
+                    ) : null}
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   const renderTable = (rows: RecurringStream[]) => (
-    <div className="rounded-md border">
+    <div className="hidden overflow-x-auto rounded-md border lg:block">
       <Table>
         <TableHeader>
           <TableRow>
@@ -268,7 +427,7 @@ export default function RecurringPage() {
                           Category
                         </Label>
                         <Select value={draftCategoryId} onValueChange={setDraftCategoryId}>
-                          <SelectTrigger id={`cat-${row.id}`} className="w-full min-w-[12rem]">
+                          <SelectTrigger id={`cat-${row.id}`} className="h-9 w-full min-w-0 lg:min-w-[12rem]">
                             <SelectValue placeholder="Category" />
                           </SelectTrigger>
                           <SelectContent>
@@ -453,14 +612,24 @@ export default function RecurringPage() {
               {streamsQuery.isLoading ? (
                 <p className="text-muted-foreground text-sm">Loading…</p>
               ) : (
-                <div className="overflow-x-auto">{renderTable(direction === "outflow" ? streams : [])}</div>
+                <>
+                  <div className="lg:hidden">
+                    {renderMobileCards(direction === "outflow" ? streams : [])}
+                  </div>
+                  {renderTable(direction === "outflow" ? streams : [])}
+                </>
               )}
             </TabsContent>
             <TabsContent value="in" className="space-y-4">
               {streamsQuery.isLoading ? (
                 <p className="text-muted-foreground text-sm">Loading…</p>
               ) : (
-                <div className="overflow-x-auto">{renderTable(direction === "inflow" ? streams : [])}</div>
+                <>
+                  <div className="lg:hidden">
+                    {renderMobileCards(direction === "inflow" ? streams : [])}
+                  </div>
+                  {renderTable(direction === "inflow" ? streams : [])}
+                </>
               )}
             </TabsContent>
           </Tabs>

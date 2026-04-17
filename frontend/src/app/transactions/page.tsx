@@ -16,6 +16,7 @@ import { format, isValid } from "date-fns";
 import { Columns2, CreditCard, Download, EyeOff, Eye, Loader2, Store, Trash2, Wifi, CircleDot } from "lucide-react";
 
 import { AddCashTransactionDialog } from "@/app/transactions/_components/add-cash-transaction-dialog";
+import { TransactionMobileCard } from "@/app/transactions/_components/transaction-mobile-card";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -1301,13 +1302,13 @@ export default function TransactionsPage() {
             <CardDescription>Narrow down by period, account, category, channel, or text.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:flex lg:flex-row lg:flex-wrap lg:items-end">
-              <div className="grid gap-2">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:flex lg:flex-row lg:flex-wrap lg:items-end">
+              <div className="col-span-full grid min-w-0 gap-2 sm:col-span-2 md:col-span-3 lg:col-span-1 lg:w-[min(100%,17.5rem)] lg:max-w-none lg:shrink-0">
                 <Label>Month</Label>
                 <MonthYearPicker value={month} onChange={setMonth} />
               </div>
 
-              <div className="grid gap-2 lg:min-w-[200px] lg:flex-1">
+              <div className="grid min-w-0 gap-2 lg:min-w-[200px] lg:flex-1">
                 <Label>Account</Label>
                 <Select value={accountId} onValueChange={setAccountId}>
                   <SelectTrigger className="w-full">
@@ -1325,7 +1326,7 @@ export default function TransactionsPage() {
                 </Select>
               </div>
 
-              <div className="grid gap-2 lg:min-w-[200px] lg:flex-1">
+              <div className="grid min-w-0 gap-2 lg:min-w-[200px] lg:flex-1">
                 <Label>Category</Label>
                 <Select value={categoryId} onValueChange={setCategoryId}>
                   <SelectTrigger className="w-full">
@@ -1342,7 +1343,7 @@ export default function TransactionsPage() {
                 </Select>
               </div>
 
-              <div className="grid gap-2 lg:min-w-[160px]">
+              <div className="grid min-w-0 gap-2 lg:min-w-[160px]">
                 <Label>Tag</Label>
                 <Select value={tagFilterId} onValueChange={setTagFilterId}>
                   <SelectTrigger className="w-full">
@@ -1360,7 +1361,7 @@ export default function TransactionsPage() {
               </div>
 
               {members.length > 1 && (
-                <div className="grid gap-2 lg:min-w-[150px]">
+                <div className="grid min-w-0 gap-2 lg:min-w-[150px]">
                   <Label>Person</Label>
                   <Select value={personId} onValueChange={setPersonId}>
                     <SelectTrigger className="w-full">
@@ -1378,7 +1379,7 @@ export default function TransactionsPage() {
                 </div>
               )}
 
-              <div className="grid gap-2 lg:min-w-[160px]">
+              <div className="grid min-w-0 gap-2 lg:min-w-[160px]">
                 <Label>Channel</Label>
                 <Select value={channel} onValueChange={setChannel}>
                   <SelectTrigger className="w-full">
@@ -1393,7 +1394,7 @@ export default function TransactionsPage() {
                 </Select>
               </div>
 
-              <div className="col-span-2 grid gap-2 sm:col-span-3 lg:col-span-1 lg:min-w-[220px] lg:flex-[2]">
+              <div className="col-span-1 grid gap-2 sm:col-span-2 md:col-span-3 lg:col-span-1 lg:min-w-[220px] lg:flex-[2]">
                 <Label htmlFor="search">Search</Label>
                 <Input
                   id="search"
@@ -1431,69 +1432,97 @@ export default function TransactionsPage() {
         ) : null}
 
         {!isLoading && transactions.length > 0 ? (
-          <Card className="overflow-hidden border-border/80 shadow-sm">
-            <CardContent className="p-0">
-              <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead className="w-[44px]" />
-                    <TableHead>Transaction</TableHead>
-                    <TableHead className="hidden md:table-cell">Category</TableHead>
-                    <TableHead className="hidden sm:table-cell">Date</TableHead>
-                    <TableHead className="text-right">Amount</TableHead>
-                    <TableHead className="hidden min-w-[148px] text-right sm:table-cell">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {transactions.map((tx) => {
-                    const cat = tx.category_id != null ? categoryById.get(tx.category_id) : undefined;
-                    const catLabel = cat?.name ?? tx.pfc_detailed ?? tx.pfc_primary ?? "Uncategorized";
-                    const availableTagsToAdd = allTags.filter(
-                      (t) => !tx.tags.some((x) => x.id === t.id),
-                    );
+          <>
+            <div className="space-y-2 md:hidden">
+              {transactions.map((tx) => (
+                <TransactionMobileCard
+                  key={tx.id}
+                  tx={tx}
+                  highlight={highlightId === tx.id}
+                  loadingList={loadingList}
+                  onOpen={() => {
+                    setDetailTxId(tx.id);
+                    setDetailOpen(true);
+                  }}
+                  onDeleteCash={
+                    tx.source === "cash" ? (ev) => requestDeleteCashTx(tx, ev) : undefined
+                  }
+                  cashDeletePending={
+                    deleteCashMutation.isPending && deleteCashMutation.variables === tx.id
+                  }
+                />
+              ))}
+            </div>
 
-                    return (
-                      <FragmentRow
-                        key={tx.id}
-                        tx={tx}
-                        catLabel={catLabel}
-                        categoryById={categoryById}
-                        availableTagsToAdd={availableTagsToAdd}
-                        loadingList={loadingList}
-                        highlight={highlightId === tx.id}
-                        onRowClick={() => {
-                          setDetailTxId(tx.id);
-                          setDetailOpen(true);
-                        }}
-                        onOpenSplit={(e) => {
-                          e.stopPropagation();
-                          setDetailOpen(false);
-                          setDetailTxId(null);
-                          setSplitTx(tx);
-                          setSplitOpen(true);
-                        }}
-                        onAddTag={(tagId) => addTagMutation.mutate({ txId: tx.id, tagId })}
-                        onRemoveTag={(tagId, e) => {
-                          e.stopPropagation();
-                          removeTagMutation.mutate({ txId: tx.id, tagId });
-                        }}
-                        onDeleteCash={
-                          tx.source === "cash"
-                            ? (ev) => requestDeleteCashTx(tx, ev)
-                            : undefined
-                        }
-                        cashDeletePending={
-                          deleteCashMutation.isPending && deleteCashMutation.variables === tx.id
-                        }
-                      />
-                    );
-                  })}
-                </TableBody>
-              </Table>
-              </div>
-            </CardContent>
-          </Card>
+            <Card className="hidden overflow-hidden border-border/80 shadow-sm md:block">
+              <CardContent className="p-0">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="w-[44px]" />
+                        <TableHead>Transaction</TableHead>
+                        <TableHead className="hidden md:table-cell">Category</TableHead>
+                        <TableHead className="hidden sm:table-cell">Date</TableHead>
+                        <TableHead className="text-right">Amount</TableHead>
+                        <TableHead className="hidden min-w-[148px] text-right sm:table-cell">
+                          Actions
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {transactions.map((tx) => {
+                        const cat =
+                          tx.category_id != null ? categoryById.get(tx.category_id) : undefined;
+                        const catLabel =
+                          cat?.name ?? tx.pfc_detailed ?? tx.pfc_primary ?? "Uncategorized";
+                        const availableTagsToAdd = allTags.filter(
+                          (t) => !tx.tags.some((x) => x.id === t.id),
+                        );
+
+                        return (
+                          <FragmentRow
+                            key={tx.id}
+                            tx={tx}
+                            catLabel={catLabel}
+                            categoryById={categoryById}
+                            availableTagsToAdd={availableTagsToAdd}
+                            loadingList={loadingList}
+                            highlight={highlightId === tx.id}
+                            onRowClick={() => {
+                              setDetailTxId(tx.id);
+                              setDetailOpen(true);
+                            }}
+                            onOpenSplit={(e) => {
+                              e.stopPropagation();
+                              setDetailOpen(false);
+                              setDetailTxId(null);
+                              setSplitTx(tx);
+                              setSplitOpen(true);
+                            }}
+                            onAddTag={(tagId) => addTagMutation.mutate({ txId: tx.id, tagId })}
+                            onRemoveTag={(tagId, e) => {
+                              e.stopPropagation();
+                              removeTagMutation.mutate({ txId: tx.id, tagId });
+                            }}
+                            onDeleteCash={
+                              tx.source === "cash"
+                                ? (ev) => requestDeleteCashTx(tx, ev)
+                                : undefined
+                            }
+                            cashDeletePending={
+                              deleteCashMutation.isPending &&
+                              deleteCashMutation.variables === tx.id
+                            }
+                          />
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </>
         ) : null}
 
         <TransactionDetailsDialog

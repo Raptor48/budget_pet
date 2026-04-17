@@ -774,35 +774,39 @@ function CashWalletSection({ account }: { account: Account }) {
     <>
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Cash Wallet</h2>
-        <div className="flex items-center gap-3 rounded-xl border border-border/60 bg-card px-5 py-4 shadow-sm">
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-500">
-            <Wallet className="size-5" />
+        <div className="flex flex-col gap-4 rounded-xl border border-border/60 bg-card px-4 py-4 shadow-sm sm:flex-row sm:items-center sm:gap-3 sm:px-5">
+          <div className="flex min-w-0 items-start gap-3 sm:min-w-0 sm:flex-1 sm:items-center">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-500">
+              <Wallet className="size-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold">{account.name}</p>
+              <p className="text-xs text-muted-foreground">Manual cash tracking wallet</p>
+            </div>
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="font-semibold">{account.name}</p>
-            <p className="text-xs text-muted-foreground">Manual cash tracking wallet</p>
-          </div>
-          <div className="shrink-0 text-right">
-            <p className="text-lg font-bold tabular-nums">{formattedBalance}</p>
-            {account.owner_username && (
-              <p className="text-[10px] text-muted-foreground">{account.owner_username}</p>
-            )}
-          </div>
-          <div className="flex shrink-0 gap-2">
-            <Button type="button" size="sm" variant="outline" className="gap-1.5" onClick={openEdit}>
-              <Pencil className="size-3.5" />
-              Edit balance
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onClick={() => setDeleteOpen(true)}
-            >
-              <Trash2 className="size-3.5" />
-              Delete
-            </Button>
+          <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border/50 pt-3 sm:border-t-0 sm:pt-0">
+            <div className="text-left sm:text-right">
+              <p className="text-lg font-bold tabular-nums">{formattedBalance}</p>
+              {account.owner_username && (
+                <p className="text-[10px] text-muted-foreground">{account.owner_username}</p>
+              )}
+            </div>
+            <div className="flex shrink-0 flex-wrap justify-end gap-2">
+              <Button type="button" size="sm" variant="outline" className="gap-1.5" onClick={openEdit}>
+                <Pencil className="size-3.5" />
+                Edit balance
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => setDeleteOpen(true)}
+              >
+                <Trash2 className="size-3.5" />
+                Delete
+              </Button>
+            </div>
           </div>
         </div>
       </section>
