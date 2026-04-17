@@ -51,6 +51,8 @@ export interface Account {
   user_id: number | null;
   /** Username of the owner (joined from users) */
   owner_username: string | null;
+  /** True when this row is the per-user manual Cash wallet (no Plaid link). */
+  is_cash_wallet?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -175,8 +177,6 @@ export interface Transaction {
   account_mask: string | null;
   /** Username of the account owner (joined via accounts.user_id → users) */
   owner_username: string | null;
-  /** True when this row is the per-user manual Cash wallet (no Plaid link). */
-  is_cash_wallet?: boolean;
 }
 
 export interface TransactionFilters {
