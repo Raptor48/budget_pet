@@ -81,15 +81,29 @@ def get_plaid_client() -> plaid_api.PlaidApi:
     return plaid_api.PlaidApi(api_client)
 
 
-def create_link_token(user_id: str = "default-user", access_token: Optional[str] = None) -> dict:
-    """Create a Plaid Link token. Pass ``access_token`` for Link update mode."""
+def create_link_token(
+    user_id: str = "default-user",
+    access_token: Optional[str] = None,
+    redirect_uri: Optional[str] = None,
+) -> dict:
+    """
+    Create a Plaid Link token.
+
+    ``access_token`` — pass for Link update mode (fix broken connection).
+    ``redirect_uri`` — required for OAuth institutions (Chase, BofA, etc.) on mobile.
+                       Register this URI in the Plaid Dashboard → API → Allowed redirect URIs.
+    """
     client = get_plaid_client()
+    # redirect_uri is only passed when configured — sandbox works without it
+    effective_redirect = redirect_uri or os.getenv("PLAID_REDIRECT_URI") or None
     common = dict(
         client_name="Budget Pet",
         country_codes=[CountryCode("US")],
         language="en",
         user=LinkTokenCreateRequestUser(client_user_id=user_id),
     )
+    if effective_redirect:
+        common["redirect_uri"] = effective_redirect
     if access_token:
         request = LinkTokenCreateRequest(
             access_token=access_token,
