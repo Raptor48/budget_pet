@@ -145,6 +145,16 @@ function isCardLikeAccount(a: Account): boolean {
   return false;
 }
 
+/** Same identity as backend cash wallet row (active or soft-deleted). Must not appear as a generic tile. */
+function isCashWalletShape(a: Account): boolean {
+  return (
+    a.name === "Cash" &&
+    a.type === "depository" &&
+    (a.subtype ?? "") === "cash" &&
+    (a.plaid_account_id == null || a.plaid_account_id === "")
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Card face content components
 // ---------------------------------------------------------------------------
@@ -752,6 +762,7 @@ function CashWalletSection({ account }: { account: Account }) {
     mutationFn: () => accountsApi.delete(account.id),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["v2-accounts"] });
+      queryClient.removeQueries({ queryKey: ["accounts", "cash-wallet-ensure"] });
       setDeleteOpen(false);
     },
   });
@@ -948,9 +959,24 @@ function NetWorthCard({ accounts }: { accounts: Account[] }) {
 // ---------------------------------------------------------------------------
 
 export default function AccountsPage() {
+  const queryClient = useQueryClient();
+
   const { data: accounts = [], isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["v2-accounts", "all"],
     queryFn: () => accountsApi.list(false),
+  });
+
+  const hasActiveCashWallet = useMemo(() => accounts.some((a) => a.is_cash_wallet), [accounts]);
+
+  const cashWalletEnsure = useQuery({
+    queryKey: ["accounts", "cash-wallet-ensure"],
+    queryFn: async () => {
+      const wallet = await accountsApi.cashWallet();
+      await queryClient.invalidateQueries({ queryKey: ["v2-accounts", "all"] });
+      return wallet;
+    },
+    enabled: !isLoading && !isError && accounts.length > 0 && !hasActiveCashWallet,
+    staleTime: 60_000,
   });
 
   const { data: members = [] } = useQuery({
@@ -966,14 +992,19 @@ export default function AccountsPage() {
     [grouped.depository],
   );
   const depositoryTiles = useMemo(
-    () => grouped.depository.filter((a) => !isCardLikeAccount(a) && !a.is_cash_wallet),
+    () =>
+      grouped.depository.filter(
+        (a) => !isCardLikeAccount(a) && !a.is_cash_wallet && !isCashWalletShape(a),
+      ),
     [grouped.depository],
   );
 
-  const cashWallet = useMemo(
+  const cashWalletFromList = useMemo(
     () => grouped.depository.find((a) => a.is_cash_wallet) ?? null,
     [grouped.depository],
   );
+
+  const cashWallet = cashWalletFromList ?? cashWalletEnsure.data ?? null;
 
   if (isLoading) {
     return (
