@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Providers } from "@/components/providers";
 import { ProtectedRoute } from "@/components/auth/protected-route";
@@ -16,7 +16,26 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Budget Pet - Family Budget Manager",
-  description: "Modern web interface for budget management",
+  description: "Track spending, accounts, and savings goals for your whole family",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Budget Pet",
+  },
+  formatDetection: {
+    telephone: false,
+  },
+  manifest: "/manifest.webmanifest",
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#059669" },
+    { media: "(prefers-color-scheme: dark)",  color: "#064e3b" },
+  ],
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
