@@ -138,6 +138,41 @@ async def test_date_range_route_empty_returns_nulls():
     assert response.min_month is None
     assert response.max_month is None
     kwargs = fake_repo.get_date_range.call_args.kwargs
-    # Non-owner → user_id filter is the caller's id.
-    assert kwargs.get("user_id") == 5
+    # Same family-wide range as owners; hidden rows use viewer_user_id in SQL.
+    assert kwargs.get("user_id") is None
+    assert kwargs.get("viewer_user_id") == 5
     assert kwargs.get("exclude_plaid_sandbox") is True
+
+
+@pytest.mark.asyncio
+async def test_list_transactions_route_family_wide_for_non_owner():
+    """Members must not have user_id forced to self — list is family-wide + privacy."""
+    from web.transactions.routes import list_transactions
+
+    fake_request = MagicMock()
+    fake_request.state.user = {"id": 5, "is_owner": False}
+
+    fake_repo = MagicMock()
+    fake_repo.list_transactions = AsyncMock(return_value=[])
+
+    with patch("web.transactions.routes._repo", return_value=fake_repo), patch(
+        "web.transactions.routes.reports_include_plaid_sandbox", return_value=True
+    ), patch("web.transactions.routes._enrich_many", new_callable=AsyncMock, return_value=[]):
+        await list_transactions(
+            fake_request,
+            month=None,
+            account_id=None,
+            category_id=None,
+            tag_id=None,
+            search=None,
+            channel=None,
+            pending_only=None,
+            source=None,
+            user_id=None,
+            limit=200,
+            offset=0,
+        )
+
+    kwargs = fake_repo.list_transactions.call_args.kwargs
+    assert kwargs.get("user_id") is None
+    assert kwargs.get("viewer_user_id") == 5

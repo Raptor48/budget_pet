@@ -81,7 +81,7 @@ All transactions from Plaid, cash wallet (`source=cash`), and legacy `manual` ro
 ### Cash wallet (accounts)
 One designated manual account per user: `name='Cash'`, `type=depository`, `subtype=cash`, `plaid_account_id` NULL, `is_cash_wallet=true`, `user_id` set. Created lazily via `GET /api/accounts/cash-wallet` or first cash transaction. `current_balance_cents` is adjusted when cash transactions are inserted/deleted; it may also be set via `PATCH /api/accounts/{id}` with `current_balance_cents` **only** on this wallet (not on Plaid-linked accounts). `DELETE /api/accounts/{id}` performs a soft delete (`is_active=false`); a new wallet is re-created the next time the user adds cash.
 
-Note on family scope: `categories`, `tags`, and `category_budgets` are intentionally **not** scoped per user in V2 — the family shares the taxonomy and the envelope. The per-user `user_id` filter is only applied to `transactions`, `accounts`, and `sessions`.
+Note on family scope: `categories`, `tags`, and `category_budgets` are intentionally **not** scoped per user in V2 — the family shares the taxonomy and the envelope. **`accounts`** rows are still tied to `user_id` (who linked Plaid or owns the cash wallet). **`transactions`** are listed for the whole household via the API (everyone sees every account’s activity except rows hidden with `is_private`). **`sessions`** remain per user.
 
 ### tags + transaction_tags
 User-defined tags for custom classification (e.g., "alcohol", "business").

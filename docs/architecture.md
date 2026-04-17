@@ -85,6 +85,10 @@ spend (e.g. a gift) from each other *in the UI and in aggregates*.
   and anything derived from them (financial health score, category donut,
   cash-flow aggregates). Does **not** apply to per-account balances — a
   private row still updates the wallet's running balance.
+- Transaction **reads** are family-wide: any logged-in member can list or
+  open another member’s non-private transactions. **Writes** (PATCH, DELETE,
+  tags, splits) still require owning the transaction’s account (non-owners
+  cannot edit someone else’s rows).
 - Internal / startup jobs call the repos with `viewer_user_id=None`, which
   bypasses the filter by design.
 
