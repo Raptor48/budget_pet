@@ -40,12 +40,18 @@ _PRODUCTS = [
     Products("transactions"),
     Products("liabilities"),
 ]
-# investments is optional — not all institutions support it
+# investments is optional — not all institutions support it, and it requires
+# explicit approval from Plaid for production accounts.
+# Disable by setting PLAID_ENABLE_INVESTMENTS=false in env.
 # recurring_transactions is NOT a link product — data comes from /transactions/recurring/get
 # which only requires the base "transactions" product
-_OPTIONAL_PRODUCTS = [
-    Products("investments"),
-]
+
+
+def _get_optional_products() -> list:
+    enable_investments = os.getenv("PLAID_ENABLE_INVESTMENTS", "true").strip().lower()
+    if enable_investments in ("1", "true", "yes"):
+        return [Products("investments")]
+    return []
 
 
 def _pfc_version_model() -> PersonalFinanceCategoryVersion:
@@ -115,9 +121,10 @@ def create_link_token(
             **common,
         )
     else:
+        optional = _get_optional_products()
         request = LinkTokenCreateRequest(
             products=_PRODUCTS,
-            optional_products=_OPTIONAL_PRODUCTS,
+            **({"optional_products": optional} if optional else {}),
             **common,
         )
     response = client.link_token_create(request)
