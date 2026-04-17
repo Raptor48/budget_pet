@@ -86,21 +86,16 @@ def test_verify_body_hash_mismatch(monkeypatch):
     monkeypatch.setenv("PLAID_ENV", "production")
 
     body = b'{"test": 1}'
-    correct_hash = hashlib.sha256(body).hexdigest()
     wrong_hash = "0" * 64
 
     jwt_payload = {"iat": int(time.time()), "request_body_sha256": wrong_hash}
 
-    with patch("web.plaid.webhook_verify.PyJWKClient") as mock_jwks_cls:
-        mock_jwks = MagicMock()
-        mock_jwks_cls.return_value = mock_jwks
-        mock_signing_key = MagicMock()
-        mock_jwks.get_signing_key_from_jwt.return_value = mock_signing_key
+    with patch("web.plaid.webhook_verify.jwt.get_unverified_header", return_value={"alg": "ES256", "kid": "k"}):
+        with patch("web.plaid.webhook_verify._load_signing_key", return_value=MagicMock()):
+            with patch("web.plaid.webhook_verify.jwt.decode", return_value=jwt_payload):
+                from web.plaid.webhook_verify import verify_plaid_webhook
 
-        with patch("web.plaid.webhook_verify.jwt") as mock_jwt:
-            mock_jwt.decode.return_value = jwt_payload
-            from web.plaid.webhook_verify import verify_plaid_webhook
-            result = verify_plaid_webhook(_make_request("fake.jwt.token"), body)
+                result = verify_plaid_webhook(_make_request("fake.jwt.token"), body)
 
     assert result is False
 
@@ -117,15 +112,12 @@ def test_verify_iat_too_old(monkeypatch):
         "request_body_sha256": hashlib.sha256(body).hexdigest(),
     }
 
-    with patch("web.plaid.webhook_verify.PyJWKClient") as mock_jwks_cls:
-        mock_jwks = MagicMock()
-        mock_jwks_cls.return_value = mock_jwks
-        mock_jwks.get_signing_key_from_jwt.return_value = MagicMock()
+    with patch("web.plaid.webhook_verify.jwt.get_unverified_header", return_value={"alg": "ES256", "kid": "k"}):
+        with patch("web.plaid.webhook_verify._load_signing_key", return_value=MagicMock()):
+            with patch("web.plaid.webhook_verify.jwt.decode", return_value=jwt_payload):
+                from web.plaid.webhook_verify import verify_plaid_webhook
 
-        with patch("web.plaid.webhook_verify.jwt") as mock_jwt:
-            mock_jwt.decode.return_value = jwt_payload
-            from web.plaid.webhook_verify import verify_plaid_webhook
-            result = verify_plaid_webhook(_make_request("fake.jwt.token"), body)
+                result = verify_plaid_webhook(_make_request("fake.jwt.token"), body)
 
     assert result is False
 
@@ -141,15 +133,12 @@ def test_verify_valid(monkeypatch):
         "request_body_sha256": hashlib.sha256(body).hexdigest(),
     }
 
-    with patch("web.plaid.webhook_verify.PyJWKClient") as mock_jwks_cls:
-        mock_jwks = MagicMock()
-        mock_jwks_cls.return_value = mock_jwks
-        mock_jwks.get_signing_key_from_jwt.return_value = MagicMock()
+    with patch("web.plaid.webhook_verify.jwt.get_unverified_header", return_value={"alg": "ES256", "kid": "k"}):
+        with patch("web.plaid.webhook_verify._load_signing_key", return_value=MagicMock()):
+            with patch("web.plaid.webhook_verify.jwt.decode", return_value=jwt_payload):
+                from web.plaid.webhook_verify import verify_plaid_webhook
 
-        with patch("web.plaid.webhook_verify.jwt") as mock_jwt:
-            mock_jwt.decode.return_value = jwt_payload
-            from web.plaid.webhook_verify import verify_plaid_webhook
-            result = verify_plaid_webhook(_make_request("fake.jwt.token"), body)
+                result = verify_plaid_webhook(_make_request("fake.jwt.token"), body)
 
     assert result is True
 
