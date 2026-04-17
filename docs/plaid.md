@@ -97,11 +97,17 @@ Users can rename or recolor any category for display; Plaid-derived rows cannot 
 ## Link Token Products
 
 ```python
-products = [transactions, liabilities]
-optional_products = [investments, recurring_transactions]
+products = [transactions]
+required_if_supported_products = [liabilities]
+optional_products = [investments]            # gated by PLAID_ENABLE_INVESTMENTS
+transactions.days_requested = 730            # set via PLAID_TRANSACTIONS_DAYS_REQUESTED
 ```
 
-optional_products are requested but don't fail if the institution doesn't support them.
+`required_if_supported_products` are requested but don't fail if the institution doesn't support them. The same is true for `optional_products`. `recurring_transactions` is **not** a Link product — data comes from `/transactions/recurring/get` after the Item is linked.
+
+`transactions.days_requested` controls how many days of historical transactions Plaid returns after linking. Plaid default is 90 days and the maximum is **730** (~24 months); we request the maximum by default because Plaid's Transactions product is billed as a **per-Item monthly subscription** (see [Plaid billing docs](https://plaid.com/docs/account/billing#subscription-fee)), so a larger history window does **not** increase cost. The value is tunable via `PLAID_TRANSACTIONS_DAYS_REQUESTED` and clamped into `[1..730]`.
+
+The value is passed in **both** `LinkTokenCreateRequest` branches (new connection and update-mode with `access_token`). Plaid supports extending history for an existing Item by re-running Link in update-mode with a larger `days_requested` — see [Plaid docs](https://plaid.com/docs/api/link/#link-token-create-request-transactions-days-requested).
 
 ## Reset Cursor
 
@@ -109,6 +115,36 @@ POST /api/plaid/items/{item_id}/reset-cursor
 
 Sets cursor to NULL. Next sync will re-import ALL transactions from the beginning.
 Use for testing or recovering from sync issues.
+
+## Sync Idempotency
+
+`transactions/sync` pages are collected by `get_transactions_sync` until
+`has_more=False`, then `import_transactions` upserts them with
+`ON CONFLICT (plaid_transaction_id) DO UPDATE`. The cursor in `plaid_items.cursor`
+is advanced **only after** successful import, so the sync has at-least-once
+semantics: a crash between pages or during import simply causes the next sync
+to re-fetch from the previous cursor and re-upsert already-imported rows, which
+is a no-op at the row level (no duplicates, existing edits like `category_id`
+are preserved by `COALESCE`). Removed transactions reported by Plaid are
+deleted in the same step.
+
+## Removing a bank
+
+`DELETE /api/plaid/items/{item_id}` supports two modes:
+
+| Mode | What is deleted | When to use |
+|---|---|---|
+| `?purge=false` (default) | `plaid_items` row only; `accounts.plaid_item_id` is set to `NULL` via FK `ON DELETE SET NULL`; accounts, transactions, recurring streams and holdings stay. | You want to stop syncing this bank but keep the historical reports. |
+| `?purge=true` | Above **plus** all accounts with this `plaid_item_id`, all Plaid-sourced transactions on those accounts (`source IN ('plaid','plaid_sandbox')`), their `transaction_tags` / `transaction_splits`, `recurring_streams` tied to those accounts, `investment_holdings` for those accounts, orphaned `securities`, and `plaid_sync_log` rows for the item. Cash/manual transactions are never removed. | You plan to reconnect the same bank and want to avoid duplicates. |
+
+**Why purge matters on reconnect.** Plaid issues a fresh `item_id` and fresh
+per-account `account_id` values on every Link flow, even for the same bank and
+user. If you `purge=false` and later re-link BofA, the new Item brings in new
+`accounts` rows and 730 days of transactions as entirely new `plaid_transaction_id`s,
+while the old `accounts` / `transactions` remain — resulting in visible
+duplicates in lists, budgets, reports and net worth. The UI surfaces this
+trade-off via a confirmation dialog that pre-fetches row counts from
+`GET /api/plaid/items/{item_id}/data-summary`.
 
 ## Webhooks
 

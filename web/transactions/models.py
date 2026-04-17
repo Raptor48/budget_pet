@@ -14,6 +14,15 @@ class TagBrief(BaseModel):
         from_attributes = True
 
 
+class TransactionDateRange(BaseModel):
+    """Earliest / latest transaction months visible to the caller (YYYY-MM)."""
+
+    min_month: Optional[str] = None
+    max_month: Optional[str] = None
+    earliest: Optional[date] = None
+    latest: Optional[date] = None
+
+
 class SplitOut(BaseModel):
     id: int
     parent_transaction_id: int

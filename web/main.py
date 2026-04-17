@@ -15,14 +15,18 @@ logger = logging.getLogger(__name__)
 
 
 def _cors_allow_origins() -> list[str]:
-    """Comma-separated origins in CORS_ORIGINS; sensible defaults for local + Railway."""
+    """Comma-separated browser origins in CORS_ORIGINS (session cookies).
+
+    The production Next.js origin is always supplied via the `CORS_ORIGINS`
+    env var in Railway; the defaults below cover local development only so
+    we never hardcode a specific deployment host in the source.
+    """
     raw = os.getenv("CORS_ORIGINS", "").strip()
     if raw:
         return [o.strip() for o in raw.split(",") if o.strip()]
     return [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        "https://nextjs-production-4840.up.railway.app",
     ]
 
 

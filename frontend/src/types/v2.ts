@@ -193,6 +193,18 @@ export interface TransactionFilters {
   offset?: number;
 }
 
+/** GET /api/transactions/date-range — bounds used by the shared month/year picker. */
+export interface TransactionDateRange {
+  /** Earliest visible month in "YYYY-MM" format, or null when no transactions exist. */
+  min_month: string | null;
+  /** Latest visible month in "YYYY-MM" format, or null when no transactions exist. */
+  max_month: string | null;
+  /** Raw earliest date ("YYYY-MM-DD") — useful for day-level pickers later. */
+  earliest: string | null;
+  /** Raw latest date ("YYYY-MM-DD") — useful for day-level pickers later. */
+  latest: string | null;
+}
+
 /** POST /api/transactions — cash row; server sets source, wallet, channel, currency, pending. */
 export interface ManualCashTransactionCreate {
   amount_cents: number;

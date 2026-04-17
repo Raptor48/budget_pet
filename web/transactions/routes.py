@@ -10,6 +10,7 @@ from .models import (
     SplitListCreate,
     SplitOut,
     TransactionCreate,
+    TransactionDateRange,
     TransactionOut,
     TransactionUpdate,
 )
@@ -87,8 +88,36 @@ async def list_transactions(
         limit=limit,
         offset=offset,
         omit_heavy_fields=True,
+        exclude_plaid_sandbox=not reports_include_plaid_sandbox(),
     )
     return await _enrich_many(rows, repo)
+
+
+@router.get("/date-range", response_model=TransactionDateRange)
+async def get_transactions_date_range(request: Request):
+    """
+    Return the earliest and latest transaction dates visible to the caller.
+    Used by the shared month/year picker to bound year and month options.
+    """
+    current_user = getattr(request.state, "user", None) or {}
+    current_id = current_user.get("id")
+    if current_id is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    user_filter: Optional[int] = None if current_user.get("is_owner") else current_id
+    repo = _repo()
+    r = await repo.get_date_range(
+        user_id=user_filter,
+        viewer_user_id=current_id,
+        exclude_plaid_sandbox=not reports_include_plaid_sandbox(),
+    )
+    earliest = r.get("earliest")
+    latest = r.get("latest")
+    return TransactionDateRange(
+        min_month=earliest.strftime("%Y-%m") if earliest else None,
+        max_month=latest.strftime("%Y-%m") if latest else None,
+        earliest=earliest,
+        latest=latest,
+    )
 
 
 @router.post("", response_model=TransactionOut, status_code=201)

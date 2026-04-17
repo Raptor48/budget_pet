@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { PiggyBank, PiggyBankCreate, PiggyBankUpdate } from '@/types/v2';
 import { piggyApi } from '@/lib/api';
+import { notify } from '@/lib/notify';
 import { Plus, Edit, Palette, Target } from 'lucide-react';
 import * as LucideIcons from 'lucide-react';
 import { format } from 'date-fns';
@@ -89,7 +90,7 @@ export function PiggyBankForm({ piggy, onSuccess, trigger }: PiggyBankFormProps)
       onSuccess();
     } catch (error) {
       console.error('Error saving piggy bank:', error);
-      alert('Failed to save piggy bank. Please try again.');
+      notify.error('Failed to save piggy bank. Please try again.');
     } finally {
       setLoading(false);
     }

@@ -13,6 +13,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { insightsApi } from "@/lib/api";
+import { onMutationError } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import { ArrowLeft, Sparkles } from "lucide-react";
 
@@ -34,6 +35,7 @@ export default function InsightsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["insights", "feed"] });
     },
+    onError: onMutationError("Could not mark insights as seen."),
   });
 
   const data = feedQuery.data;
@@ -70,6 +72,28 @@ export default function InsightsPage() {
           <p className="text-muted-foreground text-sm">Loading…</p>
         ) : feedQuery.isError ? (
           <p className="text-destructive text-sm">Could not load insights.</p>
+        ) : !data?.cards || data.cards.length === 0 ? (
+          <Card className="border-dashed">
+            <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
+              <div className="flex size-12 items-center justify-center rounded-full bg-primary/10">
+                <Sparkles className="size-6 text-primary" />
+              </div>
+              <div className="space-y-1">
+                <p className="font-medium">Nothing to show yet</p>
+                <p className="text-muted-foreground max-w-xs text-sm">
+                  Insights appear once you have synced transactions or logged cash spending.
+                </p>
+              </div>
+              <div className="flex flex-wrap justify-center gap-2 pt-2">
+                <Button asChild size="sm" variant="outline">
+                  <Link href="/settings">Connect a bank</Link>
+                </Button>
+                <Button asChild size="sm">
+                  <Link href="/transactions">Add cash transaction</Link>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
             {data?.cards?.map((card, i) => (

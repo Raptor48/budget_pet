@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { budgetsApi, categoriesApi, ApiError } from "@/lib/api";
+import { confirm } from "@/lib/notify";
 import { cn, formatCurrency } from "@/lib/utils";
 import type { BudgetProgress } from "@/types/v2";
 import { ChevronLeft, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
@@ -159,8 +160,14 @@ export function BudgetsView() {
     setEditOpen(true);
   };
 
-  const handleDelete = (row: BudgetRow) => {
-    if (!window.confirm(`Remove budget for “${row.category_name}” in ${row.month}?`)) return;
+  const handleDelete = async (row: BudgetRow) => {
+    const ok = await confirm({
+      title: "Remove budget?",
+      description: `Budget for “${row.category_name}” in ${row.month} will be removed.`,
+      destructive: true,
+      confirmLabel: "Remove",
+    });
+    if (!ok) return;
     deleteMutation.mutate(row.budgetId);
   };
 

@@ -1,7 +1,8 @@
 # Budget Pet — Documentation
 
-> **V2.0 — Plaid-First Family Budget**
-> All documentation here reflects the current V2 architecture.
+> **V2.1 — Plaid-First Family Budget**
+> All documentation here reflects the current V2.1 architecture (Plaid as the
+> source of truth + offline cash wallet + per-row `is_private` + PWA shell).
 
 ## Documents
 
@@ -23,6 +24,26 @@ cd frontend && npm run dev
 ```
 
 DB migrations and category seeding run automatically on startup.
+
+Required env vars (see `.env.template`):
+
+- `DATABASE_URL` — Railway Postgres URL.
+- `ADMIN_LOGIN` / `ADMIN_PASSWORD` — primary owner account bootstrapped on
+  startup (plain ASCII login).
+- `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` — Plaid credentials (see
+  `docs/plaid.md`).
+- `CORS_ORIGINS` — comma-separated browser origins for the Next.js
+  frontend (e.g. `https://your-app.up.railway.app`). No production host
+  is hardcoded.
+
+## Installable app (PWA)
+
+The frontend ships a Web App Manifest and Apple touch icons, so it can be
+added to the home screen on iOS / iPadOS / Android, and installed as a
+standalone window on macOS (Safari → Share → Add to Dock) and Windows
+(Edge/Chrome → Install app). Icons live in `frontend/public/` and
+`frontend/src/app/` and are referenced from
+`frontend/src/app/manifest.ts`.
 
 ## Plaid Sandbox Testing
 

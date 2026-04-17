@@ -5,7 +5,7 @@ import json
 import logging
 from typing import List
 
-from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 import os
 
@@ -105,9 +105,52 @@ async def list_items(request: Request):
     return [PlaidItem(**i) for i in items]
 
 
+@router.get("/items/{item_id}/data-summary")
+async def get_item_data_summary(item_id: str, request: Request):
+    """
+    Return counts of transactions and accounts associated with a Plaid item.
+    Used by the UI to show a warning before destructive delete + purge.
+    """
+    user = getattr(request.state, "user", None) or {}
+    uid = user.get("id")
+    if uid is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    repo = get_plaid_repo()
+    row = await repo.get_item(item_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if not user.get("is_owner") and row.get("user_id") != int(uid):
+        raise HTTPException(status_code=403, detail="Not allowed to access this item")
+    return await repo.get_item_data_summary(item_id)
+
+
 @router.delete("/items/{item_id}")
-async def delete_item(item_id: str, request: Request):
-    """Disconnect a bank item. Only the item's owner (or app owner) can delete it."""
+async def delete_item(
+    item_id: str,
+    request: Request,
+    purge: bool = Query(
+        False,
+        description=(
+            "When true, also delete accounts, transactions, recurring streams and "
+            "investment holdings imported from this bank. Default keeps historical "
+            "data to preserve existing reports, but reconnecting the same bank "
+            "will then create duplicate accounts and transactions."
+        ),
+    ),
+):
+    """
+    Disconnect a bank item.
+
+    * ``purge=false`` (default): remove only the Plaid connection. Imported
+      transactions and accounts stay so historical reports are preserved, but
+      reconnecting the same bank later will result in duplicate rows because
+      Plaid assigns new ``item_id`` / ``account_id`` values on every re-link.
+    * ``purge=true``: additionally remove all Plaid-sourced transactions,
+      accounts, recurring streams and investment holdings tied to this item.
+      Cash and manual transactions are never removed.
+
+    Only the item's owner (or app owner) can delete it.
+    """
     user = getattr(request.state, "user", None) or {}
     uid = user.get("id")
     if uid is None:
@@ -118,6 +161,13 @@ async def delete_item(item_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Item not found")
     if not user.get("is_owner") and row.get("user_id") != int(uid):
         raise HTTPException(status_code=403, detail="Not allowed to delete this item")
+
+    if purge:
+        summary = await repo.purge_item(item_id)
+        if summary.get("plaid_items_deleted", 0) == 0:
+            raise HTTPException(status_code=404, detail="Item not found")
+        return {"message": "Bank connection and imported data removed", **summary}
+
     deleted = await repo.delete_item(item_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Item not found")

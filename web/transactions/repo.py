@@ -176,6 +176,57 @@ class TransactionsRepository:
             )
         return [dict(r) for r in rows]
 
+    async def get_date_range(
+        self,
+        user_id: Optional[int] = None,
+        viewer_user_id: Optional[int] = None,
+        exclude_plaid_sandbox: bool = False,
+    ) -> Dict[str, Optional[date]]:
+        """
+        Return the earliest and latest transaction dates visible to the caller.
+
+        Applies the same ownership / privacy / sandbox filters as ``list_transactions``
+        so the resulting range matches what the user can actually see in the UI.
+        Returns ``{"earliest": None, "latest": None}`` when no transactions match.
+        """
+        conditions: List[str] = ["1=1"]
+        params: List[Any] = []
+        idx = 1
+
+        if user_id is not None:
+            conditions.append(f"a.user_id = ${idx}")
+            params.append(user_id)
+            idx += 1
+
+        if exclude_plaid_sandbox:
+            conditions.append("(t.source IS NULL OR t.source <> 'plaid_sandbox')")
+
+        if viewer_user_id is not None:
+            conditions.append(
+                f"(NOT t.is_private OR EXISTS ("
+                f"SELECT 1 FROM accounts _a WHERE _a.id = t.account_id AND _a.user_id = ${idx}"
+                f"))"
+            )
+            params.append(viewer_user_id)
+            idx += 1
+
+        where = " AND ".join(conditions)
+        pool = await self._pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT MIN(COALESCE(t.authorized_date, t.date)) AS earliest,
+                       MAX(COALESCE(t.authorized_date, t.date)) AS latest
+                FROM transactions t
+                LEFT JOIN accounts a ON a.id = t.account_id
+                WHERE {where}
+                """,
+                *params,
+            )
+        if row is None:
+            return {"earliest": None, "latest": None}
+        return {"earliest": row["earliest"], "latest": row["latest"]}
+
     async def get_transaction(
         self, transaction_id: int, viewer_user_id: Optional[int] = None
     ) -> Optional[Dict[str, Any]]:

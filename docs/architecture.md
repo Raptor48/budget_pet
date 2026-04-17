@@ -68,3 +68,48 @@ plaid/scheduler.py (daily 03:00 + manual POST /api/plaid/sync)
 - **PFC auto-mapping** — categories auto-created on first sync from personal_finance_category
 - **Split transactions** — invariant: SUM(splits.amount_cents) = parent.amount_cents
 - **plaid_sandbox source** — excluded from reports/budgets/CSV when `reports_include_plaid_sandbox()` is false; **by default included** if `PLAID_ENV=sandbox`, or force with `REPORTS_INCLUDE_PLAID_SANDBOX=true` (see `web/env_flags.py`)
+
+## Privacy model (`is_private`)
+
+Budget Pet is a family app; it is not a security boundary against outside
+attackers. `is_private` exists so family members can hide a particular
+spend (e.g. a gift) from each other *in the UI and in aggregates*.
+
+- Storage: a boolean column on `transactions` + sparse index (see
+  `docs/data-model.md`).
+- Enforcement: every repo that reads `transactions` accepts a
+  `viewer_user_id` argument and injects a `NOT is_private OR accounts.user_id = $viewer_id`
+  filter. The router layer takes the viewer id from
+  `request.state.user["id"]`.
+- Scope: applies to list/detail, CSV export, `reports/*`, `insights/feed`
+  and anything derived from them (financial health score, category donut,
+  cash-flow aggregates). Does **not** apply to per-account balances — a
+  private row still updates the wallet's running balance.
+- Internal / startup jobs call the repos with `viewer_user_id=None`, which
+  bypasses the filter by design.
+
+## PWA
+
+The Next.js app is installable on iOS / iPadOS / macOS / Android / Windows.
+
+- Manifest is generated dynamically by `frontend/src/app/manifest.ts`.
+- Icons: `frontend/public/icon-192.png` (`any`), `public/icon.png` (512,
+  `any`), `public/icon-maskable.png` (512, `maskable` with safe-zone
+  padding) + `frontend/src/app/apple-icon.png` picked up by Next.js.
+- `appleWebApp` metadata + `theme-color` for light/dark sit in
+  `frontend/src/app/layout.tsx`.
+- A service worker for offline mode is intentionally out of scope for V2.1.
+
+## Frontend UX conventions
+
+- Toasts: `sonner`'s `<Toaster richColors />` is mounted in
+  `frontend/src/app/layout.tsx`. Wrap through `notify.success/error/info`
+  in `frontend/src/lib/notify.ts`; set `onError: onMutationError(...)` on
+  every React Query mutation so backend errors never disappear silently.
+- Confirm dialogs: `confirm(...)` from `lib/notify` returns a promise
+  resolved by the single `<ConfirmDialogHost />` in the root layout. Never
+  use `window.alert` / `window.confirm` directly.
+- Loading states: prefer skeleton rectangles (`components/ui/skeleton.tsx`)
+  over spinners for initial data loads so the page shape is preserved.
+- Empty states: cards with dashed borders + CTA buttons are used in
+  `insights` and `reports` when there's nothing to show.

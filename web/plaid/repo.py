@@ -124,6 +124,139 @@ class PlaidRepository:
             result = await conn.execute("DELETE FROM plaid_items WHERE item_id = $1", item_id)
         return result != "DELETE 0"
 
+    async def get_item_data_summary(self, item_id: str) -> Dict[str, int]:
+        """
+        Return counts of DB rows owned by a single Plaid item. Used by the UI to
+        warn the user before destructive delete + purge operations.
+
+        Only counts rows that ``purge_item`` would actually remove: accounts tied
+        to the item, and Plaid-sourced transactions on those accounts. Cash /
+        manual transactions are never counted because they are not removed.
+        """
+        pool = await self._pool()
+        async with pool.acquire() as conn:
+            accounts_count_row = await conn.fetchrow(
+                "SELECT COUNT(*) AS c FROM accounts WHERE plaid_item_id = $1",
+                item_id,
+            )
+            accounts_count = int(accounts_count_row["c"]) if accounts_count_row else 0
+
+            txn_count_row = await conn.fetchrow(
+                """
+                SELECT COUNT(*) AS c
+                FROM transactions t
+                JOIN accounts a ON a.id = t.account_id
+                WHERE a.plaid_item_id = $1
+                  AND t.source IN ('plaid', 'plaid_sandbox')
+                """,
+                item_id,
+            )
+            txn_count = int(txn_count_row["c"]) if txn_count_row else 0
+        return {
+            "accounts_count": accounts_count,
+            "transactions_count": txn_count,
+        }
+
+    async def purge_item(self, item_id: str) -> Dict[str, int]:
+        """
+        Fully remove a Plaid item and all data it brought in.
+
+        Deletion order respects FK constraints. Only Plaid-sourced transactions
+        are deleted; cash/manual transactions on any unrelated account are never
+        touched. Accounts without a ``plaid_item_id`` (cash wallets) are never
+        touched either.
+
+        Returns counts of deleted rows per table, mirroring ``delete_sandbox_data``.
+        """
+        pool = await self._pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                account_rows = await conn.fetch(
+                    "SELECT id FROM accounts WHERE plaid_item_id = $1",
+                    item_id,
+                )
+                account_ids = [r["id"] for r in account_rows]
+
+                tx_count = 0
+                stream_count = 0
+                if account_ids:
+                    tx_id_rows = await conn.fetch(
+                        """
+                        SELECT id FROM transactions
+                        WHERE account_id = ANY($1::int[])
+                          AND source IN ('plaid', 'plaid_sandbox')
+                        """,
+                        account_ids,
+                    )
+                    tx_ids = [r["id"] for r in tx_id_rows]
+                    tx_count = len(tx_ids)
+                    if tx_ids:
+                        await conn.execute(
+                            "DELETE FROM transaction_tags WHERE transaction_id = ANY($1::int[])",
+                            tx_ids,
+                        )
+                        await conn.execute(
+                            "DELETE FROM transaction_splits WHERE parent_transaction_id = ANY($1::int[])",
+                            tx_ids,
+                        )
+                        await conn.execute(
+                            "DELETE FROM transactions WHERE id = ANY($1::int[])",
+                            tx_ids,
+                        )
+
+                    stream_result = await conn.execute(
+                        "DELETE FROM recurring_streams WHERE account_id = ANY($1::int[])",
+                        account_ids,
+                    )
+                    stream_count = int(stream_result.split()[-1]) if stream_result else 0
+
+                    await conn.execute(
+                        "DELETE FROM investment_holdings WHERE account_id = ANY($1::int[])",
+                        account_ids,
+                    )
+                    await conn.execute(
+                        """
+                        DELETE FROM securities
+                        WHERE plaid_security_id NOT IN (
+                            SELECT DISTINCT security_id FROM investment_holdings
+                        )
+                        """
+                    )
+
+                await conn.execute(
+                    "DELETE FROM plaid_sync_log WHERE item_id = $1",
+                    item_id,
+                )
+
+                accounts_deleted = 0
+                if account_ids:
+                    acc_result = await conn.execute(
+                        "DELETE FROM accounts WHERE id = ANY($1::int[])",
+                        account_ids,
+                    )
+                    accounts_deleted = int(acc_result.split()[-1]) if acc_result else 0
+
+                item_result = await conn.execute(
+                    "DELETE FROM plaid_items WHERE item_id = $1",
+                    item_id,
+                )
+                items_deleted = int(item_result.split()[-1]) if item_result else 0
+
+        logger.info(
+            "Purged Plaid item %s: %d transactions, %d accounts, %d recurring streams, item_deleted=%d",
+            item_id,
+            tx_count,
+            accounts_deleted,
+            stream_count,
+            items_deleted,
+        )
+        return {
+            "transactions_deleted": tx_count,
+            "accounts_deleted": accounts_deleted,
+            "recurring_streams_deleted": stream_count,
+            "plaid_items_deleted": items_deleted,
+        }
+
     async def update_cursor(self, item_id: str, cursor: str) -> None:
         pool = await self._pool()
         async with pool.acquire() as conn:

@@ -85,6 +85,6 @@ async def get_forecast(days: int = Query(30, ge=1, le=90)):
 
 
 @router.get("/financial-health", response_model=FinancialHealthScore)
-async def get_financial_health():
-    data = await _repo().get_financial_health_data()
+async def get_financial_health(request: Request):
+    data = await _repo().get_financial_health_data(viewer_user_id=_viewer_id(request))
     return compute_health_score(**data)

@@ -58,6 +58,8 @@ import {
   tagsApi,
   transactionsApi,
 } from "@/lib/api";
+import { TRANSACTIONS_DATE_RANGE_QUERY_KEY } from "@/lib/hooks/use-transactions-date-range";
+import { confirm, notify, onMutationError } from "@/lib/notify";
 import {
   formatPlaidTxnAmountForDisplay,
   formatPlaidTxnAmountLegacy,
@@ -390,13 +392,15 @@ function TransactionDetailsDialog({
     setEditCategoryId(transaction.category_id == null ? ALL : String(transaction.category_id));
   }, [transaction]);
 
-  const handleSave = () => {
-    void Promise.resolve(
-      onSave({
+  const handleSave = async () => {
+    try {
+      await onSave({
         user_note: editNote,
         category_id: editCategoryId === ALL ? null : Number(editCategoryId),
-      }),
-    );
+      });
+    } catch {
+      /* onSave's mutation reports the error via toast */
+    }
   };
 
   const loc = transaction ? asLocation(transaction.location) : null;
@@ -633,23 +637,30 @@ function TransactionDetailsDialog({
         <DialogFooter className="shrink-0 flex-col gap-2 border-t border-border px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex w-full flex-wrap gap-2 sm:w-auto">
             {transaction && !isLoading && !isError && onTogglePrivate ? (
-              <Button
-                type="button"
-                variant={transaction.is_private ? "secondary" : "outline"}
-                className="gap-1.5"
-                disabled={isTogglingPrivate || isSaving}
-                onClick={() => onTogglePrivate(transaction.id, !transaction.is_private)}
-                title={transaction.is_private ? "Make visible to others" : "Hide from others"}
-              >
-                {isTogglingPrivate ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : transaction.is_private ? (
-                  <EyeOff className="size-4" />
-                ) : (
-                  <Eye className="size-4" />
-                )}
-                {transaction.is_private ? "Private" : "Set private"}
-              </Button>
+              <div className="flex flex-col gap-1">
+                <Button
+                  type="button"
+                  variant={transaction.is_private ? "secondary" : "outline"}
+                  className="gap-1.5"
+                  disabled={isTogglingPrivate || isSaving}
+                  onClick={() => onTogglePrivate(transaction.id, !transaction.is_private)}
+                  title={transaction.is_private ? "Make visible to others" : "Hide from others"}
+                >
+                  {isTogglingPrivate ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : transaction.is_private ? (
+                    <EyeOff className="size-4" />
+                  ) : (
+                    <Eye className="size-4" />
+                  )}
+                  {transaction.is_private ? "Hidden" : "Make private"}
+                </Button>
+                <p className="text-[11px] text-muted-foreground">
+                  {transaction.is_private
+                    ? "Hidden from other family members."
+                    : "Hide the amount from other family members (e.g. a gift)."}
+                </p>
+              </div>
             ) : null}
             {transaction && !isLoading && !isError && transaction.source === "cash" && onDeleteCash ? (
               <Button
@@ -658,18 +669,19 @@ function TransactionDetailsDialog({
                 className="gap-1.5"
                 disabled={isDeletingCash || isSaving}
                 onClick={async () => {
-                  if (
-                    !window.confirm(
-                      "Permanently delete this cash transaction? Your Cash wallet balance will be adjusted.",
-                    )
-                  ) {
-                    return;
-                  }
+                  const ok = await confirm({
+                    title: "Delete cash transaction?",
+                    description:
+                      "This cannot be undone. Your Cash wallet balance will be adjusted.",
+                    destructive: true,
+                    confirmLabel: "Delete",
+                  });
+                  if (!ok) return;
                   try {
                     await onDeleteCash(transaction.id);
                     onOpenChange(false);
                   } catch {
-                    /* mutation onError shows alert */
+                    /* mutation onError surfaces the error via toast */
                   }
                 }}
               >
@@ -1155,6 +1167,7 @@ export default function TransactionsPage() {
       await queryClient.invalidateQueries({ queryKey: ["transactions"] });
       await queryClient.invalidateQueries({ queryKey: ["transaction", variables.id] });
     },
+    onError: onMutationError("Failed to save changes."),
   });
 
   const togglePrivateMutation = useMutation({
@@ -1164,6 +1177,7 @@ export default function TransactionsPage() {
       await queryClient.invalidateQueries({ queryKey: ["transactions"] });
       await queryClient.invalidateQueries({ queryKey: ["transaction", variables.id] });
     },
+    onError: onMutationError("Could not update privacy."),
   });
 
   const addTagMutation = useMutation({
@@ -1173,6 +1187,7 @@ export default function TransactionsPage() {
       await queryClient.invalidateQueries({ queryKey: ["transactions"] });
       await queryClient.invalidateQueries({ queryKey: ["transaction", txId] });
     },
+    onError: onMutationError("Could not add tag."),
   });
 
   const removeTagMutation = useMutation({
@@ -1182,6 +1197,7 @@ export default function TransactionsPage() {
       await queryClient.invalidateQueries({ queryKey: ["transactions"] });
       await queryClient.invalidateQueries({ queryKey: ["transaction", txId] });
     },
+    onError: onMutationError("Could not remove tag."),
   });
 
   const deleteCashMutation = useMutation({
@@ -1192,6 +1208,7 @@ export default function TransactionsPage() {
       await queryClient.invalidateQueries({ queryKey: ["transaction-splits", deletedId] });
       await queryClient.invalidateQueries({ queryKey: ["accounts", "cash-wallet"] });
       await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      await queryClient.invalidateQueries({ queryKey: TRANSACTIONS_DATE_RANGE_QUERY_KEY });
       if (detailTxIdRef.current === deletedId) {
         setDetailOpen(false);
         setDetailTxId(null);
@@ -1201,11 +1218,7 @@ export default function TransactionsPage() {
         setSplitTx(null);
       }
     },
-    onError: (err) => {
-      const msg =
-        err instanceof ApiError ? err.detail ?? err.message : "Could not delete transaction.";
-      window.alert(msg);
-    },
+    onError: onMutationError("Could not delete transaction."),
   });
 
   const deleteCashById = useCallback(
@@ -1214,16 +1227,20 @@ export default function TransactionsPage() {
   );
 
   const requestDeleteCashTx = useCallback(
-    (tx: Transaction, e: MouseEvent) => {
+    async (tx: Transaction, e: MouseEvent) => {
       e.stopPropagation();
-      if (
-        !window.confirm(
-          `Delete cash transaction "${displayName(tx)}"? Your Cash wallet balance will be adjusted.`,
-        )
-      ) {
-        return;
+      const ok = await confirm({
+        title: "Delete cash transaction?",
+        description: `"${displayName(tx)}" will be removed and your Cash wallet balance adjusted.`,
+        destructive: true,
+        confirmLabel: "Delete",
+      });
+      if (!ok) return;
+      try {
+        await deleteCashMutation.mutateAsync(tx.id);
+      } catch {
+        /* mutation onError surfaces the error via toast */
       }
-      void deleteCashMutation.mutateAsync(tx.id);
     },
     [deleteCashMutation],
   );
@@ -1255,7 +1272,7 @@ export default function TransactionsPage() {
       URL.revokeObjectURL(href);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Export failed";
-      window.alert(msg);
+      notify.error(msg);
     }
   }, [listFilters.month, listFilters.account_id, listFilters.category_id, listFilters.tag_id, month]);
 
@@ -1564,6 +1581,8 @@ function FragmentRow({
         className={cn(
           "cursor-pointer transition-[box-shadow] duration-300",
           highlight && "ring-2 ring-primary ring-offset-2 ring-offset-background",
+          tx.is_private &&
+            "relative bg-amber-500/[0.04] before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:border-l-2 before:border-dashed before:border-amber-500/60",
         )}
         onClick={onRowClick}
       >
@@ -1584,9 +1603,21 @@ function FragmentRow({
                 </Badge>
               ) : null}
               {tx.is_private ? (
-                <span title="Private — hidden from other users">
-                  <EyeOff className="size-3.5 text-muted-foreground" />
-                </span>
+                <TooltipProvider delayDuration={200}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-400">
+                        <EyeOff className="size-3" />
+                        Private
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p className="max-w-[240px] text-xs">
+                        Only you can see the amount and details. Other family members see this row as hidden.
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-2">

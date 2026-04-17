@@ -7,7 +7,11 @@ from web.insights.feed import build_insights_feed
 
 
 class _FakeReports:
-    async def get_financial_health_data(self):
+    def __init__(self):
+        self.last_viewer_user_id = object()  # sentinel to detect default
+
+    async def get_financial_health_data(self, viewer_user_id=None):
+        self.last_viewer_user_id = viewer_user_id
         return {
             "total_debt_cents": 0,
             "annual_income_cents": 120_000,
@@ -20,10 +24,12 @@ class _FakeReports:
             "has_overdue": False,
         }
 
-    async def get_cash_flow(self, _month: str):
+    async def get_cash_flow(self, _month: str, viewer_user_id=None):
+        self.last_viewer_user_id = viewer_user_id
         return {"net_cents": 100}
 
-    async def get_by_category(self, _month: str):
+    async def get_by_category(self, _month: str, viewer_user_id=None):
+        self.last_viewer_user_id = viewer_user_id
         return [{"category_name": "Groceries", "amount_cents": 12_345}]
 
 
@@ -58,3 +64,16 @@ async def test_build_insights_feed_cards_and_actionable(monkeypatch):
     assert "forecast" in types
     assert isinstance(out["actionable_count"], int)
     assert all("severity" in c and "title" in c for c in out["cards"])
+
+
+@pytest.mark.asyncio
+async def test_build_insights_feed_propagates_viewer_user_id(monkeypatch):
+    """Viewer id must be forwarded to ReportsRepository so privacy filter applies."""
+    fake_reports = _FakeReports()
+    monkeypatch.setattr("web.reports.repo.ReportsRepository", lambda: fake_reports)
+    monkeypatch.setattr("web.recurring.repo.RecurringRepository", lambda: _FakeRecurring())
+
+    await build_insights_feed(viewer_user_id=42)
+
+    # Last call (get_by_category) should record viewer_user_id=42.
+    assert fake_reports.last_viewer_user_id == 42

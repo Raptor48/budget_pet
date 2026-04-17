@@ -19,6 +19,7 @@ from plaid.model.item_webhook_update_request import ItemWebhookUpdateRequest
 from plaid.model.liabilities_get_request import LiabilitiesGetRequest
 from plaid.model.link_token_create_request import LinkTokenCreateRequest
 from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
+from plaid.model.link_token_transactions import LinkTokenTransactions
 from plaid.model.products import Products
 from plaid.model.personal_finance_category_version import PersonalFinanceCategoryVersion
 from plaid.model.transactions_recurring_get_request import TransactionsRecurringGetRequest
@@ -26,7 +27,10 @@ from plaid.model.transactions_recurring_get_request_options import TransactionsR
 from plaid.model.transactions_sync_request import TransactionsSyncRequest
 from plaid.model.transactions_sync_request_options import TransactionsSyncRequestOptions
 
-from web.plaid.constants import get_plaid_pfc_category_version
+from web.plaid.constants import (
+    get_plaid_pfc_category_version,
+    get_plaid_transactions_days_requested,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,11 +113,17 @@ def create_link_token(
     # webhook URL — Plaid sends SYNC_UPDATES_AVAILABLE, ITEM_LOGIN_REQUIRED, etc. here
     # Strip whitespace to avoid INVALID_FIELD errors from trailing spaces in env vars.
     webhook_url = (os.getenv("PLAID_WEBHOOK_URL") or "").strip() or None
+    # Request the configured amount of historical transactions (default 730 ≈ 24 months).
+    # Applies to both initial link and update-mode (Plaid extends history for existing items).
+    txn_options = LinkTokenTransactions(
+        days_requested=get_plaid_transactions_days_requested(),
+    )
     common = dict(
         client_name="Budget Pet",
         country_codes=[CountryCode("US")],
         language="en",
         user=LinkTokenCreateRequestUser(client_user_id=user_id),
+        transactions=txn_options,
     )
     if effective_redirect:
         common["redirect_uri"] = effective_redirect

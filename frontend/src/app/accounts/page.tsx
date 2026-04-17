@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -975,7 +976,11 @@ export default function AccountsPage() {
       <AppLayout>
         <div className="space-y-6">
           <h1 className="text-3xl font-bold">Accounts</h1>
-          <p className="text-muted-foreground">Loading accounts…</p>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-32 w-full" />
+            ))}
+          </div>
         </div>
       </AppLayout>
     );

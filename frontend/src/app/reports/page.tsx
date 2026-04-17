@@ -11,6 +11,7 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MonthYearPicker } from "@/components/ui/month-year-picker";
+import { PieChart } from "lucide-react";
 import { reportsApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type {
@@ -467,7 +468,15 @@ export default function Reports() {
                   </>
                 )}
                 {byCategoryQuery.data?.length === 0 && (
-                  <p className="text-muted-foreground text-sm text-center py-6">No category data this month.</p>
+                  <div className="flex flex-col items-center gap-2 py-12 text-center">
+                    <div className="flex size-12 items-center justify-center rounded-full bg-muted">
+                      <PieChart className="size-6 text-muted-foreground" />
+                    </div>
+                    <p className="font-medium">No spending in this month</p>
+                    <p className="text-muted-foreground max-w-xs text-sm">
+                      Pick a different month or add a cash transaction to see your spending breakdown.
+                    </p>
+                  </div>
                 )}
               </CardContent>
             </Card>

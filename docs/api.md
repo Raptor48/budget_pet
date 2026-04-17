@@ -3,6 +3,17 @@
 All endpoints require authentication (session cookie or Authorization: Bearer header).
 Base URL: configured in NEXT_PUBLIC_API_URL.
 
+### Transaction privacy (`is_private`)
+
+Any transaction (cash, Plaid, manual) can be marked `is_private: true`. In that
+case the row is **visible only to the account owner**; all other family
+members get a filtered response where the transaction is omitted entirely.
+The filter is applied server-side in every place that aggregates
+transactions: `GET /api/transactions`, `GET /api/transactions/{id}`,
+CSV export, `/api/reports/*` and `/api/insights/feed`. The filter uses
+`session.user.id` as the viewer; calls without an authenticated session
+(internal/startup only) bypass the filter.
+
 ## Accounts
 
 | Method | Path | Description |
@@ -35,6 +46,10 @@ Each category has `source`: **`plaid_pfc`** (created when syncing Plaid transact
 | PATCH | /api/tags/{id} | Update tag |
 | DELETE | /api/tags/{id} | Delete tag |
 
+> Note: the V2 frontend currently only uses `GET /api/tags`; the mutating
+> endpoints remain available for future UI/automation but have no active
+> callers.
+
 ## Merchant category rules
 
 | Method | Path | Description |
@@ -48,9 +63,10 @@ Each category has `source`: **`plaid_pfc`** (created when syncing Plaid transact
 | Method | Path | Description |
 |---|---|---|
 | GET | /api/transactions | List transactions (filters: month, account_id, category_id, tag_id, search, channel, pending_only, limit, offset) |
+| GET | /api/transactions/date-range | Earliest and latest transaction dates visible to the caller (`{ min_month, max_month, earliest, latest }`). Used by the shared month/year picker to bound year and month options. Same auth + privacy + sandbox filters as `GET /api/transactions`. |
 | POST | /api/transactions | Create **cash** transaction on the user's Cash wallet (`source=cash`); body: `amount_cents`, `date`, `name`, optional `category_id`, `authorized_date`, `merchant_name`, `user_note`. Server sets `payment_channel=other`, `currency=USD`, `is_pending=false`. |
-| GET | /api/transactions/{id} | Get transaction with tags and splits |
-| PATCH | /api/transactions/{id} | Update category_id, user_note, merchant_name |
+| GET | /api/transactions/{id} | Get transaction with tags and splits (returns 404 when the row is `is_private` and the caller is not the owner) |
+| PATCH | /api/transactions/{id} | Update `category_id`, `user_note`, `merchant_name`, `is_private` |
 | DELETE | /api/transactions/{id} | Delete non-Plaid rows (`cash`, `manual`, etc.); reverses Cash wallet balance for `source=cash` |
 | POST | /api/transactions/{id}/tags/{tag_id} | Add tag |
 | DELETE | /api/transactions/{id}/tags/{tag_id} | Remove tag |
@@ -79,7 +95,13 @@ Each category has `source`: **`plaid_pfc`** (created when syncing Plaid transact
 | DELETE | /api/budgets/{id} | Delete budget |
 | GET | /api/budgets/progress | Budget vs actual for month (split-aware) |
 
-## Investments
+## Investments (stub)
+
+The `investments` namespace is reserved for Plaid's `investments` product.
+The product is disabled by default and only activated when
+`PLAID_ENABLE_INVESTMENTS=true` (see `docs/plaid.md`). The endpoint below is
+kept as a stub so the frontend/tests don't break while we wait for Plaid
+production approval; it returns an empty list when the product is off.
 
 | Method | Path | Description |
 |---|---|---|
@@ -87,23 +109,27 @@ Each category has `source`: **`plaid_pfc`** (created when syncing Plaid transact
 
 ## Reports
 
+All report endpoints that aggregate transactions respect the `is_private`
+filter: private rows owned by someone else are dropped before aggregation,
+so the monthly totals never reveal a gift someone else is planning.
+
 | Method | Path | Description |
 |---|---|---|
-| GET | /api/reports/cash-flow | Income vs expenses for a month |
+| GET | /api/reports/cash-flow | Income vs expenses for a month (privacy-aware) |
 | GET | /api/reports/cash-flow/history | Last N months (default 12) |
-| GET | /api/reports/by-category | Spending by category for month (split-aware) |
+| GET | /api/reports/by-category | Spending by category for month, split-aware (privacy-aware) |
 | GET | /api/reports/by-tag | Spending by tag (optional month + tag_id filter) |
 | GET | /api/reports/merchants | Top N merchants by spend |
 | GET | /api/reports/net-worth | Current net worth snapshot |
 | GET | /api/reports/net-worth/history | Historical snapshots (default 12 months) |
 | GET | /api/reports/forecast | Cash flow forecast for next N days (30/60/90) |
-| GET | /api/reports/financial-health | Health score 0–100 with metrics |
+| GET | /api/reports/financial-health | Health score 0–100 with metrics (privacy-aware) |
 
 ## Insights
 
 | Method | Path | Description |
 |---|---|---|
-| GET | /api/insights/feed | Aggregated insight cards from existing reports (partial failures degrade per-card, not whole response) |
+| GET | /api/insights/feed | Aggregated insight cards from existing reports (partial failures degrade per-card, not whole response). Respects the `is_private` filter via the session user. |
 | POST | /api/insights/mark-viewed | Store `insights_last_viewed_at` in `user_preferences` (cross-device “seen” baseline for teaser) |
 
 ## Plaid
@@ -113,7 +139,8 @@ Each category has `source`: **`plaid_pfc`** (created when syncing Plaid transact
 | POST | /api/plaid/link-token | Create Plaid Link token |
 | POST | /api/plaid/exchange-token | Exchange public_token for access_token |
 | GET | /api/plaid/items | List connected bank items |
-| DELETE | /api/plaid/items/{item_id} | Disconnect a bank |
+| GET | /api/plaid/items/{item_id}/data-summary | Counts of accounts and Plaid-sourced transactions tied to the item; used by the UI to warn before destructive delete + purge. |
+| DELETE | /api/plaid/items/{item_id} | Disconnect a bank. `?purge=true` also deletes accounts, Plaid-sourced transactions, recurring streams and investment holdings for this item. Default (`?purge=false`) keeps imported data for historical reports, but reconnecting the same bank will create duplicate rows because Plaid issues new `item_id` / `account_id` values on every re-link. Cash/manual transactions are never removed. |
 | POST | /api/plaid/items/{item_id}/reset-cursor | Reset sync cursor |
 | POST | /api/plaid/sync | Trigger manual sync for all items |
 | GET | /api/plaid/sync/log | Last 50 sync log entries |
