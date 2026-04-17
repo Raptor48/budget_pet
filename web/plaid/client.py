@@ -9,6 +9,7 @@ from typing import Optional
 import plaid
 from plaid.api import plaid_api
 from plaid.model.accounts_balance_get_request import AccountsBalanceGetRequest
+from plaid.model.accounts_balance_get_request_options import AccountsBalanceGetRequestOptions
 from plaid.model.country_code import CountryCode
 from plaid.model.institutions_get_by_id_request import InstitutionsGetByIdRequest
 from plaid.model.institutions_get_by_id_request_options import InstitutionsGetByIdRequestOptions
@@ -28,6 +29,7 @@ from plaid.model.transactions_sync_request import TransactionsSyncRequest
 from plaid.model.transactions_sync_request_options import TransactionsSyncRequestOptions
 
 from web.plaid.constants import (
+    get_balance_min_last_updated_datetime,
     get_plaid_pfc_category_version,
     get_plaid_transactions_days_requested,
 )
@@ -67,8 +69,11 @@ def _pfc_version_model() -> PersonalFinanceCategoryVersion:
 
 
 def _transactions_sync_request_options() -> TransactionsSyncRequestOptions:
+    # min_last_updated_datetime: required for Capital One (ins_128026) balance
+    # refresh on some sync paths; ignored elsewhere (see Plaid Balance API docs).
     return TransactionsSyncRequestOptions(
         personal_finance_category_version=_pfc_version_model(),
+        min_last_updated_datetime=get_balance_min_last_updated_datetime(),
     )
 
 
@@ -193,7 +198,12 @@ def get_transactions_sync(access_token: str, cursor: Optional[str] = None) -> di
 def get_account_balances(access_token: str) -> list:
     """Fetch current balances for all accounts linked to this item."""
     client = get_plaid_client()
-    request = AccountsBalanceGetRequest(access_token=access_token)
+    request = AccountsBalanceGetRequest(
+        access_token=access_token,
+        options=AccountsBalanceGetRequestOptions(
+            min_last_updated_datetime=get_balance_min_last_updated_datetime(),
+        ),
+    )
     response = client.accounts_balance_get(request)
     accounts = response["accounts"]
     # Convert SDK objects to plain dicts

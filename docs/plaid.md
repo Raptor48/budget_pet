@@ -35,6 +35,25 @@
 
 7. Update cursor, write to plaid_sync_log
 
+## Capital One (`ins_128026`) and `min_last_updated_datetime`
+
+For Capital One, Plaid requires **`min_last_updated_datetime`** (ISO 8601 UTC) on
+requests that fetch **non-depository** balances (for example credit cards),
+because those balances are not real-time. If it is missing, Plaid returns
+`INVALID_REQUEST` / `INVALID_FIELD` with a message like
+`min_last_updated_datetime parameter required for balance on ins_128026`.
+The same parameter may be required on **`/transactions/sync`** when that call
+refreshes account balances for the Item.
+
+Budget Pet passes this timestamp on **`/transactions/sync`** (request `options`)
+and **`/accounts/balance/get`** (request `options`), using a floor of **730
+days** in the past (UTC). Plaid **ignores** the field for other institutions
+and for Capital One depository accounts.
+
+If you ever see `LAST_UPDATED_DATETIME_OUT_OF_RANGE`, Plaid’s docs suggest
+falling back to cached balances from `/accounts/get`; open an issue if that
+happens in production.
+
 ## Transaction Fields
 
 All fields mapped directly from Plaid API:
