@@ -1,20 +1,11 @@
 "use client";
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { UsersManagement } from '@/components/settings/users-management';
 import { DollarSign } from 'lucide-react';
 
 export default function UsersPage() {
   const { user, loading } = useAuth();
-  const router = useRouter();
-
-  useEffect(() => {
-    if (!loading && user && !user.is_owner) {
-      router.replace('/settings');
-    }
-  }, [user, loading, router]);
 
   if (loading) {
     return (
@@ -24,9 +15,8 @@ export default function UsersPage() {
     );
   }
 
-  if (!user?.is_owner) {
-    return null;
-  }
-
-  return <UsersManagement />;
+  // Render for everyone — owner gets full management UI, non-owner gets
+  // a read-only list of family members. Access-control for the mutating
+  // API routes stays on the backend (owner-only).
+  return <UsersManagement readOnly={!user?.is_owner} />;
 }
