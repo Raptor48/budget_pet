@@ -160,6 +160,7 @@ export interface Transaction {
   location: Location | null;
   payment_meta: PaymentMeta | null;
   is_pending: boolean;
+  is_private: boolean;
   /** plaid | plaid_sandbox | manual | cash */
   source: string;
   user_note: string | null;

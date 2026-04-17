@@ -83,6 +83,7 @@ async def list_transactions(
         pending_only=pending_only,
         source=source,
         user_id=user_id,
+        viewer_user_id=current_id,
         limit=limit,
         offset=offset,
         omit_heavy_fields=True,
@@ -138,6 +139,7 @@ async def export_transactions(
         tag_id=tag_id,
         source=source,
         user_id=export_user_id,
+        viewer_user_id=current_id,
         limit=10000,
         omit_heavy_fields=True,
         exclude_plaid_sandbox=not reports_include_plaid_sandbox(),
@@ -211,8 +213,9 @@ def _check_txn_ownership(txn: dict, current_user: dict) -> None:
 @router.get("/{transaction_id}", response_model=TransactionOut)
 async def get_transaction(transaction_id: int, request: Request):
     current_user = getattr(request.state, "user", None) or {}
+    current_id = current_user.get("id")
     repo = _repo()
-    txn = await repo.get_transaction(transaction_id)
+    txn = await repo.get_transaction(transaction_id, viewer_user_id=current_id)
     if not txn:
         raise HTTPException(status_code=404, detail="Transaction not found")
     _check_txn_ownership(txn, current_user)
@@ -222,12 +225,19 @@ async def get_transaction(transaction_id: int, request: Request):
 @router.patch("/{transaction_id}", response_model=TransactionOut)
 async def update_transaction(transaction_id: int, body: TransactionUpdate, request: Request):
     current_user = getattr(request.state, "user", None) or {}
+    current_id = current_user.get("id")
     repo = _repo()
+    # Bypass privacy filter for owner of the transaction so they can toggle is_private on their own tx.
+    # Use raw get (no viewer_user_id) then check ownership before applying changes.
     txn = await repo.get_transaction(transaction_id)
     if not txn:
         raise HTTPException(status_code=404, detail="Transaction not found")
     _check_txn_ownership(txn, current_user)
-    updated = await repo.update_transaction(transaction_id, body.model_dump(exclude_none=True))
+    # Non-owners can only toggle is_private on their own transactions
+    update_data = body.model_dump(exclude_none=True)
+    if not current_user.get("is_owner") and txn.get("account_user_id") != current_id:
+        update_data.pop("is_private", None)
+    updated = await repo.update_transaction(transaction_id, update_data)
     if not updated:
         raise HTTPException(status_code=404, detail="Transaction not found")
     return await _enrich(updated, repo)
@@ -236,8 +246,9 @@ async def update_transaction(transaction_id: int, body: TransactionUpdate, reque
 @router.delete("/{transaction_id}", status_code=204)
 async def delete_transaction(transaction_id: int, request: Request):
     current_user = getattr(request.state, "user", None) or {}
+    current_id = current_user.get("id")
     repo = _repo()
-    txn = await repo.get_transaction(transaction_id)
+    txn = await repo.get_transaction(transaction_id, viewer_user_id=current_id)
     if not txn:
         raise HTTPException(
             status_code=404,
@@ -255,8 +266,9 @@ async def delete_transaction(transaction_id: int, request: Request):
 @router.post("/{transaction_id}/tags/{tag_id}", status_code=204)
 async def add_tag(transaction_id: int, tag_id: int, request: Request):
     current_user = getattr(request.state, "user", None) or {}
+    current_id = current_user.get("id")
     repo = _repo()
-    txn = await repo.get_transaction(transaction_id)
+    txn = await repo.get_transaction(transaction_id, viewer_user_id=current_id)
     if not txn:
         raise HTTPException(status_code=404, detail="Transaction not found")
     _check_txn_ownership(txn, current_user)
@@ -266,8 +278,9 @@ async def add_tag(transaction_id: int, tag_id: int, request: Request):
 @router.delete("/{transaction_id}/tags/{tag_id}", status_code=204)
 async def remove_tag(transaction_id: int, tag_id: int, request: Request):
     current_user = getattr(request.state, "user", None) or {}
+    current_id = current_user.get("id")
     repo = _repo()
-    txn = await repo.get_transaction(transaction_id)
+    txn = await repo.get_transaction(transaction_id, viewer_user_id=current_id)
     if not txn:
         raise HTTPException(status_code=404, detail="Transaction not found")
     _check_txn_ownership(txn, current_user)
@@ -279,7 +292,8 @@ async def remove_tag(transaction_id: int, tag_id: int, request: Request):
 @router.get("/{transaction_id}/splits", response_model=List[SplitOut])
 async def get_splits(transaction_id: int, request: Request):
     current_user = getattr(request.state, "user", None) or {}
-    txn = await _repo().get_transaction(transaction_id)
+    current_id = current_user.get("id")
+    txn = await _repo().get_transaction(transaction_id, viewer_user_id=current_id)
     if not txn:
         raise HTTPException(status_code=404, detail="Transaction not found")
     _check_txn_ownership(txn, current_user)
@@ -289,7 +303,8 @@ async def get_splits(transaction_id: int, request: Request):
 @router.post("/{transaction_id}/splits", response_model=List[SplitOut])
 async def set_splits(transaction_id: int, body: SplitListCreate, request: Request):
     current_user = getattr(request.state, "user", None) or {}
-    txn = await _repo().get_transaction(transaction_id)
+    current_id = current_user.get("id")
+    txn = await _repo().get_transaction(transaction_id, viewer_user_id=current_id)
     if not txn:
         raise HTTPException(status_code=404, detail="Transaction not found")
     _check_txn_ownership(txn, current_user)
@@ -304,7 +319,8 @@ async def set_splits(transaction_id: int, body: SplitListCreate, request: Reques
 @router.delete("/{transaction_id}/splits", status_code=204)
 async def delete_splits(transaction_id: int, request: Request):
     current_user = getattr(request.state, "user", None) or {}
-    txn = await _repo().get_transaction(transaction_id)
+    current_id = current_user.get("id")
+    txn = await _repo().get_transaction(transaction_id, viewer_user_id=current_id)
     if not txn:
         raise HTTPException(status_code=404, detail="Transaction not found")
     _check_txn_ownership(txn, current_user)

@@ -1,7 +1,7 @@
 from datetime import date
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from .models import BudgetCreate, BudgetOut, BudgetProgressOut, BudgetUpdate
 from .repo import BudgetsRepository
@@ -20,9 +20,12 @@ async def list_budgets(month: Optional[str] = Query(None, regex=r"^\d{4}-\d{2}$"
 
 @router.get("/progress", response_model=List[BudgetProgressOut])
 async def get_progress(
-    month: str = Query(default_factory=lambda: date.today().strftime("%Y-%m"), regex=r"^\d{4}-\d{2}$")
+    request: Request,
+    month: str = Query(default_factory=lambda: date.today().strftime("%Y-%m"), regex=r"^\d{4}-\d{2}$"),
 ):
-    return await _repo().get_progress(month)
+    user = getattr(request.state, "user", None) or {}
+    viewer_user_id = user.get("id")
+    return await _repo().get_progress(month, viewer_user_id=viewer_user_id)
 
 
 @router.post("", response_model=BudgetOut, status_code=201)
