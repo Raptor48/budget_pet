@@ -52,6 +52,10 @@ export function AppLayout({ children }: AppLayoutProps) {
           // Desktop: shrinks/expands
           collapsed ? "md:w-16" : "md:w-64",
           "flex flex-col",
+          // iOS / iPadOS PWA + notch: keep drawer chrome below status / Dynamic Island
+          "pt-[env(safe-area-inset-top,0px)] md:pt-0",
+          "pl-[env(safe-area-inset-left,0px)] md:pl-0",
+          "pb-[env(safe-area-inset-bottom,0px)] md:pb-0",
         )}
       >
         <Sidebar
@@ -63,32 +67,36 @@ export function AppLayout({ children }: AppLayoutProps) {
 
       {/* ── Main content ── */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* Mobile top bar */}
-        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-4 md:hidden">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="shrink-0"
-            onClick={() => setMobileOpen(true)}
-            aria-label="Open navigation"
-          >
-            <Menu className="size-5" />
-          </Button>
-          <span className="font-semibold text-primary">Family Budget</span>
-          {mobileOpen && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="ml-auto shrink-0"
-              onClick={closeMobile}
-              aria-label="Close navigation"
-            >
-              <X className="size-5" />
-            </Button>
-          )}
+        {/* Mobile top bar — safe-area so menu control stays below notch / status (PWA, Safari) */}
+        <header className="shrink-0 border-b border-border bg-card md:hidden">
+          <div className="pt-[env(safe-area-inset-top,0px)] pr-[env(safe-area-inset-right,0px)] pl-[env(safe-area-inset-left,0px)]">
+            <div className="flex h-14 items-center gap-3 px-4">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="shrink-0"
+                onClick={() => setMobileOpen(true)}
+                aria-label="Open navigation"
+              >
+                <Menu className="size-5" />
+              </Button>
+              <span className="font-semibold text-primary">Family Budget</span>
+              {mobileOpen && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="ml-auto shrink-0"
+                  onClick={closeMobile}
+                  aria-label="Close navigation"
+                >
+                  <X className="size-5" />
+                </Button>
+              )}
+            </div>
+          </div>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-y-auto">
+        <main className="min-h-0 flex-1 overflow-y-auto pb-[env(safe-area-inset-bottom,0px)] md:pb-0">
           <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
             {children}
           </div>
