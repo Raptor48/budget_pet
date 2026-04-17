@@ -203,7 +203,7 @@ function DashboardContent() {
     <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground text-sm">Overview for {month}</p>
+        <p className="text-muted-foreground text-sm">Overview for {spendMonth}</p>
       </div>
 
       {/* Row 1 — 4 KPI cards: Net Worth · Cash Flow · Health · Insights */}

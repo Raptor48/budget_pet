@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PiggyBank } from '@/types/v2';
 import { piggyApi } from '@/lib/api';
+import { confirm, notify } from '@/lib/notify';
 import { formatCurrency } from '@/lib/utils';
 import { format, differenceInMonths, isPast } from 'date-fns';
 import { Trash2, Plus, CheckCircle2, Calendar, Target } from 'lucide-react';
@@ -63,21 +64,27 @@ export function PiggyBankCard({ piggy, onUpdate }: PiggyBankCardProps) {
       onUpdate();
     } catch (error) {
       console.error('Error adding amount:', error);
-      alert('Failed to add amount. Please try again.');
+      notify.error('Failed to add amount. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!confirm(`Are you sure you want to delete "${piggy.name}"?`)) return;
-    
+    const ok = await confirm({
+      title: `Delete "${piggy.name}"?`,
+      description: "This piggy goal will be permanently removed.",
+      destructive: true,
+      confirmLabel: "Delete",
+    });
+    if (!ok) return;
+
     try {
       await piggyApi.delete(piggy.id);
       onUpdate();
     } catch (error) {
       console.error('Error deleting piggy bank:', error);
-      alert('Failed to delete. Please try again.');
+      notify.error('Failed to delete. Please try again.');
     }
   };
 
@@ -88,7 +95,7 @@ export function PiggyBankCard({ piggy, onUpdate }: PiggyBankCardProps) {
       onUpdate();
     } catch (error) {
       console.error('Error adding amount:', error);
-      alert('Failed to add amount. Please try again.');
+      notify.error('Failed to add amount. Please try again.');
     } finally {
       setLoading(false);
     }

@@ -23,24 +23,12 @@ def _sandbox_tx_filter_no_alias() -> str:
     return " AND (source IS NULL OR source <> 'plaid_sandbox')"
 
 
-def _private_tx_filter(alias: str = "t") -> str:
-    """Return SQL fragment that hides private transactions from other users.
-    Uses a subquery so callers don't need an explicit accounts JOIN.
-    The $N placeholder for viewer_user_id must be appended to the query params list.
-    Call as: _private_tx_filter("t")  →  " AND (NOT t.is_private OR ...)"
-    The placeholder index must be supplied by the caller.
-    """
-    return (
-        f" AND (NOT {alias}.is_private OR EXISTS ("
-        f"SELECT 1 FROM accounts _pa WHERE _pa.id = {alias}.account_id AND _pa.user_id = %s))"
-    )
-
-
 def _private_tx_filter_with_idx(alias: str, idx: int) -> str:
     """Return SQL fragment using asyncpg-style $N placeholder."""
+    prefix = f"{alias}." if alias else ""
     return (
-        f" AND (NOT {alias}.is_private OR EXISTS ("
-        f"SELECT 1 FROM accounts _pa WHERE _pa.id = {alias}.account_id AND _pa.user_id = ${idx}))"
+        f" AND (NOT {prefix}is_private OR EXISTS ("
+        f"SELECT 1 FROM accounts _pa WHERE _pa.id = {prefix}account_id AND _pa.user_id = ${idx}))"
     )
 
 
@@ -339,14 +327,27 @@ class ReportsRepository:
             )
         return dict(row)
 
-    async def get_financial_health_data(self) -> Dict[str, Any]:
-        """Gather raw data needed for financial health score calculation."""
+    async def get_financial_health_data(
+        self, viewer_user_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """Gather raw data needed for financial health score calculation.
+
+        When ``viewer_user_id`` is provided, private transactions owned by other
+        users are excluded from the income/expense aggregates so they do not
+        leak into the viewer's health score.
+        """
         pool = await self._pool()
         today = date.today()
         current_month = today.strftime("%Y-%m")
         async with pool.acquire() as conn:
             # Monthly income: average over the last 3 completed months.
             # Using only the current month produces an unreliable estimate early in the month.
+            income_filter = (
+                _private_tx_filter_with_idx("", 1) if viewer_user_id is not None else ""
+            )
+            income_params: list = []
+            if viewer_user_id is not None:
+                income_params.append(viewer_user_id)
             monthly_income = await conn.fetchval(
                 f"""
                 SELECT COALESCE(AVG(monthly_total), 0)
@@ -359,12 +360,20 @@ class ReportsRepository:
                       AND COALESCE(authorized_date, date) >= (DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '3 months')
                       AND COALESCE(authorized_date, date) < DATE_TRUNC('month', CURRENT_DATE)
                       {_sandbox_tx_filter_no_alias()}
+                      {income_filter}
                     GROUP BY m
                 ) sub
-                """
+                """,
+                *income_params,
             )
             monthly_income = int(monthly_income or 0)
             # Monthly expenses: use the current month for the on-screen snapshot
+            exp_filter = (
+                _private_tx_filter_with_idx("", 2) if viewer_user_id is not None else ""
+            )
+            exp_params: list = [current_month]
+            if viewer_user_id is not None:
+                exp_params.append(viewer_user_id)
             monthly_expenses = await conn.fetchval(
                 f"""
                 SELECT COALESCE(SUM(amount_cents), 0)
@@ -373,10 +382,17 @@ class ReportsRepository:
                   AND COALESCE(authorized_date, date) >= ($1 || '-01')::date
                   AND COALESCE(authorized_date, date) < (($1 || '-01')::date + INTERVAL '1 month')
                   {_sandbox_tx_filter_no_alias()}
+                  {exp_filter}
                 """,
-                current_month,
+                *exp_params,
             )
             # Average monthly expenses (last 6 months)
+            avg_filter = (
+                _private_tx_filter_with_idx("", 1) if viewer_user_id is not None else ""
+            )
+            avg_params: list = []
+            if viewer_user_id is not None:
+                avg_params.append(viewer_user_id)
             avg_expenses = await conn.fetchval(
                 f"""
                 SELECT COALESCE(AVG(monthly_total), 0)
@@ -388,9 +404,11 @@ class ReportsRepository:
                     WHERE amount_cents > 0
                       AND COALESCE(authorized_date, date) >= (CURRENT_DATE - INTERVAL '6 months')
                       {_sandbox_tx_filter_no_alias()}
+                      {avg_filter}
                     GROUP BY m
                 ) sub
-                """
+                """,
+                *avg_params,
             )
             # Total debt (credit + loan)
             total_debt = await conn.fetchval(

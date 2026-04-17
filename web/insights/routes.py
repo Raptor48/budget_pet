@@ -10,8 +10,10 @@ router = APIRouter(prefix="/api/insights", tags=["insights"])
 
 
 @router.get("/feed")
-async def insights_feed():
-    data = await build_insights_feed()
+async def insights_feed(request: Request):
+    user = getattr(request.state, "user", None) or {}
+    viewer_user_id = user.get("id")
+    data = await build_insights_feed(viewer_user_id=viewer_user_id)
     return {"generated_at": datetime.now(timezone.utc).isoformat(), **data}
 
 

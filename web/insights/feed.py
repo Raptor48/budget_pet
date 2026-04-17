@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import logging
 from datetime import date, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
-async def build_insights_feed() -> Dict[str, Any]:
+async def build_insights_feed(viewer_user_id: Optional[int] = None) -> Dict[str, Any]:
     from web.reports.calculations import build_forecast, compute_health_score
     from web.reports.repo import ReportsRepository
     from web.recurring.repo import RecurringRepository
@@ -22,7 +22,7 @@ async def build_insights_feed() -> Dict[str, Any]:
 
     # Financial health
     try:
-        fh = await reports.get_financial_health_data()
+        fh = await reports.get_financial_health_data(viewer_user_id=viewer_user_id)
         score = compute_health_score(**fh)
         cards.append(
             {
@@ -38,8 +38,8 @@ async def build_insights_feed() -> Dict[str, Any]:
 
     # Cash flow vs last month
     try:
-        cur = await reports.get_cash_flow(month)
-        prv = await reports.get_cash_flow(prev)
+        cur = await reports.get_cash_flow(month, viewer_user_id=viewer_user_id)
+        prv = await reports.get_cash_flow(prev, viewer_user_id=viewer_user_id)
         delta = cur["net_cents"] - prv["net_cents"]
         tone = "warn" if delta < 0 else "info"
         cards.append(
@@ -56,7 +56,7 @@ async def build_insights_feed() -> Dict[str, Any]:
 
     # Top category spend shift (simple: max category share message)
     try:
-        by_cat = await reports.get_by_category(month)
+        by_cat = await reports.get_by_category(month, viewer_user_id=viewer_user_id)
         if by_cat:
             top = max(by_cat, key=lambda x: x.get("amount_cents", 0) or 0)
             cards.append(

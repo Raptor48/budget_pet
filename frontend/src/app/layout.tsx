@@ -1,7 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Toaster } from "sonner";
 import { Providers } from "@/components/providers";
 import { ProtectedRoute } from "@/components/auth/protected-route";
+import { ConfirmDialogHost } from "@/components/ui/confirm-dialog";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -52,6 +54,8 @@ export default function RootLayout({
           <ProtectedRoute>
             {children}
           </ProtectedRoute>
+          <ConfirmDialogHost />
+          <Toaster position="top-right" richColors closeButton theme="dark" />
         </Providers>
       </body>
     </html>

@@ -110,6 +110,48 @@ class TestGetTransactionPrivacy:
         assert result["id"] == 8
 
 
+class TestFinancialHealthPrivacy:
+    """Verify get_financial_health_data injects a privacy filter when viewer_user_id is set."""
+
+    @pytest.mark.asyncio
+    async def test_viewer_id_adds_privacy_filter_to_sql(self):
+        from web.reports.repo import ReportsRepository
+
+        repo = ReportsRepository()
+        conn = AsyncMock()
+        conn.fetchval = AsyncMock(return_value=0)
+        pool = make_mock_pool(conn)
+        with patch("web.reports.repo.get_pool", AsyncMock(return_value=pool)):
+            await repo.get_financial_health_data(viewer_user_id=42)
+
+        sqls = [call.args[0] for call in conn.fetchval.call_args_list]
+        tx_sqls = [s for s in sqls if "FROM transactions" in s]
+        assert tx_sqls, "expected at least one transactions query"
+        for sql in tx_sqls:
+            assert "is_private" in sql, "privacy filter must be injected"
+            assert "_pa.user_id" in sql
+
+    @pytest.mark.asyncio
+    async def test_no_viewer_id_omits_privacy_filter(self):
+        from web.reports.repo import ReportsRepository
+
+        repo = ReportsRepository()
+        conn = AsyncMock()
+        conn.fetchval = AsyncMock(return_value=0)
+        pool = make_mock_pool(conn)
+        with patch("web.reports.repo.get_pool", AsyncMock(return_value=pool)):
+            await repo.get_financial_health_data()
+
+        tx_sqls = [
+            call.args[0]
+            for call in conn.fetchval.call_args_list
+            if "FROM transactions" in call.args[0]
+        ]
+        assert tx_sqls
+        for sql in tx_sqls:
+            assert "is_private" not in sql
+
+
 class TestTransactionUpdatePrivacy:
     @pytest.fixture
     def repo(self):

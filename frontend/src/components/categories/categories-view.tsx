@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/table";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { categoriesApi, ApiError } from "@/lib/api";
+import { confirm } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import type { Category } from "@/types/v2";
 import { Pencil, Plus, Trash2, ChevronDown } from "lucide-react";
@@ -166,9 +167,15 @@ export function CategoriesView() {
     setEditOpen(true);
   };
 
-  const handleDelete = (c: Category) => {
+  const handleDelete = async (c: Category) => {
     if (c.source === "plaid_pfc") return;
-    if (!window.confirm(`Delete category "${c.name}"? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: `Delete category "${c.name}"?`,
+      description: "This cannot be undone.",
+      destructive: true,
+      confirmLabel: "Delete",
+    });
+    if (!ok) return;
     deleteMutation.mutate(c.id);
   };
 

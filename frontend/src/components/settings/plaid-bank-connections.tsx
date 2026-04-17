@@ -21,6 +21,7 @@ import {
   Building2, RefreshCw, Trash2, CheckCircle, AlertCircle, Clock, RotateCcw, Loader2,
 } from "lucide-react";
 import { plaidApi } from "@/lib/api";
+import { TRANSACTIONS_DATE_RANGE_QUERY_KEY } from "@/lib/hooks/use-transactions-date-range";
 import type { PlaidItem, PlaidSyncResult } from "@/types/v2";
 
 // ---------------------------------------------------------------
@@ -160,15 +161,27 @@ export function PlaidBankConnections() {
       queryClient.invalidateQueries({ queryKey: ["plaid-sync-log"] });
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: TRANSACTIONS_DATE_RANGE_QUERY_KEY });
     },
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (itemId: string) => plaidApi.deleteItem(itemId),
+    mutationFn: ({ itemId, purge }: { itemId: string; purge: boolean }) =>
+      plaidApi.deleteItem(itemId, { purge }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["plaid-items"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: TRANSACTIONS_DATE_RANGE_QUERY_KEY });
       setDeleteTarget(null);
     },
+  });
+
+  const { data: deleteSummary } = useQuery({
+    queryKey: ["plaid-item-data-summary", deleteTarget],
+    queryFn: () =>
+      deleteTarget ? plaidApi.getItemDataSummary(deleteTarget) : Promise.resolve(null),
+    enabled: deleteTarget !== null,
   });
 
   const resetCursorMutation = useMutation({
@@ -365,15 +378,81 @@ export function PlaidBankConnections() {
         loading={resetCursorMutation.isPending}
       />
 
-      <DangerConfirmDialog
+      <RemoveBankDialog
         open={deleteTarget !== null}
         onOpenChange={(o) => !o && setDeleteTarget(null)}
-        title="Remove Bank Connection?"
-        description="This will permanently disconnect this bank. Your imported transactions and accounts will remain, but no new data will sync from this bank."
-        confirmLabel="Yes, Remove"
-        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget)}
+        summary={deleteSummary ?? null}
         loading={deleteMutation.isPending}
+        onConfirm={(purge) => {
+          if (deleteTarget) deleteMutation.mutate({ itemId: deleteTarget, purge });
+        }}
       />
     </Card>
+  );
+}
+
+// ---------------------------------------------------------------
+// Remove bank dialog — Keep data (safe) vs Delete everything (purge)
+// ---------------------------------------------------------------
+function RemoveBankDialog({
+  open,
+  onOpenChange,
+  summary,
+  loading,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  summary: { transactions_count: number; accounts_count: number } | null;
+  loading?: boolean;
+  onConfirm: (purge: boolean) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-destructive">Remove Bank Connection?</DialogTitle>
+          <DialogDescription>
+            {summary
+              ? `This bank has ${summary.accounts_count} account(s) and ${summary.transactions_count} imported transaction(s). Choose what to do with that data.`
+              : "This will permanently disconnect this bank."}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3 text-sm">
+          <Alert className="border-amber-600/50 bg-amber-500/10 text-amber-950 dark:text-amber-100">
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              If you reconnect this bank later, Plaid will issue new account IDs and will
+              re-import all transactions from scratch. Unless you delete existing data now,
+              you will see duplicate transactions and accounts after reconnecting.
+            </AlertDescription>
+          </Alert>
+        </div>
+
+        <DialogFooter className="flex flex-col gap-2 sm:flex-col sm:items-stretch sm:space-x-0">
+          <Button
+            variant="destructive"
+            disabled={loading}
+            onClick={() => onConfirm(true)}
+            className="gap-2"
+          >
+            {loading && <Loader2 className="size-4 animate-spin" />}
+            Delete everything (recommended)
+          </Button>
+          <Button
+            variant="outline"
+            disabled={loading}
+            onClick={() => onConfirm(false)}
+            className="gap-2"
+          >
+            Keep imported data (may duplicate on reconnect)
+          </Button>
+          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={loading}>
+            Cancel
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

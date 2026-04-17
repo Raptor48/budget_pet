@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { accountsApi, transactionsApi } from "@/lib/api";
+import { TRANSACTIONS_DATE_RANGE_QUERY_KEY } from "@/lib/hooks/use-transactions-date-range";
 import type { Category, ManualCashTransactionCreate } from "@/types/v2";
 
 const NONE = "__none__";
@@ -79,6 +80,7 @@ export function AddCashTransactionDialog({ open, onOpenChange, categories }: Pro
       await queryClient.invalidateQueries({ queryKey: ["budgets"] });
       await queryClient.invalidateQueries({ queryKey: ["accounts"] });
       await queryClient.invalidateQueries({ queryKey: ["accounts", "cash-wallet"] });
+      await queryClient.invalidateQueries({ queryKey: TRANSACTIONS_DATE_RANGE_QUERY_KEY });
       onOpenChange(false);
       setAmountStr("");
       setName("");

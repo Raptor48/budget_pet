@@ -184,7 +184,7 @@ export function Sidebar({
             <Tooltip>
               <TooltipTrigger asChild>
                 <Link
-                  href={user?.is_owner ? "/settings/users" : "/settings"}
+                  href="/settings/users"
                   onClick={onMobileClose}
                   className="block"
                 >
@@ -192,7 +192,7 @@ export function Sidebar({
                     variant="ghost"
                     size="icon"
                     className="w-full text-muted-foreground hover:text-foreground"
-                    aria-label="Account and profile"
+                    aria-label="Open user management"
                   >
                     <span className="flex size-7 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
                       {user?.username.charAt(0).toUpperCase() ?? "U"}
@@ -206,10 +206,10 @@ export function Sidebar({
             </Tooltip>
           ) : (
             <Link
-              href={user?.is_owner ? "/settings/users" : "/settings"}
+              href="/settings/users"
               onClick={onMobileClose}
               className="block rounded-lg outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              aria-label={user?.is_owner ? "Open user management" : "Open settings"}
+              aria-label="Open user management"
             >
               <div className="flex cursor-pointer items-center gap-2.5 rounded-lg bg-muted px-3 py-2 transition-colors hover:bg-muted/80">
                 <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary">

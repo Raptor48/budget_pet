@@ -21,8 +21,8 @@ import type {
   PlaidSyncResult,
   RecurringStream,
   Tag,
-  TagSpend,
   Transaction,
+  TransactionDateRange,
   TransactionFilters,
   TransactionSplit,
   ManualCashTransactionCreate,
@@ -90,13 +90,7 @@ export const accountsApi = {
   list: (activeOnly = true): Promise<Account[]> =>
     apiRequest(`/api/accounts?active_only=${activeOnly}`),
 
-  get: (id: number): Promise<Account> =>
-    apiRequest(`/api/accounts/${id}`),
-
   cashWallet: (): Promise<Account> => apiRequest("/api/accounts/cash-wallet"),
-
-  create: (data: Partial<Account>): Promise<Account> =>
-    apiRequest('/api/accounts', { method: 'POST', body: JSON.stringify(data) }),
 
   update: (id: number, data: Partial<Account>): Promise<Account> =>
     apiRequest(`/api/accounts/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
@@ -126,8 +120,6 @@ export const membersApi = {
 export const categoriesApi = {
   list: (): Promise<Category[]> => apiRequest('/api/categories'),
 
-  get: (id: number): Promise<Category> => apiRequest(`/api/categories/${id}`),
-
   create: (data: Pick<Category, 'name' | 'color'> & { icon?: string | null }): Promise<Category> =>
     apiRequest('/api/categories', { method: 'POST', body: JSON.stringify(data) }),
 
@@ -144,15 +136,6 @@ export const categoriesApi = {
 
 export const tagsApi = {
   list: (): Promise<Tag[]> => apiRequest('/api/tags'),
-
-  create: (data: { name: string; color?: string }): Promise<Tag> =>
-    apiRequest('/api/tags', { method: 'POST', body: JSON.stringify(data) }),
-
-  update: (id: number, data: Partial<Tag>): Promise<Tag> =>
-    apiRequest(`/api/tags/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-
-  delete: (id: number): Promise<void> =>
-    apiRequest(`/api/tags/${id}`, { method: 'DELETE' }),
 };
 
 // ---------------------------------------------------------------------------
@@ -218,6 +201,9 @@ export const transactionsApi = {
   removeTag: (transactionId: number, tagId: number): Promise<void> =>
     apiRequest(`/api/transactions/${transactionId}/tags/${tagId}`, { method: 'DELETE' }),
 
+  getDateRange: (): Promise<TransactionDateRange> =>
+    apiRequest('/api/transactions/date-range'),
+
   getSplits: (transactionId: number): Promise<TransactionSplit[]> =>
     apiRequest(`/api/transactions/${transactionId}/splits`),
 
@@ -229,9 +215,6 @@ export const transactionsApi = {
       method: 'POST',
       body: JSON.stringify({ splits }),
     }),
-
-  deleteSplits: (transactionId: number): Promise<void> =>
-    apiRequest(`/api/transactions/${transactionId}/splits`, { method: 'DELETE' }),
 
   exportUrl: (filters: TransactionFilters = {}): string => {
     const params = new URLSearchParams();
@@ -335,14 +318,6 @@ export const reportsApi = {
     return apiRequest(`/api/reports/by-category${qs}`);
   },
 
-  getByTag: (month?: string, tagId?: number): Promise<TagSpend[]> => {
-    const params = new URLSearchParams();
-    if (month) params.set('month', month);
-    if (tagId != null) params.set('tag_id', String(tagId));
-    const qs = params.toString();
-    return apiRequest(`/api/reports/by-tag${qs ? '?' + qs : ''}`);
-  },
-
   getTopMerchants: (month?: string, limit = 10): Promise<MerchantSpend[]> => {
     const params = new URLSearchParams();
     if (month) params.set('month', month);
@@ -382,8 +357,24 @@ export const plaidApi = {
 
   listItems: (): Promise<PlaidItem[]> => apiRequest('/api/plaid/items'),
 
-  deleteItem: (itemId: string): Promise<{ message: string }> =>
-    apiRequest(`/api/plaid/items/${itemId}`, { method: 'DELETE' }),
+  getItemDataSummary: (
+    itemId: string,
+  ): Promise<{ transactions_count: number; accounts_count: number }> =>
+    apiRequest(`/api/plaid/items/${itemId}/data-summary`),
+
+  deleteItem: (
+    itemId: string,
+    options: { purge?: boolean } = {},
+  ): Promise<{
+    message: string;
+    transactions_deleted?: number;
+    accounts_deleted?: number;
+    recurring_streams_deleted?: number;
+    plaid_items_deleted?: number;
+  }> => {
+    const qs = options.purge ? '?purge=true' : '';
+    return apiRequest(`/api/plaid/items/${itemId}${qs}`, { method: 'DELETE' });
+  },
 
   resetCursor: (itemId: string): Promise<{ message: string }> =>
     apiRequest(`/api/plaid/items/${itemId}/reset-cursor`, { method: 'POST' }),
