@@ -23,24 +23,52 @@ def _sandbox_tx_filter_no_alias() -> str:
     return " AND (source IS NULL OR source <> 'plaid_sandbox')"
 
 
+def _private_tx_filter(alias: str = "t") -> str:
+    """Return SQL fragment that hides private transactions from other users.
+    Uses a subquery so callers don't need an explicit accounts JOIN.
+    The $N placeholder for viewer_user_id must be appended to the query params list.
+    Call as: _private_tx_filter("t")  →  " AND (NOT t.is_private OR ...)"
+    The placeholder index must be supplied by the caller.
+    """
+    return (
+        f" AND (NOT {alias}.is_private OR EXISTS ("
+        f"SELECT 1 FROM accounts _pa WHERE _pa.id = {alias}.account_id AND _pa.user_id = %s))"
+    )
+
+
+def _private_tx_filter_with_idx(alias: str, idx: int) -> str:
+    """Return SQL fragment using asyncpg-style $N placeholder."""
+    return (
+        f" AND (NOT {alias}.is_private OR EXISTS ("
+        f"SELECT 1 FROM accounts _pa WHERE _pa.id = {alias}.account_id AND _pa.user_id = ${idx}))"
+    )
+
+
 class ReportsRepository:
     async def _pool(self):
         return await get_pool()
 
-    async def get_cash_flow(self, month: str) -> Dict[str, Any]:
+    async def get_cash_flow(self, month: str, viewer_user_id: Optional[int] = None) -> Dict[str, Any]:
         pool = await self._pool()
+        private_filter = (
+            _private_tx_filter_with_idx("t", 2) if viewer_user_id is not None else ""
+        )
+        params: list = [month]
+        if viewer_user_id is not None:
+            params.append(viewer_user_id)
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""
                 SELECT
-                    COALESCE(SUM(CASE WHEN amount_cents < 0 THEN ABS(amount_cents) ELSE 0 END), 0) AS income_cents,
-                    COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END), 0) AS expenses_cents
-                FROM transactions
-                WHERE COALESCE(authorized_date, date) >= ($1 || '-01')::date
-                  AND COALESCE(authorized_date, date) < (($1 || '-01')::date + INTERVAL '1 month')
-                  {_sandbox_tx_filter_no_alias()}
+                    COALESCE(SUM(CASE WHEN t.amount_cents < 0 THEN ABS(t.amount_cents) ELSE 0 END), 0) AS income_cents,
+                    COALESCE(SUM(CASE WHEN t.amount_cents > 0 THEN t.amount_cents ELSE 0 END), 0) AS expenses_cents
+                FROM transactions t
+                WHERE COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
+                  AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
+                  {_sandbox_tx_filter("t")}
+                  {private_filter}
                 """,
-                month,
+                *params,
             )
         income = row["income_cents"] or 0
         expenses = row["expenses_cents"] or 0
@@ -51,22 +79,29 @@ class ReportsRepository:
             "net_cents": income - expenses,
         }
 
-    async def get_cash_flow_history(self, months: int = 12) -> List[Dict[str, Any]]:
+    async def get_cash_flow_history(self, months: int = 12, viewer_user_id: Optional[int] = None) -> List[Dict[str, Any]]:
         pool = await self._pool()
+        private_filter = (
+            _private_tx_filter_with_idx("t", 2) if viewer_user_id is not None else ""
+        )
+        params: list = [months]
+        if viewer_user_id is not None:
+            params.append(viewer_user_id)
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
                 SELECT
-                    TO_CHAR(COALESCE(authorized_date, date), 'YYYY-MM') AS month,
-                    COALESCE(SUM(CASE WHEN amount_cents < 0 THEN ABS(amount_cents) ELSE 0 END), 0) AS income_cents,
-                    COALESCE(SUM(CASE WHEN amount_cents > 0 THEN amount_cents ELSE 0 END), 0) AS expenses_cents
-                FROM transactions
-                WHERE COALESCE(authorized_date, date) >= (CURRENT_DATE - INTERVAL '1 month' * $1)::date
-                  {_sandbox_tx_filter_no_alias()}
+                    TO_CHAR(COALESCE(t.authorized_date, t.date), 'YYYY-MM') AS month,
+                    COALESCE(SUM(CASE WHEN t.amount_cents < 0 THEN ABS(t.amount_cents) ELSE 0 END), 0) AS income_cents,
+                    COALESCE(SUM(CASE WHEN t.amount_cents > 0 THEN t.amount_cents ELSE 0 END), 0) AS expenses_cents
+                FROM transactions t
+                WHERE COALESCE(t.authorized_date, t.date) >= (CURRENT_DATE - INTERVAL '1 month' * $1)::date
+                  {_sandbox_tx_filter("t")}
+                  {private_filter}
                 GROUP BY month
                 ORDER BY month DESC
                 """,
-                months,
+                *params,
             )
         result = []
         for r in rows:
@@ -80,8 +115,14 @@ class ReportsRepository:
             })
         return result
 
-    async def get_by_category(self, month: str) -> List[Dict[str, Any]]:
+    async def get_by_category(self, month: str, viewer_user_id: Optional[int] = None) -> List[Dict[str, Any]]:
         pool = await self._pool()
+        private_filter = (
+            _private_tx_filter_with_idx("t", 2) if viewer_user_id is not None else ""
+        )
+        params: list = [month]
+        if viewer_user_id is not None:
+            params.append(viewer_user_id)
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
@@ -93,6 +134,7 @@ class ReportsRepository:
                       AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
                       AND NOT EXISTS (SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id)
                       {_sandbox_tx_filter("t")}
+                      {private_filter}
                     GROUP BY t.category_id
 
                     UNION ALL
@@ -104,6 +146,7 @@ class ReportsRepository:
                       AND COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
                       AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
                       {_sandbox_tx_filter("t")}
+                      {private_filter}
                     GROUP BY ts.category_id
                 ),
                 agg AS (
@@ -122,12 +165,12 @@ class ReportsRepository:
                 LEFT JOIN categories c ON c.id = agg.category_id
                 ORDER BY agg.amount_cents DESC
                 """,
-                month,
+                *params,
             )
         return [dict(r) for r in rows]
 
     async def get_by_tag(
-        self, month: Optional[str] = None, tag_id: Optional[int] = None
+        self, month: Optional[str] = None, tag_id: Optional[int] = None, viewer_user_id: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         pool = await self._pool()
         conditions = ["t.amount_cents > 0"]
@@ -150,6 +193,13 @@ class ReportsRepository:
             idx += 1
         if not reports_include_plaid_sandbox():
             conditions.append("(t.source IS NULL OR t.source <> 'plaid_sandbox')")
+        if viewer_user_id is not None:
+            conditions.append(
+                f"(NOT t.is_private OR EXISTS ("
+                f"SELECT 1 FROM accounts _pa WHERE _pa.id = t.account_id AND _pa.user_id = ${idx}))"
+            )
+            params.append(viewer_user_id)
+            idx += 1
         where = " AND ".join(conditions)
         async with pool.acquire() as conn:
             rows = await conn.fetch(
@@ -171,41 +221,48 @@ class ReportsRepository:
         return [dict(r) for r in rows]
 
     async def get_top_merchants(
-        self, month: Optional[str] = None, limit: int = 10
+        self, month: Optional[str] = None, limit: int = 10, viewer_user_id: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         pool = await self._pool()
         conditions = [
-            "amount_cents > 0",
-            "merchant_name IS NOT NULL",
+            "t.amount_cents > 0",
+            "t.merchant_name IS NOT NULL",
         ]
         params: List[Any] = []
         idx = 1
         if month:
             conditions.append(
-                f"COALESCE(authorized_date, date) >= (${idx} || '-01')::date"
+                f"COALESCE(t.authorized_date, t.date) >= (${idx} || '-01')::date"
             )
             params.append(month)
             idx += 1
             conditions.append(
-                f"COALESCE(authorized_date, date) < ((${idx} || '-01')::date + INTERVAL '1 month')"
+                f"COALESCE(t.authorized_date, t.date) < ((${idx} || '-01')::date + INTERVAL '1 month')"
             )
             params.append(month)
             idx += 1
         if not reports_include_plaid_sandbox():
-            conditions.append("(source IS NULL OR source <> 'plaid_sandbox')")
+            conditions.append("(t.source IS NULL OR t.source <> 'plaid_sandbox')")
+        if viewer_user_id is not None:
+            conditions.append(
+                f"(NOT t.is_private OR EXISTS ("
+                f"SELECT 1 FROM accounts _pa WHERE _pa.id = t.account_id AND _pa.user_id = ${idx}))"
+            )
+            params.append(viewer_user_id)
+            idx += 1
         params.append(limit)
         where = " AND ".join(conditions)
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
                 SELECT
-                    merchant_name,
-                    MAX(logo_url) AS logo_url,
-                    SUM(amount_cents) AS amount_cents,
+                    t.merchant_name,
+                    MAX(t.logo_url) AS logo_url,
+                    SUM(t.amount_cents) AS amount_cents,
                     COUNT(*) AS transaction_count
-                FROM transactions
+                FROM transactions t
                 WHERE {where}
-                GROUP BY merchant_name
+                GROUP BY t.merchant_name
                 ORDER BY amount_cents DESC
                 LIMIT ${idx}
                 """,

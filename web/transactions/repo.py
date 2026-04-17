@@ -27,6 +27,7 @@ class TransactionsRepository:
         pending_only: Optional[bool] = None,
         source: Optional[str] = None,
         user_id: Optional[int] = None,
+        viewer_user_id: Optional[int] = None,
         limit: int = 200,
         offset: int = 0,
         omit_heavy_fields: bool = True,
@@ -98,6 +99,17 @@ class TransactionsRepository:
         if exclude_plaid_sandbox:
             conditions.append("(t.source IS NULL OR t.source <> 'plaid_sandbox')")
 
+        # Hide private transactions that belong to other users.
+        # viewer_user_id=None means no filtering (internal calls or tests).
+        if viewer_user_id is not None:
+            conditions.append(
+                f"(NOT t.is_private OR EXISTS ("
+                f"SELECT 1 FROM accounts _a WHERE _a.id = t.account_id AND _a.user_id = ${idx}"
+                f"))"
+            )
+            params.append(viewer_user_id)
+            idx += 1
+
         where = " AND ".join(conditions)
         params.append(limit)
         params.append(offset)
@@ -128,6 +140,7 @@ class TransactionsRepository:
                        NULL::jsonb AS location,
                        NULL::jsonb AS payment_meta,
                        t.is_pending,
+                       t.is_private,
                        t.source,
                        t.user_note,
                        t.created_at,
@@ -163,7 +176,9 @@ class TransactionsRepository:
             )
         return [dict(r) for r in rows]
 
-    async def get_transaction(self, transaction_id: int) -> Optional[Dict[str, Any]]:
+    async def get_transaction(
+        self, transaction_id: int, viewer_user_id: Optional[int] = None
+    ) -> Optional[Dict[str, Any]]:
         pool = await self._pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -172,6 +187,7 @@ class TransactionsRepository:
                        a.name     AS account_name,
                        a.mask     AS account_mask,
                        u.username AS owner_username,
+                       a.user_id  AS account_user_id,
                        EXISTS(SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id) AS has_splits
                 FROM transactions t
                 LEFT JOIN accounts a ON a.id = t.account_id
@@ -180,7 +196,18 @@ class TransactionsRepository:
                 """,
                 transaction_id,
             )
-        return dict(row) if row else None
+        if not row:
+            return None
+        result = dict(row)
+        # Return None (treat as not found) if the transaction is private and
+        # belongs to a different user. This prevents leaking existence via 403.
+        if (
+            viewer_user_id is not None
+            and result.get("is_private")
+            and result.get("account_user_id") != viewer_user_id
+        ):
+            return None
+        return result
 
     async def get_tags_for_transaction(self, transaction_id: int) -> List[Dict[str, Any]]:
         pool = await self._pool()
@@ -355,7 +382,7 @@ class TransactionsRepository:
     async def update_transaction(
         self, transaction_id: int, data: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        allowed = {"category_id", "user_note", "merchant_name"}
+        allowed = {"category_id", "user_note", "merchant_name", "is_private"}
         fields = {k: v for k, v in data.items() if k in allowed}
         if not fields:
             return await self.get_transaction(transaction_id)

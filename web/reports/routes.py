@@ -1,7 +1,7 @@
 from datetime import date
 from typing import List, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 
 from .calculations import build_forecast, compute_health_score
 from .models import (
@@ -23,39 +23,48 @@ def _repo() -> ReportsRepository:
     return ReportsRepository()
 
 
+def _viewer_id(request: Request) -> Optional[int]:
+    user = getattr(request.state, "user", None) or {}
+    return user.get("id")
+
+
 @router.get("/cash-flow", response_model=CashFlowMonth)
 async def get_cash_flow(
-    month: str = Query(default_factory=lambda: date.today().strftime("%Y-%m"), regex=r"^\d{4}-\d{2}$")
+    request: Request,
+    month: str = Query(default_factory=lambda: date.today().strftime("%Y-%m"), regex=r"^\d{4}-\d{2}$"),
 ):
-    return await _repo().get_cash_flow(month)
+    return await _repo().get_cash_flow(month, viewer_user_id=_viewer_id(request))
 
 
 @router.get("/cash-flow/history", response_model=List[CashFlowMonth])
-async def get_cash_flow_history(months: int = Query(12, ge=1, le=24)):
-    return await _repo().get_cash_flow_history(months)
+async def get_cash_flow_history(request: Request, months: int = Query(12, ge=1, le=24)):
+    return await _repo().get_cash_flow_history(months, viewer_user_id=_viewer_id(request))
 
 
 @router.get("/by-category", response_model=List[CategorySpend])
 async def get_by_category(
-    month: str = Query(default_factory=lambda: date.today().strftime("%Y-%m"), regex=r"^\d{4}-\d{2}$")
+    request: Request,
+    month: str = Query(default_factory=lambda: date.today().strftime("%Y-%m"), regex=r"^\d{4}-\d{2}$"),
 ):
-    return await _repo().get_by_category(month)
+    return await _repo().get_by_category(month, viewer_user_id=_viewer_id(request))
 
 
 @router.get("/by-tag", response_model=List[TagSpend])
 async def get_by_tag(
+    request: Request,
     month: Optional[str] = Query(None, regex=r"^\d{4}-\d{2}$"),
     tag_id: Optional[int] = Query(None),
 ):
-    return await _repo().get_by_tag(month=month, tag_id=tag_id)
+    return await _repo().get_by_tag(month=month, tag_id=tag_id, viewer_user_id=_viewer_id(request))
 
 
 @router.get("/merchants", response_model=List[MerchantSpend])
 async def get_top_merchants(
+    request: Request,
     month: Optional[str] = Query(None, regex=r"^\d{4}-\d{2}$"),
     limit: int = Query(10, ge=1, le=50),
 ):
-    return await _repo().get_top_merchants(month=month, limit=limit)
+    return await _repo().get_top_merchants(month=month, limit=limit, viewer_user_id=_viewer_id(request))
 
 
 @router.get("/net-worth")

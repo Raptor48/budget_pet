@@ -13,7 +13,7 @@ import {
 import { usePathname, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, isValid } from "date-fns";
-import { Columns2, CreditCard, Download, Loader2, Store, Trash2, Wifi, CircleDot } from "lucide-react";
+import { Columns2, CreditCard, Download, EyeOff, Eye, Loader2, Store, Trash2, Wifi, CircleDot } from "lucide-react";
 
 import { AddCashTransactionDialog } from "@/app/transactions/_components/add-cash-transaction-dialog";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -356,6 +356,8 @@ function TransactionDetailsDialog({
   isSaving,
   onDeleteCash,
   isDeletingCash,
+  onTogglePrivate,
+  isTogglingPrivate,
 }: {
   transactionId: number | null;
   open: boolean;
@@ -365,6 +367,8 @@ function TransactionDetailsDialog({
   isSaving: boolean;
   onDeleteCash?: (id: number) => Promise<void>;
   isDeletingCash?: boolean;
+  onTogglePrivate?: (id: number, isPrivate: boolean) => void;
+  isTogglingPrivate?: boolean;
 }) {
   const [editNote, setEditNote] = useState("");
   const [editCategoryId, setEditCategoryId] = useState(ALL);
@@ -628,6 +632,25 @@ function TransactionDetailsDialog({
 
         <DialogFooter className="shrink-0 flex-col gap-2 border-t border-border px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+            {transaction && !isLoading && !isError && onTogglePrivate ? (
+              <Button
+                type="button"
+                variant={transaction.is_private ? "secondary" : "outline"}
+                className="gap-1.5"
+                disabled={isTogglingPrivate || isSaving}
+                onClick={() => onTogglePrivate(transaction.id, !transaction.is_private)}
+                title={transaction.is_private ? "Make visible to others" : "Hide from others"}
+              >
+                {isTogglingPrivate ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : transaction.is_private ? (
+                  <EyeOff className="size-4" />
+                ) : (
+                  <Eye className="size-4" />
+                )}
+                {transaction.is_private ? "Private" : "Set private"}
+              </Button>
+            ) : null}
             {transaction && !isLoading && !isError && transaction.source === "cash" && onDeleteCash ? (
               <Button
                 type="button"
@@ -1134,6 +1157,15 @@ export default function TransactionsPage() {
     },
   });
 
+  const togglePrivateMutation = useMutation({
+    mutationFn: ({ id, is_private }: { id: number; is_private: boolean }) =>
+      transactionsApi.update(id, { is_private }),
+    onSuccess: async (_, variables) => {
+      await queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      await queryClient.invalidateQueries({ queryKey: ["transaction", variables.id] });
+    },
+  });
+
   const addTagMutation = useMutation({
     mutationFn: ({ txId, tagId }: { txId: number; tagId: number }) =>
       transactionsApi.addTag(txId, tagId),
@@ -1470,6 +1502,14 @@ export default function TransactionsPage() {
             detailTxId != null &&
             deleteCashMutation.variables === detailTxId
           }
+          onTogglePrivate={(id, isPrivate) =>
+            togglePrivateMutation.mutate({ id, is_private: isPrivate })
+          }
+          isTogglingPrivate={
+            togglePrivateMutation.isPending &&
+            detailTxId != null &&
+            togglePrivateMutation.variables?.id === detailTxId
+          }
         />
 
         <SplitTransactionDialog
@@ -1542,6 +1582,11 @@ function FragmentRow({
                 >
                   Pending
                 </Badge>
+              ) : null}
+              {tx.is_private ? (
+                <span title="Private — hidden from other users">
+                  <EyeOff className="size-3.5 text-muted-foreground" />
+                </span>
               ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-2">

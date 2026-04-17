@@ -73,15 +73,24 @@ class BudgetsRepository:
             )
         return result != "DELETE 0"
 
-    async def get_progress(self, month: str) -> List[Dict[str, Any]]:
+    async def get_progress(self, month: str, viewer_user_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         For each budget in the given month, return actual spending.
         Actual spending uses splits if they exist, otherwise uses transaction.category_id.
         Only counts expenses (amount_cents > 0). Excludes ``plaid_sandbox`` when
-        ``reports_include_plaid_sandbox()`` is false (see ``web.env_flags``).
+        ``reports_include_plaid_sandbox()`` is false. Excludes private transactions
+        from other users when viewer_user_id is provided.
         """
         pool = await self._pool()
         sandbox_ex = "" if reports_include_plaid_sandbox() else "AND t.source != 'plaid_sandbox'"
+        params: List[Any] = [month]
+        private_ex = ""
+        if viewer_user_id is not None:
+            params.append(viewer_user_id)
+            private_ex = (
+                f"AND (NOT t.is_private OR EXISTS ("
+                f"SELECT 1 FROM accounts _pa WHERE _pa.id = t.account_id AND _pa.user_id = $2))"
+            )
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
@@ -94,6 +103,7 @@ class BudgetsRepository:
                     WHERE
                         t.amount_cents > 0
                         {sandbox_ex}
+                        {private_ex}
                         AND COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
                         AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
                         AND NOT EXISTS (
@@ -112,6 +122,7 @@ class BudgetsRepository:
                     WHERE
                         t.amount_cents > 0
                         {sandbox_ex}
+                        {private_ex}
                         AND COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
                         AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
                     GROUP BY ts.category_id
@@ -141,6 +152,6 @@ class BudgetsRepository:
                 WHERE cb.month = $1
                 ORDER BY percent_used DESC
                 """,
-                month,
+                *params,
             )
         return [dict(r) for r in rows]

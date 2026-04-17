@@ -205,7 +205,7 @@ export const transactionsApi = {
 
   update: (
     id: number,
-    data: { category_id?: number | null; user_note?: string; merchant_name?: string },
+    data: { category_id?: number | null; user_note?: string; merchant_name?: string; is_private?: boolean },
   ): Promise<Transaction> =>
     apiRequest(`/api/transactions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
 
