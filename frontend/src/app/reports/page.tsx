@@ -121,8 +121,7 @@ function CategoryDonutChart({
             paddingAngle={2}
             animationBegin={0}
             animationDuration={700}
-            activeIndex={activeIdx}
-            activeShape={ActiveShape}
+            {...({ activeIndex: activeIdx, activeShape: ActiveShape } as unknown as object)}
             onMouseEnter={(_, i) => onHover(i)}
             onMouseLeave={() => onHover(null)}
             onClick={(_, i) => onLock(lockedIdx === i ? null : i)}
