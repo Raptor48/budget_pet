@@ -68,15 +68,19 @@ def _extract_bearer(request: Request) -> Optional[str]:
 def _get_client_ip(request: Request) -> str:
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded:
-        return forwarded.split(",")[0].strip()
+        # Railway (and most reverse proxies) append the real client IP to the header.
+        # Taking the LAST entry prevents clients from spoofing via a crafted header value.
+        ips = [ip.strip() for ip in forwarded.split(",") if ip.strip()]
+        if ips:
+            return ips[-1]
     return request.client.host if request.client else "unknown"
 
 
-def _is_production(request: Request) -> bool:
+def _is_production() -> bool:
+    # Rely only on env vars — request.url.scheme is always "http" behind Railway's TLS proxy.
     return (
         os.getenv("RAILWAY_ENVIRONMENT") == "production"
         or os.getenv("RAILWAY") == "true"
-        or request.url.scheme == "https"
     )
 
 
@@ -99,7 +103,7 @@ async def login(login_data: LoginRequest, request: Request, response: Response):
     _check_rate_limit(ip)
 
     repo = get_auth_repo()
-    is_prod = _is_production(request)
+    is_prod = _is_production()
 
     admin_login = os.getenv("ADMIN_LOGIN")
     admin_password = os.getenv("ADMIN_PASSWORD")
@@ -189,6 +193,22 @@ async def _require_owner(request: Request) -> dict:
     if not user["is_owner"]:
         raise HTTPException(status_code=403, detail="Owner access required")
     return user
+
+
+@router.get("/members")
+async def list_members(request: Request):
+    """Return id + username for all family members.
+    Available to any authenticated user (not owner-only).
+    Note: /api/auth/* is exempt from AuthMiddleware, so we verify the session here."""
+    token = request.cookies.get("session_token") or _extract_bearer(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    repo = get_auth_repo()
+    user = await repo.get_session_user(token)
+    if not user:
+        raise HTTPException(status_code=401, detail="Session expired or invalid")
+    users = await repo.list_users()
+    return [{"id": u["id"], "username": u["username"]} for u in users]
 
 
 @router.get("/users", response_model=list[UserPublic])

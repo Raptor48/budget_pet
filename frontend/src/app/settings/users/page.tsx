@@ -3,7 +3,6 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
-import { AppLayout } from '@/components/layout/app-layout';
 import { UsersManagement } from '@/components/settings/users-management';
 import { DollarSign } from 'lucide-react';
 
@@ -29,9 +28,5 @@ export default function UsersPage() {
     return null;
   }
 
-  return (
-    <AppLayout>
-      <UsersManagement />
-    </AppLayout>
-  );
+  return <UsersManagement />;
 }

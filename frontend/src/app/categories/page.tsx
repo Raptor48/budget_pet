@@ -1,10 +1,5 @@
-import { AppLayout } from "@/components/layout/app-layout";
-import { CategoriesPage } from "@/components/categories/categories-page";
+import { redirect } from "next/navigation";
 
-export default function Categories() {
-  return (
-    <AppLayout>
-      <CategoriesPage />
-    </AppLayout>
-  );
+export default function CategoriesRedirectPage() {
+  redirect("/settings/categories");
 }

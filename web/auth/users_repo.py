@@ -3,7 +3,6 @@ Repository for users and sessions — asyncpg (PostgreSQL).
 All password hashing uses bcrypt with cost factor 12.
 """
 
-import os
 import secrets
 import logging
 from datetime import datetime, timedelta, timezone
@@ -18,21 +17,15 @@ _auth_repo: Optional["AuthRepository"] = None
 
 
 class AuthRepository:
-    def __init__(self, database_url: str) -> None:
-        self.database_url = database_url
-        self._pool: Optional[asyncpg.Pool] = None
+    def __init__(self) -> None:
+        pass
 
     async def get_pool(self) -> asyncpg.Pool:
-        if self._pool is None:
-            self._pool = await asyncpg.create_pool(
-                self.database_url, min_size=1, max_size=5
-            )
-        return self._pool
+        from web.db import get_pool as _get_shared_pool
+        return await _get_shared_pool()
 
     async def close(self) -> None:
-        if self._pool:
-            await self._pool.close()
-            self._pool = None
+        pass
 
     # ------------------------------------------------------------------
     # Users
@@ -180,8 +173,5 @@ class AuthRepository:
 def get_auth_repo() -> AuthRepository:
     global _auth_repo
     if _auth_repo is None:
-        db_url = os.getenv("DATABASE_URL")
-        if not db_url:
-            raise RuntimeError("DATABASE_URL not set")
-        _auth_repo = AuthRepository(db_url)
+        _auth_repo = AuthRepository()
     return _auth_repo

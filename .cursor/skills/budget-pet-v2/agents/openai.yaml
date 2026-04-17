@@ -1,0 +1,4 @@
+interface:
+  display_name: "Budget Pet V2"
+  short_description: "Plaid-first family budget: stack, docs, workflows"
+  default_prompt: "Use $budget-pet-v2 for Budget Pet V2: read docs/ first, respect Plaid as SoT and module layout."
