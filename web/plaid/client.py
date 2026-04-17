@@ -96,6 +96,8 @@ def create_link_token(
     client = get_plaid_client()
     # redirect_uri is only passed when configured — sandbox works without it
     effective_redirect = redirect_uri or os.getenv("PLAID_REDIRECT_URI") or None
+    # webhook URL — Plaid sends SYNC_UPDATES_AVAILABLE, ITEM_LOGIN_REQUIRED, etc. here
+    webhook_url = os.getenv("PLAID_WEBHOOK_URL") or None
     common = dict(
         client_name="Budget Pet",
         country_codes=[CountryCode("US")],
@@ -104,6 +106,8 @@ def create_link_token(
     )
     if effective_redirect:
         common["redirect_uri"] = effective_redirect
+    if webhook_url:
+        common["webhook"] = webhook_url
     if access_token:
         request = LinkTokenCreateRequest(
             access_token=access_token,
