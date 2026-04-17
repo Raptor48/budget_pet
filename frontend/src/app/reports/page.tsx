@@ -2,8 +2,12 @@
 
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Cell, Pie, PieChart, ResponsiveContainer, Sector, Tooltip } from "recharts";
 import { AppLayout } from "@/components/layout/app-layout";
+import {
+  CATEGORY_COLORS,
+  CategoryDonutChart,
+  CategoryLegend,
+} from "@/components/charts/category-donut-chart";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MonthYearPicker } from "@/components/ui/month-year-picker";
@@ -50,130 +54,6 @@ function formatRatioPercent(value: number | null | undefined): string {
   return `${(value * 100).toFixed(1)}%`;
 }
 
-const CATEGORY_COLORS = [
-  "#6366f1", "#22c55e", "#f59e0b", "#ec4899",
-  "#06b6d4", "#a855f7", "#14b8a6", "#f97316",
-  "#ef4444", "#84cc16", "#0ea5e9", "#e879f9",
-];
-
-/** Custom active (hovered/locked) shape: expands outward + outer ring. */
-function ActiveShape(props: Record<string, unknown>) {
-  const {
-    cx, cy, innerRadius, outerRadius,
-    startAngle, endAngle, fill,
-  } = props as {
-    cx: number; cy: number; innerRadius: number; outerRadius: number;
-    startAngle: number; endAngle: number; fill: string;
-  };
-  return (
-    <g>
-      <Sector
-        cx={cx} cy={cy}
-        innerRadius={innerRadius}
-        outerRadius={outerRadius + 8}
-        startAngle={startAngle}
-        endAngle={endAngle}
-        fill={fill}
-      />
-      <Sector
-        cx={cx} cy={cy}
-        innerRadius={outerRadius + 12}
-        outerRadius={outerRadius + 15}
-        startAngle={startAngle}
-        endAngle={endAngle}
-        fill={fill}
-        opacity={0.35}
-      />
-    </g>
-  );
-}
-
-function CategoryDonutChart({
-  data,
-  hoveredIdx,
-  lockedIdx,
-  onHover,
-  onLock,
-}: {
-  data: CategorySpend[];
-  hoveredIdx: number | null;
-  lockedIdx: number | null;
-  onHover: (i: number | null) => void;
-  onLock: (i: number | null) => void;
-}) {
-  const activeIdx = hoveredIdx ?? lockedIdx ?? undefined;
-  const totalCents = data.reduce((s, r) => s + r.amount_cents, 0);
-  const displayRow = activeIdx != null ? data[activeIdx] : null;
-  const pieData = data.map((r) => ({ name: r.category_name, value: r.amount_cents }));
-
-  return (
-    <div className="relative w-full">
-      <ResponsiveContainer width="100%" height={260}>
-        <PieChart>
-          <Pie
-            data={pieData}
-            dataKey="value"
-            nameKey="name"
-            cx="50%"
-            cy="50%"
-            innerRadius={72}
-            outerRadius={108}
-            paddingAngle={2}
-            animationBegin={0}
-            animationDuration={700}
-            {...({ activeIndex: activeIdx, activeShape: ActiveShape } as unknown as object)}
-            onMouseEnter={(_, i) => onHover(i)}
-            onMouseLeave={() => onHover(null)}
-            onClick={(_, i) => onLock(lockedIdx === i ? null : i)}
-            style={{ cursor: "pointer", outline: "none" }}
-          >
-            {pieData.map((_, i) => (
-              <Cell
-                key={i}
-                fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]}
-                opacity={activeIdx != null && activeIdx !== i ? 0.45 : 1}
-                style={{ transition: "opacity 150ms" }}
-              />
-            ))}
-          </Pie>
-          <Tooltip
-            formatter={(value: number, name: string) => [formatMoney(value), name]}
-            contentStyle={{
-              borderRadius: 10,
-              border: "1px solid hsl(var(--border))",
-              fontSize: 13,
-            }}
-            itemStyle={{ padding: "2px 0" }}
-          />
-        </PieChart>
-      </ResponsiveContainer>
-
-      {/* Center overlay */}
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-        <div className="text-center px-2">
-          {displayRow ? (
-            <>
-              <p className="text-lg font-bold tabular-nums leading-tight">
-                {formatMoney(displayRow.amount_cents)}
-              </p>
-              <p className="text-[11px] text-muted-foreground leading-snug mt-0.5 max-w-[7rem] break-words">
-                {displayRow.category_name}
-              </p>
-              <p className="text-xs text-muted-foreground tabular-nums">
-                {displayRow.percent.toFixed(1)}%
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="text-xl font-bold tabular-nums">{formatMoney(totalCents)}</p>
-              <p className="text-xs text-muted-foreground">Total</p>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function NetWorthLineChart({ data }: { data: NetWorthSnapshot[] }) {
   const sorted = useMemo(
@@ -516,53 +396,13 @@ export default function Reports() {
                         onHover={setCatHoveredIdx}
                         onLock={setCatLockedIdx}
                       />
-
-                      {/* Legend — interactive rows */}
-                      <div className="flex flex-col justify-center gap-0.5 overflow-auto max-h-[280px] pr-1">
-                        {byCategoryQuery.data.map((row, i) => {
-                          const isActive = catActiveIdx === i;
-                          const isDimmed = catActiveIdx != null && !isActive;
-                          return (
-                            <button
-                              key={`${row.category_name}-${i}`}
-                              type="button"
-                              className={cn(
-                                "flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-left text-sm transition-colors",
-                                isActive && "bg-muted",
-                                !isActive && "hover:bg-muted/50",
-                                isDimmed && "opacity-40",
-                              )}
-                              onMouseEnter={() => setCatHoveredIdx(i)}
-                              onMouseLeave={() => setCatHoveredIdx(null)}
-                              onClick={() => setCatLockedIdx((prev) => (prev === i ? null : i))}
-                            >
-                              <span
-                                className={cn(
-                                  "size-2.5 shrink-0 rounded-full transition-transform",
-                                  isActive && "scale-125",
-                                )}
-                                style={{ backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length] }}
-                              />
-                              <span className="min-w-0 flex-1 truncate font-medium">{row.category_name}</span>
-                              <span className="shrink-0 tabular-nums text-muted-foreground">
-                                {formatMoney(row.amount_cents)}
-                              </span>
-                              <span className="w-12 shrink-0 text-right tabular-nums text-muted-foreground text-xs">
-                                {row.percent.toFixed(1)}%
-                              </span>
-                            </button>
-                          );
-                        })}
-                        {catLockedIdx != null && (
-                          <button
-                            type="button"
-                            onClick={() => setCatLockedIdx(null)}
-                            className="mt-2 text-xs text-primary hover:underline text-left px-3"
-                          >
-                            Clear selection ×
-                          </button>
-                        )}
-                      </div>
+                      <CategoryLegend
+                        data={byCategoryQuery.data}
+                        hoveredIdx={catHoveredIdx}
+                        lockedIdx={catLockedIdx}
+                        onHover={setCatHoveredIdx}
+                        onLock={setCatLockedIdx}
+                      />
                     </div>
 
                     {/* Detailed table */}

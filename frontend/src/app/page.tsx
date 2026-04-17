@@ -3,8 +3,8 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { AppLayout } from "@/components/layout/app-layout";
+import { CategoryDonutWidget } from "@/components/charts/category-donut-chart";
 import {
   Card,
   CardContent,
@@ -107,9 +107,6 @@ function MerchantAvatar({ tx }: { tx: Transaction }) {
   );
 }
 
-const PIE_COLORS = [
-  "#6366f1", "#22c55e", "#f59e0b", "#ec4899", "#06b6d4", "#a855f7", "#14b8a6", "#f97316",
-];
 
 function DashboardContent() {
   const month = currentMonthIso();
@@ -185,14 +182,7 @@ function DashboardContent() {
   const insights = insightsQuery.data;
 
   const pieData = useMemo(
-    () =>
-      byCategory
-        .filter((c) => c.amount_cents > 0)
-        .map((c) => ({
-          name: c.category_name,
-          value: c.amount_cents,
-        }))
-        .slice(0, 10),
+    () => byCategory.filter((c) => c.amount_cents > 0).slice(0, 12),
     [byCategory],
   );
 
@@ -362,32 +352,13 @@ function DashboardContent() {
             </div>
             <MonthYearPicker value={spendMonth} onChange={setSpendMonth} />
           </CardHeader>
-          <CardContent className="h-[260px]">
+          <CardContent>
             {byCategoryQuery.isLoading ? (
-              <SectionSkeleton className="h-full w-full" />
-            ) : pieData.length === 0 ? (
-              <p className="text-muted-foreground text-sm">No spending for this month.</p>
+              <SectionSkeleton className="h-[240px] w-full" />
+            ) : byCategoryQuery.isError ? (
+              <p className="text-destructive text-sm">Could not load category data.</p>
             ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={pieData}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={52}
-                    outerRadius={84}
-                    paddingAngle={2}
-                    animationDuration={600}
-                  >
-                    {pieData.map((_, i) => (
-                      <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value: number) => formatUsd(value)} contentStyle={{ borderRadius: 8 }} />
-                </PieChart>
-              </ResponsiveContainer>
+              <CategoryDonutWidget data={pieData} />
             )}
           </CardContent>
         </Card>
