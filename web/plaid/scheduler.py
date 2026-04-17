@@ -31,6 +31,14 @@ def _get_source() -> str:
     return _PLAID_ENV_SOURCE.get(env, "plaid")
 
 
+def _investments_enabled() -> bool:
+    """Check PLAID_ENABLE_INVESTMENTS env flag (default true for backward compat)."""
+    import os
+
+    val = os.getenv("PLAID_ENABLE_INVESTMENTS", "true").strip().lower()
+    return val in ("1", "true", "yes")
+
+
 async def _sync_item_payload(item: Dict[str, Any], source: str) -> Dict[str, Any]:
     """Run full Plaid sync for one item dict (from plaid_items row)."""
     import asyncio
@@ -96,11 +104,12 @@ async def _sync_item_payload(item: Dict[str, Any], source: str) -> Dict[str, Any
         await rec_repo.upsert_streams(recurring_data["outflow_streams"], "outflow", account_id_map)
         await rec_repo.upsert_streams(recurring_data["inflow_streams"], "inflow", account_id_map)
 
-        inv_data = await asyncio.to_thread(get_investment_holdings, access_token)
-        if inv_data["holdings"]:
-            inv_repo = InvestmentsRepository()
-            await inv_repo.upsert_securities(inv_data["securities"])
-            await inv_repo.upsert_holdings(inv_data["holdings"], account_id_map)
+        if _investments_enabled():
+            inv_data = await asyncio.to_thread(get_investment_holdings, access_token)
+            if inv_data["holdings"]:
+                inv_repo = InvestmentsRepository()
+                await inv_repo.upsert_securities(inv_data["securities"])
+                await inv_repo.upsert_holdings(inv_data["holdings"], account_id_map)
 
         reports_repo = ReportsRepository()
         await reports_repo.snapshot_net_worth()
