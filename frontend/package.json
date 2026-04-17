@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "clean": "rm -rf .next",
     "dev": "next dev --turbopack",
+    "dev:webpack": "next dev",
     "build": "next build --turbopack",
     "start": "next start",
     "lint": "eslint"
@@ -25,6 +27,7 @@
     "date-fns": "^4.1.0",
     "lucide-react": "^0.542.0",
     "next": "15.5.9",
+    "radix-ui": "^1.4.3",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-hook-form": "^7.62.0",

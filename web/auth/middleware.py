@@ -12,6 +12,8 @@ from .users_repo import get_auth_repo
 
 _SKIP_PREFIXES = ("/api/auth/",)
 _SKIP_EXACT = {"/api/healthz"}
+# Plaid verifies webhooks with JWT (see docs/plaid.md); no session cookie on this path.
+_SKIP_WEBHOOK_PATH = "/api/plaid/webhook"
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -25,7 +27,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # Skip auth endpoints and health check
         if any(path.startswith(p) for p in _SKIP_PREFIXES):
             return await call_next(request)
-        if path in _SKIP_EXACT:
+        if path in _SKIP_EXACT or path == _SKIP_WEBHOOK_PATH:
             return await call_next(request)
 
         # CORS preflight

@@ -1,47 +1,47 @@
+/**
+ * V2 API client — all calls go to the V2 backend via /api/*.
+ * Uses cookie auth with Authorization: Bearer fallback from sessionStorage.
+ */
 import { getAuthHeaders } from '@/lib/auth';
-import {
-  Expense,
-  ExpenseCreate,
-  ExpenseUpdate,
-  ExpenseResponse,
-  Limit,
-  LimitCreate,
-  ReportResponse,
-  SyncStatus,
-  HealthResponse,
-  Loan,
-  LoanCreate,
-  LoanUpdate,
-  CreditCard,
-  CreditCardCreate,
-  CreditCardUpdate,
-  Payment,
-  PaymentCreate,
-  Income,
-  IncomeCreate,
-  IncomeUpdate,
-  RecurringExpense,
-  RecurringExpenseCreate,
-  RecurringExpenseUpdate,
-  PiggyBank,
-  PiggyBankCreate,
-  PiggyBankUpdate,
-  FinanceSummary,
+import type {
   Account,
-  InterestSummary,
-  AccountAnalytics,
-  PaymentAnalytics,
+  Budget,
+  BudgetProgress,
+  CashFlowMonth,
+  Category,
+  CategorySpend,
+  FinancialHealthScore,
+  ForecastEntry,
+  InvestmentHolding,
+  Member,
+  MerchantSpend,
+  NetWorthSnapshot,
   PlaidItem,
-  PlaidSyncResult,
   PlaidSyncLogEntry,
-  PlaidCategoryMapEntry,
-} from '@/types/api';
+  PlaidSyncResult,
+  RecurringStream,
+  Tag,
+  TagSpend,
+  Transaction,
+  TransactionFilters,
+  TransactionSplit,
+  ManualCashTransactionCreate,
+  MerchantRule,
+} from '@/types/v2';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
 
-class ApiError extends Error {
+// ---------------------------------------------------------------------------
+// Base request helper
+// ---------------------------------------------------------------------------
+
+export class ApiError extends Error {
   public detail?: string;
-  constructor(public status: number, message: string, detail?: string) {
+  constructor(
+    public status: number,
+    message: string,
+    detail?: string,
+  ) {
     super(message);
     this.name = 'ApiError';
     this.detail = detail || message;
@@ -50,284 +50,329 @@ class ApiError extends Error {
 
 async function apiRequest<T>(
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
 ): Promise<T> {
-  const url = `${API_BASE_URL}${endpoint}`;
-
+  const url = `${API_BASE}${endpoint}`;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(getAuthHeaders() as Record<string, string>),
     ...(options.headers as Record<string, string> || {}),
   };
 
-  try {
-    const response = await fetch(url, {
-      method: options.method || 'GET',
-      headers,
-      credentials: 'include', // Include cookies for cross-origin requests
-      mode: 'cors', // Explicitly set CORS mode for Safari compatibility
-      ...options,
-    });
+  const response = await fetch(url, {
+    ...options,
+    headers,
+    credentials: 'include',
+  });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
-      const errorMessage = errorData.detail || errorData.message || 'Unknown error';
-      throw new ApiError(response.status, errorMessage, errorData.detail);
+  if (!response.ok) {
+    let detail = `HTTP ${response.status}`;
+    try {
+      const body = await response.json();
+      detail = body.detail || body.message || detail;
+    } catch {
+      // ignore parse errors
     }
-
-    return response.json();
-  } catch (error) {
-    // Handle network errors or fetch failures
-    if (error instanceof ApiError) {
-      throw error; // Re-throw API errors as-is
-    }
-    
-    // Network error or fetch failed
-    const networkError = error instanceof Error ? error.message : 'Network error';
-    
-    // Safari-specific error handling
-    if (error instanceof TypeError && networkError.includes('Failed to fetch')) {
-      const isSafari = typeof navigator !== 'undefined' && 
-        /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-      
-      if (isSafari) {
-        console.error('Safari network error:', { url, error: networkError, apiBaseUrl: API_BASE_URL });
-        throw new ApiError(
-          0, 
-          `Safari network error. Please check: 1) CORS settings, 2) SSL certificate, 3) Try disabling "Prevent cross-site tracking" in Safari settings. API URL: ${API_BASE_URL || 'NOT SET'}`
-        );
-      }
-    }
-    
-    console.error('API request failed:', { url, error: networkError, apiBaseUrl: API_BASE_URL });
-    throw new ApiError(0, `Failed to fetch: ${networkError}. API URL: ${API_BASE_URL || 'NOT SET'}`);
+    throw new ApiError(response.status, detail, detail);
   }
+
+  if (response.status === 204) {
+    return undefined as unknown as T;
+  }
+  return response.json() as Promise<T>;
 }
 
-// Health check
-export const healthApi = {
-  check: (): Promise<HealthResponse> =>
-    apiRequest('/healthz'),
-};
+// ---------------------------------------------------------------------------
+// Accounts
+// ---------------------------------------------------------------------------
 
-// Expenses API
-export const expensesApi = {
-  getAll: (month?: string, query?: string, source?: string): Promise<Expense[]> => {
-    if (!month) return apiRequest('/expenses');
-    const params = new URLSearchParams({ month });
-    if (query) params.set('query', query);
-    if (source) params.set('source', source);
-    return apiRequest(`/expenses?${params.toString()}`);
-  },
+export const accountsApi = {
+  list: (activeOnly = true): Promise<Account[]> =>
+    apiRequest(`/api/accounts?active_only=${activeOnly}`),
 
-  create: (expense: ExpenseCreate): Promise<ExpenseResponse> =>
-    apiRequest('/expenses', {
-      method: 'POST',
-      body: JSON.stringify(expense),
-    }),
+  get: (id: number): Promise<Account> =>
+    apiRequest(`/api/accounts/${id}`),
 
-  update: (id: number, expense: ExpenseUpdate): Promise<ExpenseResponse> =>
-    apiRequest(`/expenses/${id}`, {
+  cashWallet: (): Promise<Account> => apiRequest("/api/accounts/cash-wallet"),
+
+  create: (data: Partial<Account>): Promise<Account> =>
+    apiRequest('/api/accounts', { method: 'POST', body: JSON.stringify(data) }),
+
+  update: (id: number, data: Partial<Account>): Promise<Account> =>
+    apiRequest(`/api/accounts/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+  assignOwner: (accountId: number, userId: number | null): Promise<Account> =>
+    apiRequest(`/api/accounts/${accountId}`, {
       method: 'PATCH',
-      body: JSON.stringify(expense),
+      body: JSON.stringify({ user_id: userId }),
     }),
 
   delete: (id: number): Promise<void> =>
-    apiRequest(`/expenses/${id}`, {
-      method: 'DELETE',
-    }),
+    apiRequest(`/api/accounts/${id}`, { method: 'DELETE' }),
 };
 
-// Limits API
-export const limitsApi = {
-  getAll: (): Promise<Limit[]> =>
-    apiRequest('/limits'),
+// ---------------------------------------------------------------------------
+// Members (all authenticated users — for person filter)
+// ---------------------------------------------------------------------------
 
-  create: (limit: LimitCreate): Promise<Limit> =>
-    apiRequest('/limits', {
-      method: 'POST',
-      body: JSON.stringify(limit),
-    }),
-
-  update: (category: string, limit: { default_limit: number } | { category: string }): Promise<Limit> =>
-    apiRequest(`/limits/${encodeURIComponent(category)}`, {
-      method: 'PATCH',
-      body: JSON.stringify(limit),
-    }),
-
-  delete: (category: string): Promise<void> =>
-    apiRequest(`/limits/${encodeURIComponent(category)}`, {
-      method: 'DELETE',
-    }),
+export const membersApi = {
+  list: (): Promise<Member[]> => apiRequest('/api/auth/members'),
 };
 
-// Reports API
-export const reportsApi = {
-  getReport: (month?: string, compare?: string): Promise<ReportResponse> =>
-    apiRequest(`/report${month ? `?month=${month}${compare ? `&compare=${compare}` : ''}` : ''}`),
-};
+// ---------------------------------------------------------------------------
+// Categories
+// ---------------------------------------------------------------------------
 
-// Sync API
-export const syncApi = {
-  getStatus: (): Promise<SyncStatus> =>
-    apiRequest('/sync/status'),
-
-  pull: (): Promise<{ message: string; sha?: string }> =>
-    apiRequest('/sync/pull', { method: 'POST' }),
-
-  push: (): Promise<{ message: string; sha?: string }> =>
-    apiRequest('/sync/push', { method: 'POST' }),
-};
-
-// Categories API
 export const categoriesApi = {
-  delete: (name: string): Promise<{ message: string }> =>
-    apiRequest(`/categories/${name}`, { method: 'DELETE' }),
+  list: (): Promise<Category[]> => apiRequest('/api/categories'),
+
+  get: (id: number): Promise<Category> => apiRequest(`/api/categories/${id}`),
+
+  create: (data: Pick<Category, 'name' | 'color'> & { icon?: string | null }): Promise<Category> =>
+    apiRequest('/api/categories', { method: 'POST', body: JSON.stringify(data) }),
+
+  update: (id: number, data: Partial<Category>): Promise<Category> =>
+    apiRequest(`/api/categories/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+  delete: (id: number): Promise<void> =>
+    apiRequest(`/api/categories/${id}`, { method: 'DELETE' }),
 };
 
-// Finance API
-export const financeApi = {
-  // Summary
-  getSummary: (month?: string): Promise<FinanceSummary> =>
-    apiRequest(`/api/finances/summary${month ? `?month=${month}` : ''}`),
+// ---------------------------------------------------------------------------
+// Tags
+// ---------------------------------------------------------------------------
 
-  // Loans
-  getLoans: (isActive?: boolean): Promise<Loan[]> =>
-    apiRequest(`/api/finances/loans${isActive !== undefined ? `?is_active=${isActive}` : ''}`),
+export const tagsApi = {
+  list: (): Promise<Tag[]> => apiRequest('/api/tags'),
 
-  createLoan: (loan: LoanCreate): Promise<Loan> =>
-    apiRequest('/api/finances/loans', {
-      method: 'POST',
-      body: JSON.stringify(loan),
-    }),
+  create: (data: { name: string; color?: string }): Promise<Tag> =>
+    apiRequest('/api/tags', { method: 'POST', body: JSON.stringify(data) }),
 
-  updateLoan: (id: number, loan: LoanUpdate): Promise<Loan> =>
-    apiRequest(`/api/finances/loans/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(loan),
-    }),
+  update: (id: number, data: Partial<Tag>): Promise<Tag> =>
+    apiRequest(`/api/tags/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
 
-  deleteLoan: (id: number): Promise<void> =>
-    apiRequest(`/api/finances/loans/${id}`, { method: 'DELETE' }),
-
-  // Credit Cards
-  getCards: (isActive?: boolean): Promise<CreditCard[]> =>
-    apiRequest(`/api/finances/cards${isActive !== undefined ? `?is_active=${isActive}` : ''}`),
-
-  createCard: (card: CreditCardCreate): Promise<CreditCard> =>
-    apiRequest('/api/finances/cards', {
-      method: 'POST',
-      body: JSON.stringify(card),
-    }),
-
-  updateCard: (id: number, card: CreditCardUpdate): Promise<CreditCard> =>
-    apiRequest(`/api/finances/cards/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(card),
-    }),
-
-  deleteCard: (id: number): Promise<void> =>
-    apiRequest(`/api/finances/cards/${id}`, { method: 'DELETE' }),
-
-  // Payments
-  getPayments: (accountType?: 'loan' | 'card', accountId?: number): Promise<Payment[]> => {
-    const params = new URLSearchParams();
-    if (accountType) params.append('account_type', accountType);
-    if (accountId) params.append('account_id', accountId.toString());
-    return apiRequest(`/api/finances/payments${params.toString() ? `?${params.toString()}` : ''}`);
-  },
-
-  createPayment: (payment: PaymentCreate): Promise<Payment> =>
-    apiRequest('/api/finances/payments', {
-      method: 'POST',
-      body: JSON.stringify(payment),
-    }),
-
-  // Income
-  getIncome: (month?: string, person?: 'Denis' | 'Taya'): Promise<Income[]> => {
-    const params = new URLSearchParams();
-    if (month) params.append('month', month);
-    if (person) params.append('person', person);
-    return apiRequest(`/api/finances/income${params.toString() ? `?${params.toString()}` : ''}`);
-  },
-
-  createIncome: (income: IncomeCreate): Promise<Income> =>
-    apiRequest('/api/finances/income', {
-      method: 'POST',
-      body: JSON.stringify(income),
-    }),
-
-  updateIncome: (id: number, income: IncomeUpdate): Promise<Income> =>
-    apiRequest(`/api/finances/income/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(income),
-    }),
-
-  deleteIncome: (id: number): Promise<void> =>
-    apiRequest(`/api/finances/income/${id}`, { method: 'DELETE' }),
-
-  // Recurring Expenses
-  getRecurringExpenses: (activeOnly?: boolean): Promise<RecurringExpense[]> =>
-    apiRequest(`/api/finances/recurring-expenses${activeOnly !== undefined ? `?active_only=${activeOnly}` : ''}`),
-
-  createRecurringExpense: (expense: RecurringExpenseCreate): Promise<RecurringExpense> =>
-    apiRequest('/api/finances/recurring-expenses', {
-      method: 'POST',
-      body: JSON.stringify(expense),
-    }),
-
-  updateRecurringExpense: (id: number, expense: RecurringExpenseUpdate): Promise<RecurringExpense> =>
-    apiRequest(`/api/finances/recurring-expenses/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(expense),
-    }),
-
-  deleteRecurringExpense: (id: number): Promise<void> =>
-    apiRequest(`/api/finances/recurring-expenses/${id}`, { method: 'DELETE' }),
-
-  // Piggy Banks
-  getPiggyBanks: (activeOnly?: boolean): Promise<PiggyBank[]> =>
-    apiRequest(`/api/finances/piggy-banks${activeOnly !== undefined ? `?active_only=${activeOnly}` : ''}`),
-
-  createPiggyBank: (piggy: PiggyBankCreate): Promise<PiggyBank> =>
-    apiRequest('/api/finances/piggy-banks', {
-      method: 'POST',
-      body: JSON.stringify(piggy),
-    }),
-
-  updatePiggyBank: (id: number, piggy: PiggyBankUpdate): Promise<PiggyBank> =>
-    apiRequest(`/api/finances/piggy-banks/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(piggy),
-    }),
-
-  deletePiggyBank: (id: number): Promise<void> =>
-    apiRequest(`/api/finances/piggy-banks/${id}`, { method: 'DELETE' }),
-
-  addToPiggyBank: (id: number, amountCents: number): Promise<PiggyBank> =>
-    apiRequest(`/api/finances/piggy-banks/${id}/add-amount?amount_cents=${amountCents}`, {
-      method: 'POST',
-    }),
-
-  // Accounts
-  getAccounts: (): Promise<{ loans: Account[]; cards: Account[] }> =>
-    apiRequest('/api/finances/accounts'),
-
-  // Analytics
-  getInterestSummary: (month?: string): Promise<InterestSummary> =>
-    apiRequest(`/api/finances/analytics/interest-summary${month ? `?month=${month}` : ''}`),
-
-  getAccountAnalytics: (type: 'loan' | 'card', id: number): Promise<AccountAnalytics> =>
-    apiRequest(`/api/finances/analytics/account/${type}/${id}`),
-
-  getPaymentAnalytics: (id: number): Promise<PaymentAnalytics> =>
-    apiRequest(`/api/finances/analytics/payment/${id}`),
+  delete: (id: number): Promise<void> =>
+    apiRequest(`/api/tags/${id}`, { method: 'DELETE' }),
 };
 
-// Plaid API
+// ---------------------------------------------------------------------------
+// Merchant → category rules
+// ---------------------------------------------------------------------------
+
+export const merchantRulesApi = {
+  list: (): Promise<MerchantRule[]> => apiRequest('/api/merchant-rules'),
+
+  create: (data: {
+    category_id: number;
+    merchant_entity_id?: string | null;
+    merchant_name?: string | null;
+  }): Promise<MerchantRule> =>
+    apiRequest('/api/merchant-rules', { method: 'POST', body: JSON.stringify(data) }),
+
+  delete: (id: number): Promise<{ ok: boolean }> =>
+    apiRequest(`/api/merchant-rules/${id}`, { method: 'DELETE' }),
+};
+
+// ---------------------------------------------------------------------------
+// Transactions
+// ---------------------------------------------------------------------------
+
+function buildTransactionQuery(filters: TransactionFilters): string {
+  const params = new URLSearchParams();
+  if (filters.month) params.set('month', filters.month);
+  if (filters.account_id != null) params.set('account_id', String(filters.account_id));
+  if (filters.category_id != null) params.set('category_id', String(filters.category_id));
+  if (filters.tag_id != null) params.set('tag_id', String(filters.tag_id));
+  if (filters.search) params.set('search', filters.search);
+  if (filters.channel) params.set('channel', filters.channel);
+  if (filters.pending_only != null) params.set('pending_only', String(filters.pending_only));
+  if (filters.user_id != null) params.set('user_id', String(filters.user_id));
+  if (filters.limit != null) params.set('limit', String(filters.limit));
+  if (filters.offset != null) params.set('offset', String(filters.offset));
+  const qs = params.toString();
+  return qs ? `?${qs}` : '';
+}
+
+export const transactionsApi = {
+  list: (filters: TransactionFilters = {}): Promise<Transaction[]> =>
+    apiRequest(`/api/transactions${buildTransactionQuery(filters)}`),
+
+  get: (id: number): Promise<Transaction> =>
+    apiRequest(`/api/transactions/${id}`),
+
+  create: (data: ManualCashTransactionCreate): Promise<Transaction> =>
+    apiRequest('/api/transactions', { method: 'POST', body: JSON.stringify(data) }),
+
+  update: (
+    id: number,
+    data: { category_id?: number | null; user_note?: string; merchant_name?: string },
+  ): Promise<Transaction> =>
+    apiRequest(`/api/transactions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+  delete: (id: number): Promise<void> =>
+    apiRequest(`/api/transactions/${id}`, { method: 'DELETE' }),
+
+  addTag: (transactionId: number, tagId: number): Promise<void> =>
+    apiRequest(`/api/transactions/${transactionId}/tags/${tagId}`, { method: 'POST' }),
+
+  removeTag: (transactionId: number, tagId: number): Promise<void> =>
+    apiRequest(`/api/transactions/${transactionId}/tags/${tagId}`, { method: 'DELETE' }),
+
+  getSplits: (transactionId: number): Promise<TransactionSplit[]> =>
+    apiRequest(`/api/transactions/${transactionId}/splits`),
+
+  setSplits: (
+    transactionId: number,
+    splits: Array<{ category_id?: number | null; tag_id?: number | null; amount_cents: number; note?: string }>,
+  ): Promise<TransactionSplit[]> =>
+    apiRequest(`/api/transactions/${transactionId}/splits`, {
+      method: 'POST',
+      body: JSON.stringify({ splits }),
+    }),
+
+  deleteSplits: (transactionId: number): Promise<void> =>
+    apiRequest(`/api/transactions/${transactionId}/splits`, { method: 'DELETE' }),
+
+  exportUrl: (filters: TransactionFilters = {}): string => {
+    const params = new URLSearchParams();
+    if (filters.month) params.set('month', filters.month);
+    if (filters.account_id != null) params.set('account_id', String(filters.account_id));
+    if (filters.category_id != null) params.set('category_id', String(filters.category_id));
+    if (filters.tag_id != null) params.set('tag_id', String(filters.tag_id));
+    const qs = params.toString();
+    return `${API_BASE}/api/transactions/export${qs ? '?' + qs : ''}`;
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Recurring
+// ---------------------------------------------------------------------------
+
+export const recurringApi = {
+  list: (direction?: 'inflow' | 'outflow', activeOnly = true): Promise<RecurringStream[]> => {
+    const params = new URLSearchParams();
+    if (direction) params.set('direction', direction);
+    params.set('active_only', String(activeOnly));
+    return apiRequest(`/api/recurring?${params}`);
+  },
+
+  create: (data: {
+    account_id: number;
+    direction: 'inflow' | 'outflow';
+    description: string;
+    merchant_name?: string | null;
+    frequency?: string | null;
+    average_amount_cents: number;
+    last_amount_cents?: number | null;
+    currency?: string;
+    first_date?: string | null;
+    last_date?: string | null;
+    category_id?: number | null;
+  }): Promise<RecurringStream> =>
+    apiRequest('/api/recurring', { method: 'POST', body: JSON.stringify(data) }),
+
+  getPriceChanges: (): Promise<RecurringStream[]> =>
+    apiRequest('/api/recurring/price-changes'),
+
+  update: (
+    id: number,
+    data: { user_label?: string | null; category_id?: number | null },
+  ): Promise<RecurringStream> =>
+    apiRequest(`/api/recurring/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+};
+
+// ---------------------------------------------------------------------------
+// Budgets
+// ---------------------------------------------------------------------------
+
+export const budgetsApi = {
+  list: (month?: string): Promise<Budget[]> => {
+    const qs = month ? `?month=${month}` : '';
+    return apiRequest(`/api/budgets${qs}`);
+  },
+
+  getProgress: (month?: string): Promise<BudgetProgress[]> => {
+    const qs = month ? `?month=${month}` : '';
+    return apiRequest(`/api/budgets/progress${qs}`);
+  },
+
+  create: (data: { category_id: number; month: string; budget_cents: number }): Promise<Budget> =>
+    apiRequest('/api/budgets', { method: 'POST', body: JSON.stringify(data) }),
+
+  update: (id: number, data: { budget_cents: number }): Promise<Budget> =>
+    apiRequest(`/api/budgets/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+  delete: (id: number): Promise<void> =>
+    apiRequest(`/api/budgets/${id}`, { method: 'DELETE' }),
+};
+
+// ---------------------------------------------------------------------------
+// Investments
+// ---------------------------------------------------------------------------
+
+export const investmentsApi = {
+  listHoldings: (accountId?: number): Promise<InvestmentHolding[]> => {
+    const qs = accountId != null ? `?account_id=${accountId}` : '';
+    return apiRequest(`/api/investments/holdings${qs}`);
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Reports
+// ---------------------------------------------------------------------------
+
+export const reportsApi = {
+  getCashFlow: (month?: string): Promise<CashFlowMonth> => {
+    const qs = month ? `?month=${month}` : '';
+    return apiRequest(`/api/reports/cash-flow${qs}`);
+  },
+
+  getCashFlowHistory: (months = 12): Promise<CashFlowMonth[]> =>
+    apiRequest(`/api/reports/cash-flow/history?months=${months}`),
+
+  getByCategory: (month?: string): Promise<CategorySpend[]> => {
+    const qs = month ? `?month=${month}` : '';
+    return apiRequest(`/api/reports/by-category${qs}`);
+  },
+
+  getByTag: (month?: string, tagId?: number): Promise<TagSpend[]> => {
+    const params = new URLSearchParams();
+    if (month) params.set('month', month);
+    if (tagId != null) params.set('tag_id', String(tagId));
+    const qs = params.toString();
+    return apiRequest(`/api/reports/by-tag${qs ? '?' + qs : ''}`);
+  },
+
+  getTopMerchants: (month?: string, limit = 10): Promise<MerchantSpend[]> => {
+    const params = new URLSearchParams();
+    if (month) params.set('month', month);
+    params.set('limit', String(limit));
+    return apiRequest(`/api/reports/merchants?${params}`);
+  },
+
+  getNetWorth: (): Promise<{ liquid_cents: number; investment_cents: number; debt_cents: number; net_worth_cents: number }> =>
+    apiRequest('/api/reports/net-worth'),
+
+  getNetWorthHistory: (months = 12): Promise<NetWorthSnapshot[]> =>
+    apiRequest(`/api/reports/net-worth/history?months=${months}`),
+
+  getForecast: (days: 30 | 60 | 90 = 30): Promise<ForecastEntry[]> =>
+    apiRequest(`/api/reports/forecast?days=${days}`),
+
+  getFinancialHealth: (): Promise<FinancialHealthScore> =>
+    apiRequest('/api/reports/financial-health'),
+};
+
+// ---------------------------------------------------------------------------
+// Plaid
+// ---------------------------------------------------------------------------
+
 export const plaidApi = {
-  getLinkToken: (): Promise<{ link_token: string; expiration: string }> =>
-    apiRequest('/api/plaid/link-token', { method: 'POST' }),
+  getLinkToken: (itemId?: string): Promise<{ link_token: string; expiration: string }> =>
+    apiRequest('/api/plaid/link-token', {
+      method: 'POST',
+      body: JSON.stringify(itemId ? { item_id: itemId } : {}),
+    }),
 
   exchangeToken: (publicToken: string, institutionName?: string): Promise<PlaidItem> =>
     apiRequest('/api/plaid/exchange-token', {
@@ -335,8 +380,7 @@ export const plaidApi = {
       body: JSON.stringify({ public_token: publicToken, institution_name: institutionName }),
     }),
 
-  getItems: (): Promise<PlaidItem[]> =>
-    apiRequest('/api/plaid/items'),
+  listItems: (): Promise<PlaidItem[]> => apiRequest('/api/plaid/items'),
 
   deleteItem: (itemId: string): Promise<{ message: string }> =>
     apiRequest(`/api/plaid/items/${itemId}`, { method: 'DELETE' }),
@@ -344,21 +388,46 @@ export const plaidApi = {
   resetCursor: (itemId: string): Promise<{ message: string }> =>
     apiRequest(`/api/plaid/items/${itemId}/reset-cursor`, { method: 'POST' }),
 
-  syncNow: (): Promise<PlaidSyncResult[]> =>
+  sync: (): Promise<PlaidSyncResult[]> =>
     apiRequest('/api/plaid/sync', { method: 'POST' }),
 
   getSyncLog: (): Promise<PlaidSyncLogEntry[]> =>
     apiRequest('/api/plaid/sync/log'),
 
-  getCategoryMap: (): Promise<PlaidCategoryMapEntry[]> =>
-    apiRequest('/api/plaid/category-map'),
-
-  updateCategoryMap: (mappings: PlaidCategoryMapEntry[]): Promise<{ message: string }> =>
-    apiRequest('/api/plaid/category-map', {
-      method: 'PATCH',
-      body: JSON.stringify({ mappings }),
-    }),
+  deleteSandboxData: (): Promise<{
+    message: string;
+    transactions_deleted: number;
+    accounts_deleted: number;
+    recurring_streams_deleted: number;
+    net_worth_snapshots_deleted: number;
+    plaid_items_deleted: number;
+  }> => apiRequest('/api/plaid/sandbox-data', { method: 'DELETE' }),
 };
+
+// ---------------------------------------------------------------------------
+// Insights
+// ---------------------------------------------------------------------------
+
+export const insightsApi = {
+  getFeed: (): Promise<{
+    generated_at: string;
+    cards: Array<{
+      type: string;
+      severity: string;
+      title: string;
+      summary: string;
+      detail?: string | null;
+    }>;
+    actionable_count: number;
+  }> => apiRequest('/api/insights/feed'),
+
+  markViewed: (): Promise<{ ok: boolean }> =>
+    apiRequest('/api/insights/mark-viewed', { method: 'POST' }),
+};
+
+// ---------------------------------------------------------------------------
+// Auth / Users (re-exported for compatibility)
+// ---------------------------------------------------------------------------
 
 export interface UserPublic {
   id: number;
@@ -368,15 +437,43 @@ export interface UserPublic {
 }
 
 export const usersApi = {
-  list: (): Promise<UserPublic[]> =>
-    apiRequest('/api/auth/users'),
+  list: (): Promise<UserPublic[]> => apiRequest('/api/auth/users'),
 
   create: (data: { username: string; password: string }): Promise<UserPublic> =>
-    apiRequest('/api/auth/users', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
+    apiRequest('/api/auth/users', { method: 'POST', body: JSON.stringify(data) }),
 
   delete: (id: number): Promise<void> =>
     apiRequest(`/api/auth/users/${id}`, { method: 'DELETE' }),
+};
+
+// ---------------------------------------------------------------------------
+// Piggy Banks (savings goals)
+// ---------------------------------------------------------------------------
+
+import type { PiggyBank, PiggyBankCreate, PiggyBankUpdate } from '@/types/v2';
+
+export const piggyApi = {
+  list: (activeOnly = false): Promise<PiggyBank[]> =>
+    apiRequest(`/api/piggy${activeOnly ? '?active_only=true' : ''}`),
+
+  create: (data: PiggyBankCreate): Promise<PiggyBank> =>
+    apiRequest('/api/piggy', { method: 'POST', body: JSON.stringify(data) }),
+
+  update: (id: number, data: PiggyBankUpdate): Promise<PiggyBank> =>
+    apiRequest(`/api/piggy/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+  addAmount: (id: number, amountCents: number): Promise<PiggyBank> =>
+    apiRequest(`/api/piggy/${id}/add?amount_cents=${amountCents}`, { method: 'POST' }),
+
+  delete: (id: number): Promise<void> =>
+    apiRequest(`/api/piggy/${id}`, { method: 'DELETE' }),
+};
+
+// ---------------------------------------------------------------------------
+// Health
+// ---------------------------------------------------------------------------
+
+export const healthApi = {
+  check: (): Promise<{ ok: boolean; version: string }> =>
+    apiRequest('/healthz'),
 };

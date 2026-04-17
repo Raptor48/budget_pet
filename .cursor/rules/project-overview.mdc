@@ -3,7 +3,7 @@ description: Budget Pet project structure, stack, conventions and docs reference
 alwaysApply: true
 ---
 
-# Budget Pet — Project Context
+# Budget Pet — Project Context (V2)
 
 ## Stack
 
@@ -11,33 +11,50 @@ alwaysApply: true
 |-------|------|
 | Backend | Python 3.11, FastAPI, Uvicorn |
 | Frontend | Next.js 15, React 19, TypeScript 5, Tailwind CSS 4, TanStack Query |
-| Bot | python-telegram-bot 22 |
-| DB | PostgreSQL on Railway (`psycopg2` legacy + `asyncpg` finance/plaid) |
+| Bot | python-telegram-bot 22 (adapts to V2 in a separate PR) |
+| DB | PostgreSQL on Railway (`asyncpg` only — psycopg2 removed in V2) |
 | Hosting | Railway (3 services: FastAPI, Next.js, telegram bot) |
 
 ## Key Conventions
 
-- **Two DB drivers** — `web/postgres_db.py` (psycopg2, sync) for legacy routes; `web/finance/repo.py` and `web/plaid/repo.py` (asyncpg, async) for finance/plaid. Never mix them.
-- **Auth** — Sessions in memory. `/api/*` protected by `AuthMiddleware` (cookie or `Authorization: Bearer`). Legacy routes `/expenses`, `/limits`, `/report` are intentionally unprotected (bot compatibility).
-- **`expenses.source`** — `manual` | `plaid` | `plaid_sandbox`. Rows with `plaid_sandbox` are excluded from all reports and statistics.
+- **Single DB driver** — only `asyncpg` via `web/db.py` pool singleton. Never use psycopg2.
+- **Auth** — Persistent DB-backed sessions (`users`, `sessions` tables). All routes under `/api/*` protected by `AuthMiddleware` (cookie or `Authorization: Bearer`).
+- **Plaid as source of truth** — linked accounts, categories, and imported transactions come from Plaid. Offline **cash** spending is recorded as normal `transactions` rows with `source=cash` on the per-user **Cash** wallet account (`GET /api/accounts/cash-wallet`). No legacy manual CSV import.
+- **`transactions.source`** — `plaid` | `plaid_sandbox` | `cash` | `manual`. Rows with `plaid_sandbox` are excluded from **reports**, **CSV export**, and **budgets** when `reports_include_plaid_sandbox()` is false; **default is to include** them when `PLAID_ENV=sandbox`, or set `REPORTS_INCLUDE_PLAID_SANDBOX=true` / `false` explicitly (see `web/env_flags.py`).
 - **Every new feature** — separate module, not inside large existing files.
-- **Docs are source of truth** — always check `docs/` before implementing. Key files: `docs/architecture.md`, `docs/api.md`, `docs/plaid.md`, `docs/bot.md`.
+- **Docs are source of truth** — always check `docs/` before implementing. Key files: `docs/architecture.md`, `docs/api.md`, `docs/plaid.md`, `docs/data-model.md`.
 
 ## Repo Structure
 
 ```
 budget_pet/
-├── web/            # FastAPI app (main.py, auth/, finance/, plaid/)
-├── services/       # Shared adapters (bot_adapter, finance_adapter, search_filter)
-├── frontend/src/   # Next.js (app/, components/, lib/, types/)
-├── bot.py          # Telegram bot entry point
-├── tests/          # pytest
-└── docs/           # Full documentation in Russian
+├── web/                  # FastAPI app
+│   ├── main.py           # Routers + startup
+│   ├── db.py             # asyncpg pool singleton
+│   ├── auth/             # Sessions, multi-user
+│   ├── accounts/         # Bank/credit/loan/investment accounts
+│   ├── transactions/     # Transactions, splits, CSV export
+│   ├── categories/       # PFC auto-mapping from Plaid
+│   ├── tags/             # User-defined labels (many-to-many)
+│   ├── recurring/        # Recurring streams, subscription tracker
+│   ├── budgets/          # Budget envelopes by category
+│   ├── investments/      # Holdings, securities
+│   ├── reports/          # Cash flow, net worth, forecast, health score
+│   ├── piggy/            # Savings goals (finance_piggy_banks table)
+│   ├── plaid/            # Plaid client, sync repo, scheduler
+│   └── migrations/       # v2_init.py — idempotent DDL
+├── services/             # Bot adapters (V1, pending V2 migration)
+├── frontend/src/         # Next.js (app/, components/, lib/, types/v2.ts)
+├── bot.py                # Telegram bot (pending V2 migration)
+├── tests/v2/             # pytest — V2 unit tests
+└── docs/                 # Current V2 documentation
+    └── archive/v1/       # Old V1 docs (for reference only)
 ```
 
-## Plaid Integration
+## Plaid Integration (V2)
 
-- Products: `transactions` + `liabilities`
-- Expenses synced to `expenses` table with full metadata (merchant_name, plaid_category_raw, plaid_pfc_category, is_pending)
-- Income (amount < 0) synced to `finance_income` with `person='Plaid'`
-- Liabilities sync updates APR, min_payment, due_day on credit cards and loans
+- Products: `transactions` + `liabilities` + `investments` + `recurring_transactions`
+- All data written to V2 tables: `transactions`, `accounts`, `recurring_streams`, `investment_holdings`
+- Category auto-mapping via `personal_finance_category.detailed` (PFC) → `categories` table
+- Net worth snapshot taken automatically after each sync
+- Sync triggered daily at 03:00 by APScheduler or manually via `POST /api/plaid/sync`

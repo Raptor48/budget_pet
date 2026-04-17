@@ -1,0 +1,11 @@
+{
+  "pythonVersion": "3.13",
+  "pythonPlatform": "Darwin",
+  "pythonPath": "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3",
+  "extraPaths": [
+    "/Library/Frameworks/Python.framework/Versions/3.13/lib/python3.13/site-packages"
+  ],
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "warning",
+  "reportMissingModuleSource": "none"
+}

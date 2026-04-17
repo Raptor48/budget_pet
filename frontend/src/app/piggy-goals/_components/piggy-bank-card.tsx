@@ -8,8 +8,8 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { PiggyBank } from '@/types/api';
-import { financeApi } from '@/lib/api';
+import { PiggyBank } from '@/types/v2';
+import { piggyApi } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 import { format, differenceInMonths, isPast } from 'date-fns';
 import { Trash2, Plus, CheckCircle2, Calendar, Target } from 'lucide-react';
@@ -57,7 +57,7 @@ export function PiggyBankCard({ piggy, onUpdate }: PiggyBankCardProps) {
 
     setLoading(true);
     try {
-      await financeApi.addToPiggyBank(piggy.id, amountCents);
+      await piggyApi.addAmount(piggy.id, amountCents);
       setAddAmountOpen(false);
       setAddAmount('');
       onUpdate();
@@ -73,7 +73,7 @@ export function PiggyBankCard({ piggy, onUpdate }: PiggyBankCardProps) {
     if (!confirm(`Are you sure you want to delete "${piggy.name}"?`)) return;
     
     try {
-      await financeApi.deletePiggyBank(piggy.id);
+      await piggyApi.delete(piggy.id);
       onUpdate();
     } catch (error) {
       console.error('Error deleting piggy bank:', error);
@@ -84,7 +84,7 @@ export function PiggyBankCard({ piggy, onUpdate }: PiggyBankCardProps) {
   const handleQuickAdd = async (amount: number) => {
     setLoading(true);
     try {
-      await financeApi.addToPiggyBank(piggy.id, amount * 100);
+      await piggyApi.addAmount(piggy.id, amount * 100);
       onUpdate();
     } catch (error) {
       console.error('Error adding amount:', error);

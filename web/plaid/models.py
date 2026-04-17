@@ -1,20 +1,32 @@
 """
-Pydantic models for Plaid integration.
+Pydantic models for Plaid integration — V2.
 """
 from datetime import datetime
-from typing import Optional, List
+from typing import List, Optional
+
 from pydantic import BaseModel
 
 
 class PlaidItem(BaseModel):
-    id: int
     item_id: str
     institution_name: Optional[str] = None
-    connected_at: datetime
+    institution_color: Optional[str] = None
+    institution_logo: Optional[str] = None
+    user_id: Optional[int] = None
+    cursor: Optional[str] = None
     last_synced_at: Optional[datetime] = None
+    connected_at: Optional[datetime] = None
+    item_login_required: bool = False
+    sync_updates_pending: bool = False
 
     class Config:
         from_attributes = True
+
+
+class LinkTokenBody(BaseModel):
+    """Optional `item_id` for Plaid Link update mode (uses stored access_token)."""
+
+    item_id: Optional[str] = None
 
 
 class PlaidSyncLogEntry(BaseModel):
@@ -22,22 +34,12 @@ class PlaidSyncLogEntry(BaseModel):
     item_id: str
     synced_at: datetime
     transactions_added: int
-    income_added: int = 0
     balances_updated: int
     status: str
     error_msg: Optional[str] = None
 
     class Config:
         from_attributes = True
-
-
-class PlaidCategoryMapEntry(BaseModel):
-    plaid_category: str
-    budget_category: str
-
-
-class PlaidCategoryMapUpdate(BaseModel):
-    mappings: List[PlaidCategoryMapEntry]
 
 
 class ExchangeTokenRequest(BaseModel):
@@ -48,7 +50,6 @@ class ExchangeTokenRequest(BaseModel):
 class SyncResult(BaseModel):
     item_id: str
     transactions_added: int
-    income_added: int = 0
     balances_updated: int
     status: str
     error_msg: Optional[str] = None

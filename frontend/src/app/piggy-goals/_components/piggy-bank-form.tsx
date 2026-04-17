@@ -5,8 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { PiggyBank, PiggyBankCreate, PiggyBankUpdate } from '@/types/api';
-import { financeApi } from '@/lib/api';
+import { PiggyBank, PiggyBankCreate, PiggyBankUpdate } from '@/types/v2';
+import { piggyApi } from '@/lib/api';
 import { Plus, Edit, Palette, Target } from 'lucide-react';
 import * as LucideIcons from 'lucide-react';
 import { format } from 'date-fns';
@@ -80,9 +80,9 @@ export function PiggyBankForm({ piggy, onSuccess, trigger }: PiggyBankFormProps)
       };
 
       if (piggy) {
-        await financeApi.updatePiggyBank(piggy.id, data as PiggyBankUpdate);
+        await piggyApi.update(piggy.id, data as PiggyBankUpdate);
       } else {
-        await financeApi.createPiggyBank(data as PiggyBankCreate);
+        await piggyApi.create(data as PiggyBankCreate);
       }
 
       setOpen(false);

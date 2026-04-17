@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AppLayout } from '@/components/layout/app-layout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { financeApi } from '@/lib/api';
+import { piggyApi } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 import { PiggyBankCard } from './_components/piggy-bank-card';
 import { PiggyBankForm } from './_components/piggy-bank-form';
@@ -21,7 +21,7 @@ export default function PiggyGoalsPage() {
 
   const { data: piggyBanks = [], isLoading } = useQuery({
     queryKey: ['piggy-banks', filter === 'all' ? false : filter === 'active'],
-    queryFn: () => financeApi.getPiggyBanks(filter === 'all' ? false : filter === 'active'),
+    queryFn: () => piggyApi.list(filter === 'active'),
   });
 
   const handleUpdate = () => {

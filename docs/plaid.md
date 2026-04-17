@@ -1,192 +1,127 @@
-# Plaid — Интеграция с банком
+# Budget Pet V2 — Plaid Integration
 
-## Назначение
+## Products Used
 
-Интеграция с [Plaid](https://plaid.com) позволяет автоматически:
-- Импортировать транзакции (расходы и доходы) из банковских счетов
-- Синхронизировать балансы, APR, минимальные платежи по картам и займам через Liabilities API
-- Разграничивать авто-импортированные и ручные данные через поле `source`
+| Product | Purpose | Plaid Endpoint |
+|---|---|---|
+| transactions | Expense/income data | /transactions/sync |
+| liabilities | Credit card + loan details | /liabilities/get |
+| investments (optional) | Portfolio holdings | /investments/holdings/get |
+| recurring_transactions (optional) | Subscriptions detection | /transactions/recurring/get |
 
-## Регистрация и настройка
+## Sync Flow (per item)
 
-1. Зарегистрируйся на [dashboard.plaid.com](https://dashboard.plaid.com)
-2. Создай приложение → получи `PLAID_CLIENT_ID` и `PLAID_SECRET`
-3. Начни в режиме **Sandbox** (тестовые данные, бесплатно)
-4. Для реальных данных переключись на **Development** (до 100 аккаунтов бесплатно)
+1. **transactions/sync** — cursor-based pagination until has_more=False
+   - Request `options.personal_finance_category_version` is set from env `PLAID_PERSONAL_FINANCE_CATEGORY_VERSION` (default **`v2`**) so responses use [PFCv2](https://plaid.com/docs/transactions/pfc-migration/) where supported.
+   - Added + Modified transactions upserted to `transactions` table
+   - Removed transactions deleted from `transactions` table
+   - Category auto-resolved from `personal_finance_category.detailed` → `categories` table (`source = plaid_pfc`)
+   
+2. **accounts/balance/get** — provision new accounts, update balances
 
-## Переменные окружения
+3. **liabilities/get** — update APR, min_payment, is_overdue on accounts
+   - Credit cards: aprs[], minimum_payment_amount, next_payment_due_date, is_overdue
+   - Student loans: interest_rate_percentage, minimum_payment_amount, expected_payoff_date
+   - Mortgages: interest_rate.percentage, next_monthly_payment, maturity_date
 
-Добавить в Railway Variables (сервис **FastAPI**) и в `.env` локально:
+4. **transactions/recurring/get** — upsert recurring_streams
+   - Uses the same `personal_finance_category_version` option as **transactions/sync** (default **v2**).
+   - Both inflow_streams and outflow_streams
+   - price_change_pct computed: |last-avg|/avg * 100
 
-| Переменная | Описание |
-|------------|----------|
-| `PLAID_CLIENT_ID` | Идентификатор приложения из Plaid Dashboard |
-| `PLAID_SECRET` | Секрет из Plaid Dashboard |
-| `PLAID_ENV` | `sandbox` / `development` / `production` |
-| `PLAID_ENCRYPTION_KEY` | Fernet-ключ для шифрования access_token в БД |
+5. **investments/holdings/get** — upsert securities + investment_holdings (if available)
 
-Генерация ключа шифрования:
-```bash
-python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-```
+6. **snapshot_net_worth()** — capture net worth into net_worth_snapshots
 
-## Как подключить банк (пользователь)
+7. Update cursor, write to plaid_sync_log
 
-1. Зайди в **Settings → Bank Connections**
-2. Нажми **Connect Bank**
-3. В открывшемся Plaid Link выбери банк → авторизуйся
-4. Соединение сохранится — транзакции начнут импортироваться при следующем синке
+## Transaction Fields
 
-## Синхронизация
-
-**Автоматически:** каждый день в 03:00 (APScheduler в FastAPI)
-
-**Вручную:** кнопка **Sync** на странице настроек или:
-```bash
-curl -X POST https://your-api.railway.app/api/plaid/sync \
-  -H "Authorization: Bearer <token>"
-```
-
-## Продукты Plaid
-
-В `link_token_create` включены два продукта:
-
-| Продукт | Данные |
-|---------|--------|
-| `transactions` | История транзакций, merchant name, категории, pending-статус |
-| `liabilities` | APR, минимальный платёж, дата платежа, кредитный лимит |
-
-## Что синхронизируется
-
-### Расходы → таблица `expenses`
-
-Транзакции с `amount > 0` (деньги уходят со счёта) импортируются в таблицу `expenses` со следующими полями:
-
-| Поле в expenses | Источник из Plaid |
-|----------------|-------------------|
-| `category` | Маппинг `plaid_category_map`; при отсутствии — `Uncategorized` |
-| `amount` | `transaction.amount` |
-| `date` | `transaction.date` |
-| `merchant_name` | `transaction.merchant_name` или `transaction.name` |
-| `plaid_category_raw` | JSON-массив `transaction.category` (напр. `["Food and Drink","Restaurants"]`) |
-| `plaid_pfc_category` | `transaction.personal_finance_category.detailed` |
-| `is_pending` | `transaction.pending` |
-| `plaid_account_id` | `transaction.account_id` |
-| `plaid_transaction_id` | `transaction.transaction_id` (уникальный, для дедупликации) |
-| `source` | `plaid_sandbox` если `PLAID_ENV=sandbox`, иначе `plaid` |
-
-При повторном синке (ON CONFLICT DO UPDATE) обновляются: `is_pending`, `merchant_name`, `plaid_category_raw`, `plaid_pfc_category`.
-
-### Доходы → таблица `finance_income`
-
-Транзакции с `amount < 0` (деньги приходят на счёт) импортируются в `finance_income` с:
-- `person = 'Plaid'`
-- `amount_cents = abs(amount) * 100`
-- `note` = merchant_name транзакции
-- `plaid_transaction_id` — для дедупликации
-
-Фильтрация: транзакции с `personal_finance_category.primary` из списка non-income (GENERAL_MERCHANDISE, FOOD_AND_DRINK и др.) пропускаются как возвраты/рефанды.
-
-### Балансы → finance_credit_cards / finance_loans
-
-Plaid Balance API возвращает текущий баланс каждого счёта. Совпадение ищется по `LOWER(name)` → обновляется `current_balance_cents`.
-
-### Liabilities → APR, минимальные платежи
-
-При синке вызывается `liabilities/get`. Для каждой кредитной карты обновляются:
-- `apr_percent` (из `aprs[].apr_percentage`, тип purchase)
-- `min_payment_cents`
-- `current_balance_cents` (из `last_statement_balance`)
-- `due_day` (день из `next_payment_due_date`)
-
-Сопоставление карт с Plaid идёт по `plaid_account_id`. Для займов аналогично обновляются `apr_percent` и `min_payment_cents`.
-
-## Разграничение реальных и тестовых данных
-
-Поле `source` в таблице `expenses`:
-
-| Значение | Описание |
-|----------|----------|
-| `manual` | Добавлено вручную через UI или бот |
-| `plaid` | Импортировано из Plaid (production / development) |
-| `plaid_sandbox` | Импортировано из Plaid Sandbox (тестовые данные) |
-
-Строки с `source = 'plaid_sandbox'` **исключаются** из отчётов и статистики (`/report`, `get_month_report`), но видны в Expenses при выборе фильтра **Test**.
-
-## Маппинг категорий
-
-Plaid возвращает свои категории (например `"Food and Drink"`, `"Shops"`). Маппинг настраивается в Settings → Bank Connections:
-
-| Plaid Category | Budget Category |
-|---------------|-----------------|
-| Food and Drink | Еда |
-| Travel | Транспорт |
-| Shops | Покупки |
-
-Транзакции без маппинга → категория **Uncategorized** (в UI показывается предупреждение ⚠).
-
-Таблица в БД: `plaid_category_map (plaid_category, budget_category)`
-
-## UI — страница Expenses
-
-В таблице расходов теперь видны:
-- **Merchant** — название мерчанта из Plaid
-- **Category** — budget-категория (редактируемая) + Plaid raw category как мелкий breadcrumb (`Food and Drink › Restaurants`)
-- **Source** — цветной badge: Manual (серый), Plaid (синий), Test (оранжевый)
-- Строки в статусе `pending` — полупрозрачны с меткой *(pending)*
-- ⚠ иконка на строках с категорией `Uncategorized` — ссылка на Settings для настройки маппинга
-- **Total** — итоговая сумма за месяц в заголовке таблицы
-
-Фильтры: **All / Manual / Plaid / Test**
-
-## Структура модуля
+All fields mapped directly from Plaid API:
 
 ```
-web/plaid/
-├── __init__.py        # Экспорт plaid_router, init_plaid_repo, start_scheduler
-├── client.py          # Обёртка над plaid-python SDK (transactions, balance, liabilities)
-├── models.py          # Pydantic-модели
-├── repo.py            # asyncpg: init_tables, import_transactions, import_income,
-│                      #   sync_balances, sync_liabilities, log_sync
-├── routes.py          # FastAPI роуты /api/plaid/*
-└── scheduler.py       # APScheduler: sync_all_items(), start_scheduler()
+transaction_id         → plaid_transaction_id
+account_id             → (mapped to accounts.id via plaid_account_id)
+amount                 → amount_cents (×100, >0=expense <0=income)
+iso_currency_code      → currency
+date                   → date
+authorized_date        → authorized_date
+datetime               → datetime
+authorized_datetime    → authorized_datetime
+name                   → name
+merchant_name          → merchant_name
+merchant_entity_id     → merchant_entity_id
+logo_url               → logo_url
+website                → website
+payment_channel        → payment_channel
+personal_finance_category.primary    → pfc_primary
+personal_finance_category.detailed   → pfc_detailed
+personal_finance_category.confidence → pfc_confidence
+personal_finance_category_icon_url   → pfc_icon_url
+counterparties         → counterparties (JSONB)
+location               → location (JSONB)
+payment_meta           → payment_meta (JSONB)
+pending                → is_pending
 ```
 
-## Таблицы БД (Plaid)
+## PFC Category Auto-Mapping
 
-| Таблица | Назначение |
-|---------|------------|
-| `plaid_items` | Подключённые банки (item_id, access_token зашифрован, cursor) |
-| `plaid_sync_log` | История синков (transactions_added, income_added, balances_updated, status) |
-| `plaid_category_map` | Маппинг Plaid categories → budget categories |
+There is **no** separate Plaid endpoint for the full PFC catalog; taxonomy reference is Plaid’s [CSV](https://plaid.com/documents/pfc-taxonomy-all.csv). Do **not** use deprecated **`/categories/get`** for PFC (that endpoint is for legacy `category` / `category_id` only).
 
-## API эндпоинты
+When a transaction is imported:
+1. Check if a category exists with `plaid_pfc_detailed = pfc_detailed` (or primary-only match when `detailed` is absent).
+2. If not found, auto-create a row with `source = plaid_pfc`:
+   - `name` = human-readable label derived from PFC strings
+   - `plaid_pfc_primary`, `plaid_pfc_detailed`, `pfc_icon_url` from Plaid
+3. Return `category_id`.
 
-Все эндпоинты защищены аутентификацией (`AuthMiddleware`).
+**Startup does not seed generic categories.** Rows appear only after sync sees real PFC values (or the user creates `source = custom` via `POST /api/categories`).
 
-| Метод | Путь | Описание |
-|-------|------|----------|
-| POST | `/api/plaid/link-token` | Создать link_token для Plaid Link UI |
-| POST | `/api/plaid/exchange-token` | Обменять public_token → сохранить access_token |
-| GET | `/api/plaid/items` | Список подключённых банков |
-| DELETE | `/api/plaid/items/{item_id}` | Отключить банк |
-| POST | `/api/plaid/sync` | Запустить синхронизацию вручную |
-| GET | `/api/plaid/sync/log` | История последних 50 синхронизаций |
-| GET | `/api/plaid/category-map` | Получить маппинг категорий |
-| PATCH | `/api/plaid/category-map` | Обновить маппинг категорий |
+Users can rename or recolor any category for display; Plaid-derived rows cannot be deleted (only custom categories). Transactions can still be reassigned to another `category_id` via the transactions API.
 
-## Безопасность
+## Environments
 
-- `access_token` хранится в БД **зашифрованным** (Fernet symmetric encryption)
-- Ключ шифрования (`PLAID_ENCRYPTION_KEY`) — только в env-переменных, никогда в коде
-- Plaid credentials никогда не передаются на фронтенд — все вызовы Plaid API только через FastAPI
+| PLAID_ENV | Source Tag | Description |
+|---|---|---|
+| sandbox | plaid_sandbox | Test data; **included in reports/budgets/CSV** when `PLAID_ENV=sandbox` unless `REPORTS_INCLUDE_PLAID_SANDBOX=false` |
+| development | plaid | Real bank accounts, up to 100 items |
+| production | plaid | Production (requires Plaid approval) |
 
-## Sandbox-тестирование
+## Sandbox Testing
 
-В режиме `PLAID_ENV=sandbox` используй тестовые данные Plaid:
-- Телефон: `+14155550123` (OTP: `1234`)
-- Институт: **Plaid Bank** → логин: `user_good`, пароль: `pass_good`
+- Use "First Platypus Bank" institution in sandbox
+- Test credentials: user_good / pass_good
+- Sandbox provides limited transaction data (merchant_name may be null)
+- After connecting, click "Reset cursor" in Settings then "Sync Now"
 
-Тестовые транзакции создаются автоматически. После синка они будут видны в Expenses с фильтром **Test** и **не влияют** на статистику.
+## Link Token Products
 
-Для перехода на реальные банки: смени `PLAID_ENV=development` в Railway Variables.
+```python
+products = [transactions, liabilities]
+optional_products = [investments, recurring_transactions]
+```
+
+optional_products are requested but don't fail if the institution doesn't support them.
+
+## Reset Cursor
+
+POST /api/plaid/items/{item_id}/reset-cursor
+
+Sets cursor to NULL. Next sync will re-import ALL transactions from the beginning.
+Use for testing or recovering from sync issues.
+
+## Webhooks
+
+Budget Pet exposes **`POST /api/plaid/webhook`** on the FastAPI service (public HTTPS URL in production).
+
+1. **Dashboard:** In the [Plaid Dashboard](https://dashboard.plaid.com/) → Developers → Webhooks, register the same URL you deploy (e.g. `https://<your-fastapi-host>/api/plaid/webhook`).
+2. **Verification:** Payloads are verified with Plaid’s **JWT** (JWKS). For local tunneling without valid JWT, set **`PLAID_SKIP_WEBHOOK_VERIFY=true`** (never in production).
+3. **Handled codes (minimum):** `ITEM_LOGIN_REQUIRED` (sets `plaid_items.item_login_required`), `SYNC_UPDATES_AVAILABLE` (debounced per-item sync; duplicate `webhook_event_id` rows are ignored for idempotency).
+4. **Operations:** After deploy, watch **Railway → FastAPI → Logs** for webhook 4xx/5xx; repeated 5xx may cause Plaid retries — fix verification or handler before leaving broken for long.
+
+Related env:
+
+| Variable | Purpose |
+|---|---|
+| `CORS_ORIGINS` | Comma-separated browser origins (cookies + preflight); include your Next.js URL. |
+| `PLAID_SKIP_WEBHOOK_VERIFY` | `true` only for dev when JWT cannot be validated. |
