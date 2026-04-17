@@ -186,7 +186,7 @@ export function CategoryLegend({
             )}
             onMouseEnter={() => onHover(i)}
             onMouseLeave={() => onHover(null)}
-            onClick={() => onLock((prev: number | null) => (prev === i ? null : i))}
+            onClick={() => onLock(lockedIdx === i ? null : i)}
           >
             <span
               className={cn(
