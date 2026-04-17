@@ -1,12 +1,23 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { UserRound } from "lucide-react";
+import { Loader2, Pencil, Trash2, UserRound, Wallet } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import {
   Select,
@@ -719,6 +730,169 @@ function AccountSection({
 }
 
 // ---------------------------------------------------------------------------
+// Cash wallet management
+// ---------------------------------------------------------------------------
+
+function CashWalletSection({ account }: { account: Account }) {
+  const queryClient = useQueryClient();
+  const [editOpen, setEditOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [balanceInput, setBalanceInput] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const updateMutation = useMutation({
+    mutationFn: (cents: number) =>
+      accountsApi.update(account.id, { current_balance_cents: cents }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["v2-accounts"] });
+      setEditOpen(false);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => accountsApi.delete(account.id),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["v2-accounts"] });
+      setDeleteOpen(false);
+    },
+  });
+
+  function openEdit() {
+    setBalanceInput((account.current_balance_cents / 100).toFixed(2));
+    setEditOpen(true);
+    setTimeout(() => inputRef.current?.select(), 50);
+  }
+
+  function handleSaveBalance() {
+    const parsed = parseFloat(balanceInput.replace(/[^0-9.\-]/g, ""));
+    if (isNaN(parsed)) return;
+    updateMutation.mutate(Math.round(parsed * 100));
+  }
+
+  const formattedBalance = formatMoney(account.current_balance_cents, account.currency ?? "USD");
+
+  return (
+    <>
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">Cash Wallet</h2>
+        <div className="flex items-center gap-3 rounded-xl border border-border/60 bg-card px-5 py-4 shadow-sm">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-500">
+            <Wallet className="size-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold">{account.name}</p>
+            <p className="text-xs text-muted-foreground">Manual cash tracking wallet</p>
+          </div>
+          <div className="shrink-0 text-right">
+            <p className="text-lg font-bold tabular-nums">{formattedBalance}</p>
+            {account.owner_username && (
+              <p className="text-[10px] text-muted-foreground">{account.owner_username}</p>
+            )}
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <Button type="button" size="sm" variant="outline" className="gap-1.5" onClick={openEdit}>
+              <Pencil className="size-3.5" />
+              Edit balance
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => setDeleteOpen(true)}
+            >
+              <Trash2 className="size-3.5" />
+              Delete
+            </Button>
+          </div>
+        </div>
+      </section>
+
+      {/* Edit balance dialog */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="sm:max-w-xs">
+          <DialogHeader>
+            <DialogTitle>Edit Cash Wallet balance</DialogTitle>
+            <DialogDescription>
+              Set the current balance directly. This does not create a transaction.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="cash-balance">Balance (USD)</Label>
+            <Input
+              id="cash-balance"
+              ref={inputRef}
+              type="number"
+              step="0.01"
+              value={balanceInput}
+              onChange={(e) => setBalanceInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSaveBalance()}
+              placeholder="0.00"
+            />
+          </div>
+          {updateMutation.isError && (
+            <p className="text-sm text-destructive">
+              {updateMutation.error instanceof Error
+                ? updateMutation.error.message
+                : "Failed to update balance"}
+            </p>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setEditOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleSaveBalance}
+              disabled={updateMutation.isPending}
+            >
+              {updateMutation.isPending ? (
+                <><Loader2 className="size-4 animate-spin" /> Saving…</>
+              ) : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete Cash Wallet?</DialogTitle>
+            <DialogDescription>
+              The wallet will be deactivated. Existing cash transactions will remain in your history
+              but will no longer be linked to an active account.
+            </DialogDescription>
+          </DialogHeader>
+          {deleteMutation.isError && (
+            <p className="text-sm text-destructive">
+              {deleteMutation.error instanceof Error
+                ? deleteMutation.error.message
+                : "Failed to delete wallet"}
+            </p>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDeleteOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => deleteMutation.mutate()}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? (
+                <><Loader2 className="size-4 animate-spin" /> Deleting…</>
+              ) : "Delete wallet"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Net worth summary card
 // ---------------------------------------------------------------------------
 
@@ -789,7 +963,12 @@ export default function AccountsPage() {
     [grouped.depository],
   );
   const depositoryTiles = useMemo(
-    () => grouped.depository.filter((a) => !isCardLikeAccount(a)),
+    () => grouped.depository.filter((a) => !isCardLikeAccount(a) && !a.is_cash_wallet),
+    [grouped.depository],
+  );
+
+  const cashWallet = useMemo(
+    () => grouped.depository.find((a) => a.is_cash_wallet) ?? null,
     [grouped.depository],
   );
 
@@ -878,6 +1057,7 @@ export default function AccountsPage() {
             <AccountSection type="loan" accounts={grouped.loan} members={members} currentUser={currentUser} mode="tile" />
             <AccountSection type="investment" accounts={grouped.investment} members={members} currentUser={currentUser} mode="tile" />
             <AccountSection type="other" accounts={grouped.other} members={members} currentUser={currentUser} mode="tile" />
+            {cashWallet ? <CashWalletSection account={cashWallet} /> : null}
           </>
         )}
       </div>
