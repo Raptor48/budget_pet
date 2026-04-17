@@ -70,9 +70,11 @@ async def list_transactions(
 ):
     current_user = getattr(request.state, "user", None) or {}
     current_id = current_user.get("id")
-    # Non-owners can only access their own transactions; ignore any supplied user_id.
-    if not current_user.get("is_owner"):
-        user_id = current_id
+    if current_id is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    # Family-wide list: any signed-in user sees all accounts' transactions except
+    # rows hidden with is_private (enforced via viewer_user_id in the repo).
+    # Optional user_id query filter narrows to one member's accounts (owner UI).
     repo = _repo()
     rows = await repo.list_transactions(
         month=month,
@@ -103,7 +105,8 @@ async def get_transactions_date_range(request: Request):
     current_id = current_user.get("id")
     if current_id is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
-    user_filter: Optional[int] = None if current_user.get("is_owner") else current_id
+    # Same visibility as list_transactions: all family months, minus hidden rows.
+    user_filter: Optional[int] = None
     repo = _repo()
     r = await repo.get_date_range(
         user_id=user_filter,
@@ -159,7 +162,8 @@ async def export_transactions(
     """Export transactions as CSV. Splits become individual rows."""
     current_user = getattr(request.state, "user", None) or {}
     current_id = current_user.get("id")
-    export_user_id = None if current_user.get("is_owner") else current_id
+    if current_id is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
     repo = _repo()
     rows = await repo.list_transactions(
         month=month,
@@ -167,7 +171,7 @@ async def export_transactions(
         category_id=category_id,
         tag_id=tag_id,
         source=source,
-        user_id=export_user_id,
+        user_id=None,
         viewer_user_id=current_id,
         limit=10000,
         omit_heavy_fields=True,
@@ -230,7 +234,11 @@ async def export_transactions(
 
 
 def _check_txn_ownership(txn: dict, current_user: dict) -> None:
-    """Raise 403 if the current non-owner user does not own the transaction's account."""
+    """Raise 403 if a non-owner mutates a transaction on another user's account.
+
+    Read routes rely on ``viewer_user_id`` + ``is_private`` only; this guard applies
+    to PATCH, DELETE, tags, and splits.
+    """
     if current_user.get("is_owner"):
         return
     owner_uid = txn.get("owner_username")
@@ -247,7 +255,6 @@ async def get_transaction(transaction_id: int, request: Request):
     txn = await repo.get_transaction(transaction_id, viewer_user_id=current_id)
     if not txn:
         raise HTTPException(status_code=404, detail="Transaction not found")
-    _check_txn_ownership(txn, current_user)
     return await _enrich(txn, repo)
 
 
@@ -325,7 +332,6 @@ async def get_splits(transaction_id: int, request: Request):
     txn = await _repo().get_transaction(transaction_id, viewer_user_id=current_id)
     if not txn:
         raise HTTPException(status_code=404, detail="Transaction not found")
-    _check_txn_ownership(txn, current_user)
     return await _splits().get_splits(transaction_id)
 
 
