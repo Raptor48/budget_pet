@@ -38,6 +38,7 @@ function ConnectBankButton({
 }) {
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const { open, ready } = usePlaidLink({
     token: linkToken ?? "",
@@ -47,7 +48,7 @@ function ConnectBankButton({
         localStorage.removeItem("plaid_link_token");
         onSuccess();
       } catch (e) {
-        console.error("Failed to exchange Plaid token:", e);
+        setError(e instanceof Error ? e.message : "Failed to connect bank account.");
       }
     },
     onExit: () => {
@@ -57,6 +58,7 @@ function ConnectBankButton({
   });
 
   const handleConnect = useCallback(async () => {
+    setError(null);
     setLoading(true);
     try {
       const { link_token } = await plaidApi.getLinkToken(itemId);
@@ -64,6 +66,8 @@ function ConnectBankButton({
       localStorage.setItem("plaid_link_token", link_token);
       setLinkToken(link_token);
     } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to start bank connection.";
+      setError(msg);
       console.error("Failed to get link token:", e);
     } finally {
       setLoading(false);
@@ -77,10 +81,15 @@ function ConnectBankButton({
   }
 
   return (
-    <Button type="button" onClick={handleConnect} disabled={loading} className="gap-2">
-      <Building2 className="h-4 w-4" />
-      {loading ? "Connecting..." : label}
-    </Button>
+    <div className="flex flex-col items-start gap-1">
+      <Button type="button" onClick={handleConnect} disabled={loading} className="gap-2">
+        <Building2 className="h-4 w-4" />
+        {loading ? "Connecting..." : label}
+      </Button>
+      {error && (
+        <p className="text-xs text-destructive max-w-xs">{error}</p>
+      )}
+    </div>
   );
 }
 
