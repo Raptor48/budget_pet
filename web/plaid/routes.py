@@ -7,11 +7,14 @@ from typing import List
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
+import os
+
 from .client import (
     create_link_token,
     exchange_public_token,
     get_institution_metadata,
     get_item_institution_id,
+    update_item_webhook,
 )
 from .models import ExchangeTokenRequest, LinkTokenBody, LinkTokenResponse, PlaidItem, PlaidSyncLogEntry, SyncResult
 from .repo import get_plaid_repo
@@ -75,6 +78,13 @@ async def exchange_token(body: ExchangeTokenRequest, request: Request):
             institution_color=institution_color,
             user_id=user_id,
         )
+
+        # Register webhook URL for this item so it receives push notifications.
+        # Required for both new connections and re-connections (update mode).
+        webhook_url = (os.getenv("PLAID_WEBHOOK_URL") or "").strip() or None
+        if webhook_url:
+            update_item_webhook(access_token, webhook_url)
+
         return PlaidItem(**item)
     except Exception as exc:
         logger.error("Failed to exchange token: %s", exc)
