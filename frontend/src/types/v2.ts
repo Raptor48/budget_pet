@@ -86,8 +86,23 @@ export interface Tag {
 export interface MerchantRule {
   id: number;
   merchant_key: string;
+  display_label: string;
   category_id: number;
   category_name: string;
+}
+
+export interface MerchantRulePreviewResult {
+  eligible_count: number;
+  skipped_splits_count: number;
+  skipped_custom_category_count: number;
+  skipped_has_entity_id_count: number;
+  sample_merchant_names: string[];
+  merchant_key?: string | null;
+  display_label?: string | null;
+}
+
+export interface MerchantRuleApplyResult extends MerchantRulePreviewResult {
+  updated_count: number;
 }
 
 // ---------------------------------------------------------------------------

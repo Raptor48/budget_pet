@@ -52,10 +52,14 @@ Each category has `source`: **`plaid_pfc`** (created when syncing Plaid transact
 
 ## Merchant category rules
 
+Rules are **family-wide** (one row per `merchant_key`). Import applies them after PFC resolution. Bulk **apply-existing** only runs `UPDATE transactions SET category_id = …` for matching Plaid rows (`source` in `plaid`, `plaid_sandbox`); rows with **splits**, **custom** categories, or (for name-only rules) a non-empty **merchant_entity_id** are skipped. **`is_private` is not changed.** Re-running apply when nothing is eligible yields `updated_count: 0`.
+
 | Method | Path | Description |
 |---|---|---|
-| GET | /api/merchant-rules | List rules (`merchant_key` is internal: `name:…` or `eid:…`) |
+| GET | /api/merchant-rules | List rules; each row includes `display_label` (human-readable) and internal `merchant_key` (`name:…` or `eid:…`) |
 | POST | /api/merchant-rules | Upsert rule; body: `category_id` and **`merchant_entity_id` or `merchant_name`** |
+| POST | /api/merchant-rules/preview | Read-only counts for bulk apply. Body: either **`rule_id`** (uses the rule’s category; `category_id` ignored), or **`category_id`** plus **`merchant_entity_id` or `merchant_name`** for a draft. Returns `eligible_count`, `skipped_*`, `sample_merchant_names`. |
+| POST | /api/merchant-rules/{id}/apply-existing | Apply saved rule to existing transactions (only `category_id` + `updated_at` on `transactions`; idempotent). |
 | DELETE | /api/merchant-rules/{id} | Delete rule |
 
 ## Transactions

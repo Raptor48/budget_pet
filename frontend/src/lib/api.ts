@@ -27,6 +27,8 @@ import type {
   TransactionSplit,
   ManualCashTransactionCreate,
   MerchantRule,
+  MerchantRuleApplyResult,
+  MerchantRulePreviewResult,
 } from '@/types/v2';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || '';
@@ -154,6 +156,17 @@ export const merchantRulesApi = {
 
   delete: (id: number): Promise<{ ok: boolean }> =>
     apiRequest(`/api/merchant-rules/${id}`, { method: 'DELETE' }),
+
+  preview: (data: {
+    category_id?: number | null;
+    rule_id?: number | null;
+    merchant_entity_id?: string | null;
+    merchant_name?: string | null;
+  }): Promise<MerchantRulePreviewResult> =>
+    apiRequest('/api/merchant-rules/preview', { method: 'POST', body: JSON.stringify(data) }),
+
+  applyExisting: (ruleId: number): Promise<MerchantRuleApplyResult> =>
+    apiRequest(`/api/merchant-rules/${ruleId}/apply-existing`, { method: 'POST' }),
 };
 
 // ---------------------------------------------------------------------------

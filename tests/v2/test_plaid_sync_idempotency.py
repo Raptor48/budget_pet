@@ -58,7 +58,11 @@ async def test_import_uses_on_conflict_upsert_sql():
     conn.execute = AsyncMock(side_effect=execute)
 
     txns = [_make_txn("txn-1", "acct-1")]
-    with patch("web.plaid.repo.get_pool", AsyncMock(return_value=pool)):
+    with patch("web.plaid.repo.get_pool", AsyncMock(return_value=pool)), patch(
+        "web.merchant_rules.repo.MerchantRulesRepository.lookup_category",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
         count = await repo.import_transactions(txns, {"acct-1": 1}, source="plaid")
 
     assert count == 1
@@ -93,7 +97,11 @@ async def test_double_import_same_transactions_no_new_rows():
 
     txns = [_make_txn("txn-a", "acct-1"), _make_txn("txn-b", "acct-1")]
 
-    with patch("web.plaid.repo.get_pool", AsyncMock(return_value=pool)):
+    with patch("web.plaid.repo.get_pool", AsyncMock(return_value=pool)), patch(
+        "web.merchant_rules.repo.MerchantRulesRepository.lookup_category",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
         first = await repo.import_transactions(txns, {"acct-1": 1}, source="plaid")
         second = await repo.import_transactions(txns, {"acct-1": 1}, source="plaid")
 
