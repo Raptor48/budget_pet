@@ -16,6 +16,7 @@ import { format, isValid } from "date-fns";
 import { Columns2, CreditCard, Download, EyeOff, Eye, Loader2, Store, Trash2, Wifi, CircleDot } from "lucide-react";
 
 import { AddCashTransactionDialog } from "@/app/transactions/_components/add-cash-transaction-dialog";
+import { CreateRuleFromTransactionButton } from "@/app/transactions/_components/create-rule-from-transaction-button";
 import { TransactionMobileCard } from "@/app/transactions/_components/transaction-mobile-card";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Badge } from "@/components/ui/badge";
@@ -626,6 +627,18 @@ function TransactionDetailsDialog({
                     ))}
                   </SelectContent>
                 </Select>
+                {transaction.source === "plaid" || transaction.source === "plaid_sandbox" ? (
+                  <div className="pt-1">
+                    <CreateRuleFromTransactionButton
+                      transaction={transaction}
+                      category={
+                        editCategoryId === ALL
+                          ? null
+                          : (categories.find((c) => String(c.id) === editCategoryId) ?? null)
+                      }
+                    />
+                  </div>
+                ) : null}
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="txn-detail-note">Note</Label>

@@ -451,10 +451,14 @@ class PlaidRepository:
                     except Exception as exc:
                         logger.warning("Category resolve failed: %s", exc)
                 from web.merchant_rules.repo import MerchantRulesRepository
+                from web.transactions.display import normalize_transaction_title
+
+                data["display_title"] = normalize_transaction_title(data)
 
                 rule_cat = await MerchantRulesRepository().lookup_category(
                     data.get("merchant_entity_id"),
                     data.get("merchant_name"),
+                    data.get("display_title"),
                 )
                 if rule_cat is not None:
                     category_id = rule_cat
@@ -469,10 +473,10 @@ class PlaidRepository:
                         merchant_entity_id, logo_url, website, payment_channel,
                         pfc_primary, pfc_detailed, pfc_confidence, pfc_icon_url,
                         counterparties, location, payment_meta,
-                        is_pending, source
+                        is_pending, source, display_title
                     ) VALUES (
                         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
-                        $16,$17,$18,$19,$20,$21,$22,$23,$24
+                        $16,$17,$18,$19,$20,$21,$22,$23,$24,$25
                     )
                     ON CONFLICT (plaid_transaction_id) DO UPDATE SET
                         account_id          = EXCLUDED.account_id,
@@ -497,6 +501,7 @@ class PlaidRepository:
                         payment_meta        = EXCLUDED.payment_meta,
                         is_pending          = EXCLUDED.is_pending,
                         source              = EXCLUDED.source,
+                        display_title       = EXCLUDED.display_title,
                         updated_at          = NOW()
                     """,
                     data.get("plaid_transaction_id"),
@@ -523,6 +528,7 @@ class PlaidRepository:
                     json.dumps(data["payment_meta"]) if data.get("payment_meta") else None,
                     data.get("is_pending", False),
                     data.get("source", "plaid"),
+                    data.get("display_title"),
                 )
                 imported += 1
 

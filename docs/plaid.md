@@ -123,9 +123,8 @@ budgets aggregate by default on the **primary** level and expose an opt-in
 
 Raw Plaid `transactions.name` is frequently unformatted bank text (upper
 case, reference numbers, store IDs) and can overflow UI rows. Every
-transaction / recurring stream is enriched with a `display_title` field
-derived by `web/transactions/display.py::normalize_transaction_title` at
-read time.
+transaction / recurring stream exposes a `display_title` field derived by
+`web/transactions/display.py::normalize_transaction_title`.
 
 Source priority (first non-empty wins):
 1. `merchant_name` (from Plaid enrichment) when it already looks
@@ -137,10 +136,34 @@ Source priority (first non-empty wins):
    applies smart title casing.
 5. Last resort: the literal string `"Transaction"`.
 
-The normalizer is mirrored in `frontend/src/lib/transaction-display.ts` so
-legacy rows (no backend `display_title`) still look clean. Both sides
-truncate to a conservative length (≈42 chars) and always return a
+### Persistence
+
+`display_title` is a real column on `transactions` (see
+`docs/data-model.md#transactions`). It is written on every upsert by both
+Plaid import (`web/plaid/repo.py::import_transactions`) and cash creation
+(`web/transactions/repo.py::create_cash_transaction`), and is recomputed
+in `update_transaction` whenever `merchant_name` changes. Historical rows
+are populated by `_migrate_transactions_display_title_backfill` in
+idempotent 1000-row batches.
+
+API handlers (`_enrich`, `_enrich_many`) prefer the stored column and
+fall back to runtime normalization only if the column is NULL. The
+frontend mirror in `frontend/src/lib/transaction-display.ts` stays in
+sync with the Python rules and is used as a safety net when rendering
+older payloads. Both sides truncate to ≈42 chars and always return a
 non-empty string.
+
+### Merchant-rule matching fallback
+
+Merchant category rules key off
+`merchant_entity_id` → `merchant_name` → `display_title` (see
+`docs/data-model.md#merchant_category_rules`). For ACH / checks /
+bill-pays where Plaid does not supply a merchant the rule still applies
+because the import lookup passes `display_title`, and the preview / apply
+SQL matches with
+`lower(trim(COALESCE(NULLIF(merchant_name, ''), display_title, '')))`.
+This is what makes rules for "Pmts Sec: Ind" and similar ACH descriptors
+work.
 
 ## Recurring price-change semantics
 

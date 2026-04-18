@@ -94,11 +94,14 @@ export interface MerchantRule {
 }
 
 export interface MerchantRulePreviewResult {
-  eligible_count: number;
-  skipped_splits_count: number;
-  skipped_custom_category_count: number;
-  skipped_has_entity_id_count: number;
+  /** Number of transactions that would be updated *with this category*. */
+  eligible_count?: number | null;
+  skipped_splits_count?: number | null;
+  skipped_custom_category_count?: number | null;
+  skipped_has_entity_id_count?: number | null;
   sample_merchant_names: string[];
+  /** Category-less match count (only present when preview was called without category_id). */
+  match_count?: number | null;
   merchant_key?: string | null;
   display_label?: string | null;
 }

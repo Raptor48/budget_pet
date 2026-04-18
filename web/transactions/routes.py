@@ -34,15 +34,16 @@ def _splits() -> SplitsRepository:
 
 
 async def _enrich(txn: dict, repo: TransactionsRepository) -> dict:
-    """Attach tags, splits and display_title to a transaction dict."""
+    """Attach tags, splits and display_title. Prefer the materialized column; fall back to runtime normalization for rows inserted before the backfill (or other edge cases)."""
     txn["tags"] = await repo.get_tags_for_transaction(txn["id"])
     txn["splits"] = await repo.get_splits_for_transaction(txn["id"])
-    txn["display_title"] = normalize_transaction_title(txn)
+    if not txn.get("display_title"):
+        txn["display_title"] = normalize_transaction_title(txn)
     return txn
 
 
 async def _enrich_many(rows: List[Dict[str, Any]], repo: TransactionsRepository) -> List[Dict[str, Any]]:
-    """Attach tags, splits and display_title for many transactions (two queries total)."""
+    """Attach tags, splits and display_title. Uses the materialized column when present."""
     if not rows:
         return rows
     ids = [r["id"] for r in rows]
@@ -52,7 +53,8 @@ async def _enrich_many(rows: List[Dict[str, Any]], repo: TransactionsRepository)
         tid = txn["id"]
         txn["tags"] = tags_map.get(tid, [])
         txn["splits"] = splits_map.get(tid, [])
-        txn["display_title"] = normalize_transaction_title(txn)
+        if not txn.get("display_title"):
+            txn["display_title"] = normalize_transaction_title(txn)
     return rows
 
 

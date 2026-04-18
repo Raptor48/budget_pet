@@ -20,11 +20,16 @@ def _parse_rule_key(merchant_key: str) -> Tuple[str, str]:
 
 
 def _merchant_sql_params(kind: str, suffix: str) -> Tuple[str, list[Any]]:
-    """Returns SQL fragment for WHERE (parametrized) and flat param list for *suffix parts."""
+    """Returns SQL fragment for WHERE (parametrized) and flat param list for *suffix parts.
+
+    For ``name:`` keys we match against ``merchant_name`` first and fall back to
+    ``display_title`` when Plaid did not supply a merchant (ACH / checks / bill
+    pays). This mirrors the key-building priority in ``keys.py``.
+    """
     if kind == "name":
         sql = """
             t.source = ANY($1::text[])
-            AND lower(trim(COALESCE(t.merchant_name, ''))) = $2
+            AND lower(trim(COALESCE(NULLIF(t.merchant_name, ''), t.display_title, ''))) = $2
             AND (t.merchant_entity_id IS NULL OR trim(t.merchant_entity_id) = '')
         """
         return sql, [list(_PLAID_SOURCES), suffix]
@@ -42,6 +47,45 @@ async def preview_for_rule(merchant_key: str, category_id: int) -> Dict[str, Any
     pool = await get_pool()
     async with pool.acquire() as conn:
         return await _preview_conn(conn, kind, suffix, category_id)
+
+
+async def preview_match_count(
+    merchant_entity_id: Optional[str],
+    merchant_name: Optional[str],
+) -> Dict[str, Any]:
+    """
+    Category-less preview: how many Plaid transactions currently match this
+    merchant by name (or entity id)? Used by the UI to give immediate feedback
+    while the user is still typing, before they pick a target category.
+
+    Returns ``match_count`` and ``sample_merchant_names``. It does NOT compute
+    eligible/skipped buckets because those depend on the target category.
+    """
+    mk = merchant_key(merchant_entity_id, merchant_name)
+    if not mk:
+        raise ValueError("merchant_entity_id or merchant_name required")
+    kind, suffix = _parse_rule_key(mk)
+    base_sql, base_params = _merchant_sql_params(kind, suffix)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        count = await conn.fetchval(
+            f"SELECT COUNT(*)::bigint FROM transactions t WHERE {base_sql}",
+            *base_params,
+        )
+        sample_sql = f"""
+            SELECT DISTINCT trim(COALESCE(NULLIF(t.merchant_name, ''), t.display_title, '')) AS mn
+            FROM transactions t
+            WHERE {base_sql}
+            AND trim(COALESCE(NULLIF(t.merchant_name, ''), t.display_title, '')) <> ''
+            LIMIT 8
+        """
+        samples = [r["mn"] for r in await conn.fetch(sample_sql, *base_params)]
+    return {
+        "match_count": int(count or 0),
+        "sample_merchant_names": samples,
+        "merchant_key": mk,
+        "display_label": display_merchant_label(mk),
+    }
 
 
 async def preview_for_draft(
@@ -74,9 +118,9 @@ async def _preview_conn(conn, kind: str, suffix: str, category_id: int) -> Dict[
     eligible_params = [*base_params, category_id]
     eligible = await conn.fetchval(eligible_sql, *eligible_params)
 
-    # sample merchant_name
+    # sample labels — prefer merchant_name, fall back to display_title for ACH rows
     sample_sql = f"""
-        SELECT DISTINCT trim(t.merchant_name) AS mn
+        SELECT DISTINCT trim(COALESCE(NULLIF(t.merchant_name, ''), t.display_title, '')) AS mn
         FROM transactions t
         WHERE {base_sql}
         AND NOT EXISTS (SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id)
@@ -85,7 +129,7 @@ async def _preview_conn(conn, kind: str, suffix: str, category_id: int) -> Dict[
             OR EXISTS (SELECT 1 FROM categories c WHERE c.id = t.category_id AND c.source = 'plaid_pfc')
         )
         AND t.category_id IS DISTINCT FROM $3
-        AND trim(COALESCE(t.merchant_name, '')) <> ''
+        AND trim(COALESCE(NULLIF(t.merchant_name, ''), t.display_title, '')) <> ''
         LIMIT 8
     """
     samples = [r["mn"] for r in await conn.fetch(sample_sql, *eligible_params)]

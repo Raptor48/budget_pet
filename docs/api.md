@@ -54,11 +54,13 @@ Each category has `source`: **`plaid_pfc`** (created when syncing Plaid transact
 
 Rules are **family-wide** (one row per `merchant_key`). Import applies them after PFC resolution. Bulk **apply-existing** only runs `UPDATE transactions SET category_id = …` for matching Plaid rows (`source` in `plaid`, `plaid_sandbox`); rows with **splits**, **custom** categories, or (for name-only rules) a non-empty **merchant_entity_id** are skipped. **`is_private` is not changed.** Re-running apply when nothing is eligible yields `updated_count: 0`.
 
+Matching SQL coalesces `NULLIF(merchant_name, '')` onto `transactions.display_title`, so a rule created for a transaction that has no Plaid merchant (ACH / checks / bill pays — e.g. "Pmts Sec: Ind") still finds every occurrence. See `docs/plaid.md` and `docs/data-model.md#merchant_category_rules` for key-building priority.
+
 | Method | Path | Description |
 |---|---|---|
 | GET | /api/merchant-rules | List rules; each row includes `display_label` (human-readable) and internal `merchant_key` (`name:…` or `eid:…`) |
-| POST | /api/merchant-rules | Upsert rule; body: `category_id` and **`merchant_entity_id` or `merchant_name`** |
-| POST | /api/merchant-rules/preview | Read-only counts for bulk apply. Body: either **`rule_id`** (uses the rule’s category; `category_id` ignored), or **`category_id`** plus **`merchant_entity_id` or `merchant_name`** for a draft. Returns `eligible_count`, `skipped_*`, `sample_merchant_names`. |
+| POST | /api/merchant-rules | Upsert rule; body: `category_id` and **one of** `merchant_entity_id`, `merchant_name`, `merchant_label`. `merchant_label` is the fallback used for transactions without a Plaid merchant — typically the transaction's `display_title`. |
+| POST | /api/merchant-rules/preview | Read-only counts. Three body shapes: (a) `rule_id` — preview an existing rule, (b) `category_id` + merchant identifier(s) — full draft preview (`eligible_count`, `skipped_*`, `sample_merchant_names`), (c) merchant identifier(s) **without** `category_id` — lightweight `match_count` preview used by the UI before a category is picked. Missing buckets are returned as `null`. |
 | POST | /api/merchant-rules/{id}/apply-existing | Apply saved rule to existing transactions (only `category_id` + `updated_at` on `transactions`; idempotent). |
 | DELETE | /api/merchant-rules/{id} | Delete rule |
 

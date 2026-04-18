@@ -151,6 +151,8 @@ export const merchantRulesApi = {
     category_id: number;
     merchant_entity_id?: string | null;
     merchant_name?: string | null;
+    /** Fallback label for ACH / check / bill-pay rows without a Plaid merchant. */
+    merchant_label?: string | null;
   }): Promise<MerchantRule> =>
     apiRequest('/api/merchant-rules', { method: 'POST', body: JSON.stringify(data) }),
 
@@ -162,6 +164,7 @@ export const merchantRulesApi = {
     rule_id?: number | null;
     merchant_entity_id?: string | null;
     merchant_name?: string | null;
+    merchant_label?: string | null;
   }): Promise<MerchantRulePreviewResult> =>
     apiRequest('/api/merchant-rules/preview', { method: 'POST', body: JSON.stringify(data) }),
 

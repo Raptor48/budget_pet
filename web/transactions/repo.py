@@ -143,6 +143,7 @@ class TransactionsRepository:
                        t.is_private,
                        t.source,
                        t.user_note,
+                       t.display_title,
                        t.created_at,
                        t.updated_at,
                        a.name     AS account_name,
@@ -349,6 +350,9 @@ class TransactionsRepository:
                 )
                 if not w or w["plaid_account_id"] is not None:
                     raise ValueError("Invalid cash wallet for transaction")
+                from web.transactions.display import normalize_transaction_title
+
+                display_title = normalize_transaction_title(data)
                 row = await conn.fetchrow(
                     """
                     INSERT INTO transactions (
@@ -358,10 +362,10 @@ class TransactionsRepository:
                         merchant_entity_id, logo_url, website, payment_channel,
                         pfc_primary, pfc_detailed, pfc_confidence, pfc_icon_url,
                         counterparties, location, payment_meta,
-                        is_pending, source, user_note
+                        is_pending, source, user_note, display_title
                     ) VALUES (
                         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
-                        $16,$17,$18,$19,$20,$21,$22,$23,$24,$25
+                        $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26
                     )
                     ON CONFLICT (plaid_transaction_id) DO UPDATE SET
                         account_id           = EXCLUDED.account_id,
@@ -386,6 +390,7 @@ class TransactionsRepository:
                         payment_meta         = EXCLUDED.payment_meta,
                         is_pending           = EXCLUDED.is_pending,
                         source               = EXCLUDED.source,
+                        display_title        = EXCLUDED.display_title,
                         updated_at           = NOW()
                     RETURNING *
                     """,
@@ -414,6 +419,7 @@ class TransactionsRepository:
                     data.get("is_pending", False),
                     data.get("source", "cash"),
                     data.get("user_note"),
+                    display_title,
                 )
                 bal = await conn.fetchrow(
                     """
@@ -445,6 +451,19 @@ class TransactionsRepository:
                 transaction_id,
                 *fields.values(),
             )
+            if row and "merchant_name" in fields:
+                from web.transactions.display import normalize_transaction_title
+
+                updated = dict(row)
+                new_title = normalize_transaction_title(updated)
+                if new_title != updated.get("display_title"):
+                    row2 = await conn.fetchrow(
+                        "UPDATE transactions SET display_title = $2 WHERE id = $1 RETURNING *",
+                        transaction_id,
+                        new_title,
+                    )
+                    if row2:
+                        row = row2
         return dict(row) if row else None
 
     async def delete_transaction(self, transaction_id: int) -> bool:
