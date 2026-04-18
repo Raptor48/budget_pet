@@ -454,19 +454,51 @@ export interface PlaidSyncLogEntry {
 // App settings — autosync schedule
 // ---------------------------------------------------------------------------
 
+export interface WebhookReconcileResult {
+  updated: number;
+  failed: number;
+  total: number;
+  errors: string[];
+}
+
+/**
+ * Autosync cadence. Anchor days are fixed by the backend so the UI never has
+ * to pick a day-of-week or day-of-month:
+ *   - `off`          — scheduled sync disabled (manual still works)
+ *   - `daily`        — every day at the configured UTC hour/minute
+ *   - `weekly`       — every Sunday
+ *   - `semimonthly`  — 1st and 15th of each month
+ *   - `monthly`      — 1st of each month
+ */
+export type AutosyncFrequency = "off" | "daily" | "weekly" | "semimonthly" | "monthly";
+
+export const AUTOSYNC_FREQUENCIES: AutosyncFrequency[] = [
+  "off",
+  "daily",
+  "weekly",
+  "semimonthly",
+  "monthly",
+];
+
 export interface AutosyncConfig {
-  enabled: boolean;
+  frequency: AutosyncFrequency;
   hour_utc: number;
   minute_utc: number;
+  webhooks_enabled: boolean;
   updated_at: string | null;
   updated_by_username: string | null;
   next_run_at: string | null;
+  /** False when PLAID_WEBHOOK_URL is not set on the backend — webhooks cannot be enabled. */
+  webhook_url_configured: boolean;
+  /** Populated only on PATCH responses that actually flipped webhooks_enabled. */
+  webhook_reconcile: WebhookReconcileResult | null;
 }
 
 export interface AutosyncConfigUpdate {
-  enabled?: boolean;
+  frequency?: AutosyncFrequency;
   hour_utc?: number;
   minute_utc?: number;
+  webhooks_enabled?: boolean;
 }
 
 // ---------------------------------------------------------------------------

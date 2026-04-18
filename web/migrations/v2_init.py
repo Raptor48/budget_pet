@@ -196,20 +196,78 @@ CREATE TABLE IF NOT EXISTS transaction_splits (
 CREATE_APP_SETTINGS = """
 CREATE TABLE IF NOT EXISTS app_settings (
     id                    SMALLINT PRIMARY KEY DEFAULT 1,
-    autosync_enabled      BOOLEAN NOT NULL DEFAULT TRUE,
+    autosync_frequency    VARCHAR(16) NOT NULL DEFAULT 'daily',
     autosync_hour_utc     SMALLINT NOT NULL DEFAULT 3,
     autosync_minute_utc   SMALLINT NOT NULL DEFAULT 0,
+    webhooks_enabled      BOOLEAN NOT NULL DEFAULT TRUE,
     updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_by            INTEGER REFERENCES users(id) ON DELETE SET NULL,
     CONSTRAINT app_settings_singleton_chk CHECK (id = 1),
     CONSTRAINT app_settings_hour_chk CHECK (autosync_hour_utc BETWEEN 0 AND 23),
-    CONSTRAINT app_settings_minute_chk CHECK (autosync_minute_utc BETWEEN 0 AND 59)
+    CONSTRAINT app_settings_minute_chk CHECK (autosync_minute_utc BETWEEN 0 AND 59),
+    CONSTRAINT app_settings_frequency_chk
+        CHECK (autosync_frequency IN ('off','daily','weekly','semimonthly','monthly'))
 )
 """
 
+ALTER_APP_SETTINGS_WEBHOOKS = (
+    "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS webhooks_enabled BOOLEAN NOT NULL DEFAULT TRUE"
+)
+
+# --- autosync frequency migration (idempotent) -----------------------------
+# V2.1 replaced the boolean ``autosync_enabled`` with an enum-ish
+# ``autosync_frequency``. The steps below are safe on:
+#   • a brand-new DB (new column created above by CREATE TABLE) — all become no-ops;
+#   • an older DB where only ``autosync_enabled`` exists — we add the new column,
+#     backfill from the old one, then drop the old column.
+# Statements are split so the idempotency-by-IF-NOT-EXISTS mechanic holds
+# regardless of which state we're in.
+ALTER_APP_SETTINGS_FREQUENCY = (
+    "ALTER TABLE app_settings "
+    "ADD COLUMN IF NOT EXISTS autosync_frequency VARCHAR(16) NOT NULL DEFAULT 'daily'"
+)
+
+# Backfill once, only when the legacy column still exists. Wrapped in a DO
+# block so a fresh DB (no ``autosync_enabled`` column) skips the UPDATE
+# without an error.
+BACKFILL_APP_SETTINGS_FREQUENCY = """
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'app_settings' AND column_name = 'autosync_enabled'
+    ) THEN
+        EXECUTE
+            'UPDATE app_settings '
+            'SET autosync_frequency = CASE '
+            '    WHEN autosync_enabled = FALSE THEN ''off'' '
+            '    ELSE COALESCE(NULLIF(autosync_frequency, ''''), ''daily'') '
+            'END';
+    END IF;
+END
+$$;
+"""
+
+DROP_APP_SETTINGS_ENABLED = "ALTER TABLE app_settings DROP COLUMN IF EXISTS autosync_enabled"
+
+# Add the check constraint only if missing (older DBs upgraded in place).
+ADD_APP_SETTINGS_FREQUENCY_CHK = """
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'app_settings_frequency_chk'
+    ) THEN
+        ALTER TABLE app_settings
+            ADD CONSTRAINT app_settings_frequency_chk
+            CHECK (autosync_frequency IN ('off','daily','weekly','semimonthly','monthly'));
+    END IF;
+END
+$$;
+"""
+
 SEED_APP_SETTINGS = """
-INSERT INTO app_settings (id, autosync_enabled, autosync_hour_utc, autosync_minute_utc)
-VALUES (1, TRUE, 3, 0)
+INSERT INTO app_settings (id, autosync_frequency, autosync_hour_utc, autosync_minute_utc)
+VALUES (1, 'daily', 3, 0)
 ON CONFLICT (id) DO NOTHING
 """
 
@@ -304,6 +362,11 @@ ALL_STATEMENTS = [
     CREATE_TRANSACTION_SPLITS,
     CREATE_NET_WORTH_SNAPSHOTS,
     CREATE_APP_SETTINGS,
+    ALTER_APP_SETTINGS_WEBHOOKS,
+    ALTER_APP_SETTINGS_FREQUENCY,
+    BACKFILL_APP_SETTINGS_FREQUENCY,
+    DROP_APP_SETTINGS_ENABLED,
+    ADD_APP_SETTINGS_FREQUENCY_CHK,
     SEED_APP_SETTINGS,
     CREATE_AUDIT_LOG,
     *AUDIT_LOG_INDEXES,

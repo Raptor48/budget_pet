@@ -45,7 +45,7 @@ class TestSchedulerRegistration:
         sched.start(paused=True)
         try:
             scheduler_module.apply_autosync_config(
-                enabled=True, hour_utc=3, minute_utc=0
+                frequency="daily", hour_utc=3, minute_utc=0
             )
             job = sched.get_job(scheduler_module._JOB_ID)
             assert job is not None, "expected the daily sync job to be registered"
@@ -68,7 +68,7 @@ class TestSchedulerRegistration:
         sched.start(paused=True)
         try:
             scheduler_module.apply_autosync_config(
-                enabled=True, hour_utc=7, minute_utc=30
+                frequency="daily", hour_utc=7, minute_utc=30
             )
             job = sched.get_job(scheduler_module._JOB_ID)
             trig = job.trigger
@@ -79,7 +79,7 @@ class TestSchedulerRegistration:
 
             # Reschedule live
             scheduler_module.apply_autosync_config(
-                enabled=True, hour_utc=21, minute_utc=15
+                frequency="daily", hour_utc=21, minute_utc=15
             )
             job = sched.get_job(scheduler_module._JOB_ID)
             repr_str = str(job.trigger)
@@ -89,21 +89,94 @@ class TestSchedulerRegistration:
             sched.shutdown(wait=False)
 
     @pytest.mark.asyncio
-    async def test_apply_autosync_config_disabled_removes_job(self):
+    async def test_apply_autosync_config_off_removes_job(self):
         sched = scheduler_module._ensure_scheduler()
         sched.start(paused=True)
         try:
             scheduler_module.apply_autosync_config(
-                enabled=True, hour_utc=3, minute_utc=0
+                frequency="daily", hour_utc=3, minute_utc=0
             )
             assert sched.get_job(scheduler_module._JOB_ID) is not None
 
             scheduler_module.apply_autosync_config(
-                enabled=False, hour_utc=3, minute_utc=0
+                frequency="off", hour_utc=3, minute_utc=0
             )
             assert sched.get_job(scheduler_module._JOB_ID) is None
         finally:
             sched.shutdown(wait=False)
+
+
+class TestFrequencyTriggers:
+    """Every non-``off`` frequency must map to a sane CronTrigger.
+
+    Why we test the trigger string: APScheduler normalises cron fields to
+    strings inside the CronTrigger, so string assertions are the portable
+    way to pin behaviour without depending on private attributes.
+    """
+
+    @pytest.mark.parametrize(
+        ("frequency", "expected_fragments"),
+        [
+            # Daily: no day-of-week or day constraint — fires every 24h.
+            ("daily", ["hour='6'", "minute='45'"]),
+            # Weekly: Sunday anchor — keeps it predictable regardless of TZ.
+            ("weekly", ["day_of_week='sun'", "hour='6'", "minute='45'"]),
+            # Semi-monthly: 1st and 15th, a common payroll cadence.
+            ("semimonthly", ["day='1,15'", "hour='6'", "minute='45'"]),
+            # Monthly: 1st of each month.
+            ("monthly", ["day='1'", "hour='6'", "minute='45'"]),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_trigger_per_frequency(self, frequency, expected_fragments):
+        sched = scheduler_module._ensure_scheduler()
+        sched.start(paused=True)
+        try:
+            scheduler_module.apply_autosync_config(
+                frequency=frequency, hour_utc=6, minute_utc=45
+            )
+            job = sched.get_job(scheduler_module._JOB_ID)
+            assert job is not None
+            repr_str = str(job.trigger)
+            for fragment in expected_fragments:
+                assert fragment in repr_str, (
+                    f"{frequency!r} trigger should contain {fragment!r}; got {repr_str}"
+                )
+        finally:
+            sched.shutdown(wait=False)
+
+    @pytest.mark.asyncio
+    async def test_reschedule_switches_frequency_in_place(self):
+        """Switching daily → monthly must not duplicate the job (one job id,
+        new trigger)."""
+        sched = scheduler_module._ensure_scheduler()
+        sched.start(paused=True)
+        try:
+            scheduler_module.apply_autosync_config(
+                frequency="daily", hour_utc=2, minute_utc=0
+            )
+            first = sched.get_job(scheduler_module._JOB_ID)
+            assert first is not None
+            assert "day" not in str(first.trigger)
+
+            scheduler_module.apply_autosync_config(
+                frequency="monthly", hour_utc=2, minute_utc=0
+            )
+            # Still exactly one job under the same id.
+            jobs = [j for j in sched.get_jobs() if j.id == scheduler_module._JOB_ID]
+            assert len(jobs) == 1
+            assert "day='1'" in str(jobs[0].trigger)
+        finally:
+            sched.shutdown(wait=False)
+
+    def test_build_cron_trigger_rejects_off(self):
+        """``off`` must never produce a trigger — callers must branch first."""
+        with pytest.raises(ValueError):
+            scheduler_module._build_cron_trigger("off", 3, 0)
+
+    def test_build_cron_trigger_rejects_unknown(self):
+        with pytest.raises(ValueError):
+            scheduler_module._build_cron_trigger("hourly", 3, 0)
 
 
 class TestScheduledSyncAuditHook:

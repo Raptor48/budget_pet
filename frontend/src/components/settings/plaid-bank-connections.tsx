@@ -23,6 +23,7 @@ import {
 import { plaidApi } from "@/lib/api";
 import { TRANSACTIONS_DATE_RANGE_QUERY_KEY } from "@/lib/hooks/use-transactions-date-range";
 import type { PlaidItem, PlaidSyncResult } from "@/types/v2";
+import { AutosyncPanel } from "./autosync-card";
 
 // ---------------------------------------------------------------
 // Plaid Link button
@@ -295,6 +296,12 @@ export function PlaidBankConnections() {
             </div>
           )}
         </div>
+
+        {/* Autosync schedule + webhook toggle — tightly coupled with the
+            manual sync below, so we render them together inside the same
+            card. Hidden when no banks are connected because neither setting
+            has any effect yet. */}
+        {items.length > 0 ? <AutosyncPanel /> : null}
 
         {/* Manual sync — always below the bank list */}
         <div className="rounded-lg border border-border/60 bg-muted/20 px-4 py-3">

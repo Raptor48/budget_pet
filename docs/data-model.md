@@ -189,9 +189,10 @@ without a redeploy. Defaults are seeded by `web/migrations/v2_init.py`.
 | Column | Type | Notes |
 |---|---|---|
 | id | SMALLINT PK | Always 1 (CHECK constraint) |
-| autosync_enabled | BOOLEAN | When FALSE the cron job is removed from APScheduler |
+| autosync_frequency | VARCHAR(16) | One of `off`, `daily`, `weekly`, `semimonthly`, `monthly` (CHECK enforced). Anchor days are fixed (`weekly` → Sunday, `semimonthly` → 1st + 15th, `monthly` → 1st); only the cadence + time are editable. `off` removes the APScheduler job entirely |
 | autosync_hour_utc | SMALLINT | 0-23 (CHECK enforced). UTC is stored so DB/server/clock stay aligned; UI converts to the user's local zone |
 | autosync_minute_utc | SMALLINT | 0-59 (CHECK enforced) |
+| webhooks_enabled | BOOLEAN | When FALSE the app ignores incoming Plaid webhooks and (on flip) pushes an empty webhook URL to every linked item via `/item/webhook/update`. Designed to cut Plaid Balance-call costs for personal / family deployments. Default TRUE |
 | updated_at | TIMESTAMPTZ | NOW() on every update |
 | updated_by | INTEGER FK | `users.id`, ON DELETE SET NULL |
 
