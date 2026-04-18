@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/table";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { categoriesApi, ApiError } from "@/lib/api";
+import { MerchantRulesSection } from "@/components/categories/merchant-rules-section";
 import { confirm } from "@/lib/notify";
 import { cn } from "@/lib/utils";
 import type { Category } from "@/types/v2";
@@ -190,6 +191,8 @@ export function CategoriesView() {
   return (
     <TooltipProvider>
       <div className="space-y-6">
+        <MerchantRulesSection />
+
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Categories</h1>

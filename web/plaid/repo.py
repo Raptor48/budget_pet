@@ -450,16 +450,14 @@ class PlaidRepository:
                         )
                     except Exception as exc:
                         logger.warning("Category resolve failed: %s", exc)
-                if user_id:
-                    from web.merchant_rules.repo import MerchantRulesRepository
+                from web.merchant_rules.repo import MerchantRulesRepository
 
-                    rule_cat = await MerchantRulesRepository().lookup_category(
-                        int(user_id),
-                        data.get("merchant_entity_id"),
-                        data.get("merchant_name"),
-                    )
-                    if rule_cat is not None:
-                        category_id = rule_cat
+                rule_cat = await MerchantRulesRepository().lookup_category(
+                    data.get("merchant_entity_id"),
+                    data.get("merchant_name"),
+                )
+                if rule_cat is not None:
+                    category_id = rule_cat
                 data["category_id"] = category_id
 
                 await conn.execute(

@@ -389,11 +389,10 @@ async def _migrate_v21_addons(conn) -> None:
         """
         CREATE TABLE IF NOT EXISTS merchant_category_rules (
             id SERIAL PRIMARY KEY,
-            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             merchant_key TEXT NOT NULL,
             category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            UNIQUE (user_id, merchant_key)
+            UNIQUE (merchant_key)
         )
         """
     )
@@ -409,6 +408,49 @@ async def _migrate_v21_addons(conn) -> None:
     )
 
 
+async def _migrate_merchant_rules_global_family(conn) -> None:
+    """
+    One global rule per merchant_key (family-wide). Legacy table had (user_id, merchant_key).
+
+    On duplicate merchant_key across users, keep the row with max(id). Does not touch transactions.
+    """
+    reg = await conn.fetchval("SELECT to_regclass('public.merchant_category_rules')")
+    if not reg:
+        return
+    has_user_id = await conn.fetchval(
+        """
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'merchant_category_rules' AND column_name = 'user_id'
+        """
+    )
+    if not has_user_id:
+        # Table already family-global (new installs); UNIQUE(merchant_key) from CREATE.
+        return
+
+    # Dedupe rules only: keep max(id) per merchant_key (surviving row wins).
+    await _ddl(
+        conn,
+        """
+        DELETE FROM merchant_category_rules m
+        WHERE EXISTS (
+            SELECT 1 FROM merchant_category_rules m2
+            WHERE m2.merchant_key = m.merchant_key AND m2.id > m.id
+        )
+        """,
+    )
+
+    # CASCADE drops FK and composite UNIQUE on (user_id, merchant_key).
+    await _ddl(conn, "ALTER TABLE merchant_category_rules DROP COLUMN IF EXISTS user_id CASCADE")
+
+    await _ddl(
+        conn,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS merchant_category_rules_merchant_key_uidx
+        ON merchant_category_rules (merchant_key)
+        """,
+    )
+
+
 async def run_v2_migrations(pool) -> None:
     """Execute all V2 DDL statements against the provided asyncpg pool."""
     logger.info("Running V2 database migrations...")
@@ -421,4 +463,5 @@ async def run_v2_migrations(pool) -> None:
                 raise
         await _migrate_categories_source(conn)
         await _migrate_v21_addons(conn)
+        await _migrate_merchant_rules_global_family(conn)
     logger.info("V2 database migrations completed successfully.")

@@ -18,7 +18,6 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { healthApi, plaidApi } from "@/lib/api";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { PlaidBankConnections } from "./plaid-bank-connections";
-import { MerchantRulesCard } from "./merchant-rules-card";
 import {
   Settings as SettingsIcon,
   Palette,
@@ -153,8 +152,6 @@ export function SettingsPage() {
 
       {/* Bank Connections (Plaid) */}
       <PlaidBankConnections />
-
-      <MerchantRulesCard />
 
       {/* Data Management */}
       <Card>

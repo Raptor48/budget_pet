@@ -111,12 +111,14 @@ From Plaid `/transactions/recurring/get`, plus **manual** rows created via `POST
 | webhook_id | TEXT PK | Plaid `webhook_id` for idempotent processing |
 
 ### merchant_category_rules
-Per-user overrides: if a rule matches `merchant_entity_id` or normalized `merchant_name`, its `category_id` is applied on **import** (after PFC resolution).
+Family-wide rules: if a rule matches `merchant_entity_id` or normalized `merchant_name`, its `category_id` is applied on **import** (after PFC resolution) for all accounts. At most one row per `merchant_key`.
 
 | Column | Type | Notes |
-| user_id | INTEGER FK | |
-| merchant_key | TEXT | Internal key `eid:…` or `name:…` (lowercased) |
+|---|---|---|
+| id | SERIAL PK | |
+| merchant_key | TEXT UNIQUE | Internal key `eid:…` or `name:…` (lowercased) |
 | category_id | INTEGER FK | |
+| created_at | TIMESTAMPTZ | |
 
 ### user_preferences
 | Column | Type | Notes |

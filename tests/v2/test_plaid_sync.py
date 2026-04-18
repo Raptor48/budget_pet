@@ -86,7 +86,11 @@ class TestPlaidRepository:
         txns = [_make_txn("txn-1", "acct-1"), _make_txn("txn-2", "acct-1", 5.0)]
         account_id_map = {"acct-1": 1}
 
-        with patch("web.plaid.repo.get_pool", AsyncMock(return_value=pool)):
+        with patch("web.plaid.repo.get_pool", AsyncMock(return_value=pool)), patch(
+            "web.merchant_rules.repo.MerchantRulesRepository.lookup_category",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
             count = await repo.import_transactions(txns, account_id_map, source="plaid")
 
         assert count == 2
