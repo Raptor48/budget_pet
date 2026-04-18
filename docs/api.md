@@ -169,15 +169,23 @@ so the monthly totals never reveal a gift someone else is planning.
 ## App settings
 
 Every authenticated family member can read and update application-wide
-settings. The only setting currently stored here is the Plaid autosync
-schedule; the change takes effect live (no redeploy) because
-`PATCH /api/settings/app` reconciles the APScheduler cron job via
-`web.plaid.scheduler.apply_autosync_config`.
+settings. Two settings are currently stored here:
+
+1. **Plaid autosync schedule** — the change takes effect live (no redeploy)
+   because `PATCH /api/settings/app` reconciles the APScheduler cron job via
+   `web.plaid.scheduler.apply_autosync_config`.
+2. **Webhooks toggle** — when flipped, `PATCH` calls Plaid's
+   `/item/webhook/update` for every linked item (via
+   `web.plaid.webhook_config.reconcile_item_webhooks`). Clearing the URL at
+   Plaid is what actually stops the $0.10 Balance calls that webhooks trigger;
+   ignoring them locally would not change the bill. New Link tokens and
+   freshly exchanged items also respect the flag so reconnecting a bank
+   never silently re-opts the family back into paid webhooks.
 
 | Method | Path | Description |
 |---|---|---|
-| GET | /api/settings/app | Current `{ enabled, hour_utc, minute_utc, updated_at, updated_by_username, next_run_at }`. `next_run_at` is derived from the live APScheduler job (null when autosync is off or the scheduler is not running). |
-| PATCH | /api/settings/app | Partial update. Any of `enabled`, `hour_utc` (0-23), `minute_utc` (0-59). Reschedules the cron job immediately and writes a `settings.autosync_updated` row to `audit_log`. Responds with the same shape as GET. |
+| GET | /api/settings/app | Current `{ frequency, hour_utc, minute_utc, webhooks_enabled, webhook_url_configured, updated_at, updated_by_username, next_run_at, webhook_reconcile }`. `frequency` is one of `off` / `daily` / `weekly` / `semimonthly` / `monthly` — anchor days are fixed (`weekly` = Sunday, `semimonthly` = 1st + 15th, `monthly` = 1st). `next_run_at` is null when `frequency === "off"`. `webhook_url_configured` mirrors the `PLAID_WEBHOOK_URL` env var — when false, the UI must prevent re-enabling webhooks. `webhook_reconcile` is null on GET. |
+| PATCH | /api/settings/app | Partial update. Any of `frequency` (enum above), `hour_utc` (0-23), `minute_utc` (0-59), `webhooks_enabled`. Reschedules the APScheduler job immediately (adds, reschedules, or removes it depending on the new frequency), pushes webhook changes to every Plaid item when `webhooks_enabled` flipped, and writes a `settings.autosync_updated` row to `audit_log` (the metadata includes both the frequency and the reconcile summary). Responds with the same shape as GET plus a populated `webhook_reconcile` object `{ updated, failed, total, errors }` when the flag flipped. |
 
 ## Audit log
 

@@ -68,11 +68,38 @@ plaid/scheduler.py (daily @ app_settings.autosync_hour_utc:minute_utc + manual P
 - Schedule source: the singleton row in `app_settings`. Loaded once on
   startup (`start_scheduler` → `_load_autosync_config`) and reconciled live
   by `PATCH /api/settings/app` via `apply_autosync_config(...)` — the UI
-  does not need a redeploy to change the hour/minute or flip the toggle.
+  does not need a redeploy to change cadence, time, or flip it off.
+- Cadence is picked from `{off, daily, weekly, semimonthly, monthly}` with
+  fixed anchor days (see `docs/plaid.md#autosync-schedule--plaid-rate-limits`).
+  The mapping to `CronTrigger` kwargs lives in
+  `web.plaid.scheduler._FREQUENCY_CRON_KWARGS` so the UI never has to pick
+  a day-of-week or day-of-month.
 - Each scheduled run writes a summary row to `audit_log` with
   `event_type = plaid.sync_scheduled` / `source = scheduler` so Settings →
   Log always shows whether the nightly job fired, even when there were no
   new transactions.
+
+## Webhooks toggle
+
+`app_settings.webhooks_enabled` gates every Plaid webhook touchpoint so a
+family deployment can trade instant transaction notifications for a lower
+Plaid bill (the `/accounts/balance/get` calls triggered by
+`SYNC_UPDATES_AVAILABLE` are the main variable cost). `PATCH
+/api/settings/app` owns the state machine:
+
+1. Persist the new flag in `app_settings`.
+2. If the flag changed, call
+   `web.plaid.webhook_config.reconcile_item_webhooks(...)` which iterates
+   `plaid_items` and sends either `PLAID_WEBHOOK_URL` or `""` to Plaid's
+   `/item/webhook/update` endpoint. The response summary (`updated / failed /
+   errors`) is returned on the PATCH and embedded in the audit row so the
+   Log tab shows any Plaid-side failures.
+3. `POST /api/plaid/webhook` early-returns when disabled, so stale
+   registrations during the transition window don't schedule a debounced
+   sync.
+4. `POST /api/plaid/link-token` passes an explicit empty-string override to
+   `create_link_token` when disabled, preventing fresh links from silently
+   re-registering a webhook.
 
 ## Audit log
 

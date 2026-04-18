@@ -100,10 +100,14 @@ def get_plaid_client() -> plaid_api.PlaidApi:
     return plaid_api.PlaidApi(api_client)
 
 
+_WEBHOOK_OVERRIDE_UNSET = object()
+
+
 def create_link_token(
     user_id: str = "default-user",
     access_token: Optional[str] = None,
     redirect_uri: Optional[str] = None,
+    webhook_url_override=_WEBHOOK_OVERRIDE_UNSET,
 ) -> dict:
     """
     Create a Plaid Link token.
@@ -111,13 +115,18 @@ def create_link_token(
     ``access_token`` — pass for Link update mode (fix broken connection).
     ``redirect_uri`` — required for OAuth institutions (Chase, BofA, etc.) on mobile.
                        Register this URI in the Plaid Dashboard → API → Allowed redirect URIs.
+    ``webhook_url_override`` — when provided, takes precedence over ``PLAID_WEBHOOK_URL``.
+        Pass an empty string to deliberately create a Link token *without* a webhook
+        (honours the in-app "webhooks disabled" toggle); the env var remains the
+        default fallback.
     """
     client = get_plaid_client()
     # redirect_uri is only passed when configured — sandbox works without it
     effective_redirect = (redirect_uri or os.getenv("PLAID_REDIRECT_URI") or "").strip() or None
-    # webhook URL — Plaid sends SYNC_UPDATES_AVAILABLE, ITEM_LOGIN_REQUIRED, etc. here
-    # Strip whitespace to avoid INVALID_FIELD errors from trailing spaces in env vars.
-    webhook_url = (os.getenv("PLAID_WEBHOOK_URL") or "").strip() or None
+    if webhook_url_override is _WEBHOOK_OVERRIDE_UNSET:
+        webhook_url = (os.getenv("PLAID_WEBHOOK_URL") or "").strip() or None
+    else:
+        webhook_url = (webhook_url_override or "").strip() or None
     # Request the configured amount of historical transactions (default 730 ≈ 24 months).
     # Applies to both initial link and update-mode (Plaid extends history for existing items).
     txn_options = LinkTokenTransactions(

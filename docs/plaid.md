@@ -37,27 +37,81 @@
 
 ## Autosync schedule & Plaid rate limits
 
-The nightly auto-sync is one cron job (`plaid_daily_sync`) on an
-`AsyncIOScheduler` pinned to **UTC**. Its hour and minute come from the
-singleton row in `app_settings` and are editable live from Settings → App —
-see `docs/architecture.md#autosync-scheduler` for the wiring.
+The auto-sync is one cron job (`plaid_daily_sync`) on an `AsyncIOScheduler`
+pinned to **UTC**. Frequency, hour, and minute come from the singleton
+`app_settings` row and are editable live from the Bank Connections card
+(Settings → App) — see `docs/architecture.md#autosync-scheduler` for the
+wiring. The scheduler is rebuilt in place by `apply_autosync_config` on
+every PATCH so users never need a redeploy to change cadence.
 
-We intentionally expose **Off / Daily only** in the UI (no "every N hours")
-because:
+Supported `autosync_frequency` values and the APScheduler `CronTrigger`
+kwargs they produce (all pinned to UTC, hour/minute come from the same row):
+
+| Frequency       | Anchor            | Cron kwargs                |
+|-----------------|-------------------|----------------------------|
+| `off`           | —                 | *(job removed entirely)*   |
+| `daily`         | every day         | `hour=H, minute=M`         |
+| `weekly`        | Sunday            | `day_of_week="sun", hour=H, minute=M` |
+| `semimonthly`   | 1st and 15th      | `day="1,15", hour=H, minute=M`        |
+| `monthly`       | 1st of each month | `day="1", hour=H, minute=M`           |
+
+Anchor days are fixed intentionally so the UI stays to **"pick cadence +
+time"** without day-of-week / day-of-month pickers. If you need a different
+anchor, edit `_FREQUENCY_CRON_KWARGS` in `web/plaid/scheduler.py` and update
+this table — the frontend picks up the cadence change automatically.
+
+We expose this limited set (no "every N hours") because:
 
 - Plaid rate-limits `/transactions/sync` per item and surfaces new posted
   transactions only a few times per day anyway, so polling more often buys
   very little fresh data.
-- Every scheduled run counts as a call on our Plaid billing plan. One
-  pull per day per connected item is enough to keep transactions,
-  balances, recurring streams and net worth snapshots current; webhook
-  events (`SYNC_UPDATES_AVAILABLE`) already cover the "push as soon as new
-  data appears" case via `schedule_debounced_sync_item` — the cron job is
-  a safety net, not the primary data path.
+- Every scheduled run counts as Plaid API calls (`/transactions/sync`,
+  `/accounts/balance/get`, `/liabilities/get`, `/transactions/recurring/get`,
+  `/investments/holdings/get`). The `/accounts/balance/get` call is the
+  primary variable cost ($0.10 each) — dropping from daily → weekly is a
+  ~7× cost reduction on that line item for households who don't need
+  same-day freshness.
 
 Each scheduled run also appends one `plaid.sync_scheduled` entry to
 `audit_log` so the Log tab shows the job fired even when the payload was
 empty.
+
+### Webhooks toggle (cost control)
+
+Settings → App also exposes an **"Instant updates (webhooks)"** switch backed
+by `app_settings.webhooks_enabled`. Flipping it has three effects:
+
+1. `PATCH /api/settings/app` calls Plaid `/item/webhook/update` for every row
+   in `plaid_items` via `web.plaid.webhook_config.reconcile_item_webhooks`,
+   passing an empty string to disable or `PLAID_WEBHOOK_URL` to re-enable.
+   This is the step that actually stops Plaid from pushing — clearing it
+   locally would still leave our billing untouched.
+2. `POST /api/plaid/webhook` short-circuits with `{"status": "disabled"}`
+   before verifying the JWT or touching the scheduler, so stale registrations
+   hitting us during the transition window never trigger a debounced sync
+   (and its paired `/accounts/balance/get` call @ $0.10).
+3. `POST /api/plaid/link-token` passes `webhook_url_override=""` to the Plaid
+   client when the toggle is off, so new bank links (and Link-update flows)
+   don't silently opt us back into webhooks.
+
+Target usage: personal / family deployments where 24-hour freshness is
+acceptable. The daily autosync still fetches transactions, balances,
+liabilities, recurring streams, and investment holdings — webhooks only
+advance the clock on "new-posted-transaction" events between sync windows.
+
+If `PLAID_WEBHOOK_URL` is unset on the backend, re-enabling webhooks is a
+no-op: the reconcile refuses to register an empty URL and surfaces the error
+on the PATCH response and in the Log tab.
+
+One-shot bulk disable (outside the UI):
+
+```
+python -c "import asyncio; from web.plaid.webhook_config import reconcile_item_webhooks; print(asyncio.run(reconcile_item_webhooks(False)))"
+```
+
+Audit rows written by `PATCH /api/settings/app` include the reconcile summary
+under `metadata.webhook_reconcile` (`updated`, `failed`, `total`, `errors`)
+so any Plaid-side rejections are visible on the Log tab.
 
 ## Capital One (`ins_128026`) and `min_last_updated_datetime`
 

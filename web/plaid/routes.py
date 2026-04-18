@@ -26,6 +26,22 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/plaid", tags=["plaid"])
 
 
+async def _webhooks_enabled() -> bool:
+    """Read the in-app webhook toggle. Defaults to True when unavailable.
+
+    Keep this resilient — we never want a DB hiccup during settings read to
+    change webhook behaviour in a surprising way. Fail-open matches how the
+    app behaved before the toggle existed.
+    """
+    try:
+        from web.app_settings.repo import get_app_settings_repo
+        row = await get_app_settings_repo().get()
+        return bool(row.get("webhooks_enabled", True))
+    except Exception as exc:
+        logger.warning("Could not read webhooks_enabled flag, assuming True: %s", exc)
+        return True
+
+
 @router.post("/link-token", response_model=LinkTokenResponse)
 async def get_link_token(request: Request, body: LinkTokenBody = Body(default_factory=LinkTokenBody)):
     """Create a Plaid Link token (new connection or update mode when ``item_id`` is sent)."""
@@ -43,7 +59,15 @@ async def get_link_token(request: Request, body: LinkTokenBody = Body(default_fa
         if not access_token:
             raise HTTPException(status_code=400, detail="Item has no access token")
     try:
-        result = create_link_token(user_id=str(uid), access_token=access_token)
+        # Honour the in-app webhook toggle: when disabled, create the Link
+        # token without a webhook URL so Plaid doesn't attach one to the new
+        # or updated Item. ``""`` means "no webhook" to our client wrapper.
+        override = None if await _webhooks_enabled() else ""
+        result = create_link_token(
+            user_id=str(uid),
+            access_token=access_token,
+            webhook_url_override=override,
+        )
         return LinkTokenResponse(**result)
     except Exception as exc:
         logger.error("Failed to create link token: %s", exc)
@@ -82,10 +106,15 @@ async def exchange_token(body: ExchangeTokenRequest, request: Request):
         )
 
         # Register webhook URL for this item so it receives push notifications.
-        # Required for both new connections and re-connections (update mode).
-        webhook_url = (os.getenv("PLAID_WEBHOOK_URL") or "").strip() or None
-        if webhook_url:
-            update_item_webhook(access_token, webhook_url)
+        # Required for both new connections and re-connections (update mode),
+        # but only when the in-app webhook toggle is on. When the toggle is
+        # off we intentionally leave the Item without a webhook URL so Plaid
+        # never pushes SYNC_UPDATES_AVAILABLE (and never bills the paired
+        # Balance call).
+        if await _webhooks_enabled():
+            webhook_url = (os.getenv("PLAID_WEBHOOK_URL") or "").strip() or None
+            if webhook_url:
+                update_item_webhook(access_token, webhook_url)
 
         await audit_record(
             "plaid.item_connect",
@@ -297,9 +326,20 @@ async def delete_sandbox_data(request: Request):
 
 @router.post("/webhook")
 async def plaid_webhook(request: Request):
-    """Plaid webhooks: ITEM_LOGIN_REQUIRED, SYNC_UPDATES_AVAILABLE (JWT verify unless skipped)."""
+    """Plaid webhooks: ITEM_LOGIN_REQUIRED, SYNC_UPDATES_AVAILABLE (JWT verify unless skipped).
+
+    When the in-app webhook toggle is off, we short-circuit with 200 OK *before*
+    spending any work — no debounced sync, no Balance call, no DB writes. We
+    also unregistered the webhook URL at Plaid when the toggle flipped, so in
+    practice these calls stop arriving, but this guard defends against stale
+    registrations during the transition window.
+    """
     from .webhook_verify import verify_plaid_webhook
     from .scheduler import schedule_debounced_sync_item
+
+    if not await _webhooks_enabled():
+        logger.info("Plaid webhook received but toggle is OFF — ignoring")
+        return {"status": "disabled"}
 
     raw = await request.body()
     if not verify_plaid_webhook(request, raw):

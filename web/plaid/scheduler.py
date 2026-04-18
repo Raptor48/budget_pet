@@ -267,15 +267,15 @@ async def _load_autosync_config() -> dict:
         from web.app_settings.repo import get_app_settings_repo
         row = await get_app_settings_repo().get()
         return {
-            "enabled": bool(row["autosync_enabled"]),
+            "frequency": str(row["autosync_frequency"]),
             "hour_utc": int(row["autosync_hour_utc"]),
             "minute_utc": int(row["autosync_minute_utc"]),
         }
     except Exception as exc:
         logger.warning(
-            "Could not load autosync config, using defaults (03:00 UTC): %s", exc
+            "Could not load autosync config, using defaults (daily @ 03:00 UTC): %s", exc
         )
-        return {"enabled": True, "hour_utc": 3, "minute_utc": 0}
+        return {"frequency": "daily", "hour_utc": 3, "minute_utc": 0}
 
 
 def _ensure_scheduler():
@@ -289,41 +289,74 @@ def _ensure_scheduler():
     return _scheduler
 
 
-def apply_autosync_config(*, enabled: bool, hour_utc: int, minute_utc: int) -> None:
+# Anchor days per frequency. Kept here so the scheduler and any UI copy
+# referring to "runs on …" agree. See `docs/plaid.md`.
+_FREQUENCY_CRON_KWARGS = {
+    # APScheduler CronTrigger kwargs (timezone is applied separately).
+    "daily":        {},
+    "weekly":       {"day_of_week": "sun"},
+    "semimonthly":  {"day": "1,15"},
+    "monthly":      {"day": "1"},
+}
+
+
+def _build_cron_trigger(frequency: str, hour_utc: int, minute_utc: int):
+    """Return an APScheduler CronTrigger for the given frequency.
+
+    ``off`` is intentionally *not* handled here — callers must check for it
+    before building a trigger, because APScheduler cron would still fire
+    daily at HH:MM if we returned a bare trigger.
+    """
+    from apscheduler.triggers.cron import CronTrigger
+
+    if frequency == "off":
+        raise ValueError("_build_cron_trigger should not be called with frequency='off'")
+    extra = _FREQUENCY_CRON_KWARGS.get(frequency)
+    if extra is None:
+        raise ValueError(f"Unsupported frequency: {frequency!r}")
+    return CronTrigger(
+        hour=hour_utc,
+        minute=minute_utc,
+        timezone="UTC",
+        **extra,
+    )
+
+
+def apply_autosync_config(*, frequency: str, hour_utc: int, minute_utc: int) -> None:
     """Reconcile the APScheduler job with the desired config.
 
     Idempotent: adds, reschedules or removes the cron job as needed. Safe to
-    call from request handlers after the settings row changes.
+    call from request handlers after the settings row changes. ``frequency``
+    must be one of ``AUTOSYNC_FREQUENCIES`` (validated upstream by the model).
     """
     scheduler = _ensure_scheduler()
     existing = scheduler.get_job(_JOB_ID) if scheduler.running else None
 
-    if not enabled:
+    if frequency == "off":
         if existing is not None:
             scheduler.remove_job(_JOB_ID)
             logger.info("Autosync disabled — removed cron job")
         return
 
+    trigger = _build_cron_trigger(frequency, hour_utc, minute_utc)
+
     if existing is None:
         scheduler.add_job(
             _scheduled_sync,
-            "cron",
-            hour=hour_utc,
-            minute=minute_utc,
+            trigger=trigger,
             id=_JOB_ID,
             coalesce=True,
             misfire_grace_time=3600,
             replace_existing=True,
         )
-        logger.info("Autosync scheduled daily at %02d:%02d UTC", hour_utc, minute_utc)
-    else:
-        from apscheduler.triggers.cron import CronTrigger
-
-        scheduler.reschedule_job(
-            _JOB_ID,
-            trigger=CronTrigger(hour=hour_utc, minute=minute_utc, timezone="UTC"),
+        logger.info(
+            "Autosync scheduled (%s) at %02d:%02d UTC", frequency, hour_utc, minute_utc
         )
-        logger.info("Autosync rescheduled to %02d:%02d UTC", hour_utc, minute_utc)
+    else:
+        scheduler.reschedule_job(_JOB_ID, trigger=trigger)
+        logger.info(
+            "Autosync rescheduled (%s) to %02d:%02d UTC", frequency, hour_utc, minute_utc
+        )
 
 
 def get_scheduler_status() -> Dict[str, Any]:
@@ -344,24 +377,25 @@ def start_scheduler():
 
     async def _bootstrap() -> None:
         cfg = await _load_autosync_config()
-        if cfg["enabled"]:
+        if cfg["frequency"] != "off":
             scheduler.add_job(
                 _scheduled_sync,
-                "cron",
-                hour=cfg["hour_utc"],
-                minute=cfg["minute_utc"],
+                trigger=_build_cron_trigger(
+                    cfg["frequency"], cfg["hour_utc"], cfg["minute_utc"]
+                ),
                 id=_JOB_ID,
                 coalesce=True,
                 misfire_grace_time=3600,
                 replace_existing=True,
             )
             logger.info(
-                "Plaid daily sync scheduler started (runs at %02d:%02d UTC)",
+                "Plaid autosync scheduler started (frequency=%s, %02d:%02d UTC)",
+                cfg["frequency"],
                 cfg["hour_utc"],
                 cfg["minute_utc"],
             )
         else:
-            logger.info("Plaid daily sync scheduler started (autosync disabled)")
+            logger.info("Plaid autosync scheduler started (autosync off)")
 
     scheduler.start()
     # Load the saved schedule once the event loop is free.
