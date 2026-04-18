@@ -179,3 +179,41 @@ Created after each sync. One row per day (ON CONFLICT DO UPDATE).
 
 ### securities + investment_holdings
 From Plaid /investments/holdings/get.
+
+### app_settings
+Singleton row (`id = 1`) holding application-wide preferences. Read on startup
+by `web.plaid.scheduler.start_scheduler` to register the daily cron job and
+re-read live by `PATCH /api/settings/app` so Settings → App changes take effect
+without a redeploy. Defaults are seeded by `web/migrations/v2_init.py`.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | SMALLINT PK | Always 1 (CHECK constraint) |
+| autosync_enabled | BOOLEAN | When FALSE the cron job is removed from APScheduler |
+| autosync_hour_utc | SMALLINT | 0-23 (CHECK enforced). UTC is stored so DB/server/clock stay aligned; UI converts to the user's local zone |
+| autosync_minute_utc | SMALLINT | 0-59 (CHECK enforced) |
+| updated_at | TIMESTAMPTZ | NOW() on every update |
+| updated_by | INTEGER FK | `users.id`, ON DELETE SET NULL |
+
+### audit_log
+Append-only activity feed used by Settings → Log. Written by
+`web.audit.record(...)` — a single non-throwing helper called from auth, Plaid
+and settings routes plus the scheduler. Audit writes never break product
+flows: insert failures are logged and swallowed.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | BIGSERIAL PK | Cursor for `GET /api/audit?before_id=...` |
+| created_at | TIMESTAMPTZ | Indexed DESC for reverse chronological list |
+| actor_user_id | INTEGER FK | `users.id`, ON DELETE SET NULL (nullable for scheduler/system events) |
+| actor_username | TEXT | Snapshotted so deleted users still render |
+| event_type | TEXT | Namespaced, e.g. `auth.login`, `auth.logout`, `auth.login_failed`, `plaid.sync_manual`, `plaid.sync_scheduled`, `plaid.item_connect`, `plaid.item_remove`, `plaid.cursor_reset`, `plaid.sandbox_wiped`, `settings.autosync_updated` |
+| source | TEXT | `manual` \| `scheduler` \| `webhook` \| `system` (CHECK enforced) |
+| target_kind | TEXT | e.g. `plaid_item` |
+| target_id | TEXT | Free-form id (institution item_id, etc.) |
+| metadata | JSONB | Event-specific payload; always `{}` when empty |
+| request_ip | INET | From `X-Forwarded-For` (last entry) or `request.client.host` |
+
+Indexes: `idx_audit_log_created_at (created_at DESC)`,
+`idx_audit_log_event_type (event_type, created_at DESC)`,
+`idx_audit_log_actor (actor_user_id, created_at DESC)`.

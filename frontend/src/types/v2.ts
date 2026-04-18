@@ -451,6 +451,49 @@ export interface PlaidSyncLogEntry {
 }
 
 // ---------------------------------------------------------------------------
+// App settings — autosync schedule
+// ---------------------------------------------------------------------------
+
+export interface AutosyncConfig {
+  enabled: boolean;
+  hour_utc: number;
+  minute_utc: number;
+  updated_at: string | null;
+  updated_by_username: string | null;
+  next_run_at: string | null;
+}
+
+export interface AutosyncConfigUpdate {
+  enabled?: boolean;
+  hour_utc?: number;
+  minute_utc?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Audit log
+// ---------------------------------------------------------------------------
+
+export type AuditSource = "manual" | "scheduler" | "webhook" | "system";
+
+export interface AuditEntry {
+  id: number;
+  created_at: string;
+  actor_user_id: number | null;
+  actor_username: string | null;
+  event_type: string;
+  source: AuditSource;
+  target_kind: string | null;
+  target_id: string | null;
+  metadata: Record<string, unknown>;
+  request_ip: string | null;
+}
+
+export interface AuditListResponse {
+  entries: AuditEntry[];
+  next_before_id: number | null;
+}
+
+// ---------------------------------------------------------------------------
 // Piggy Banks (savings goals)
 // ---------------------------------------------------------------------------
 

@@ -35,6 +35,30 @@
 
 7. Update cursor, write to plaid_sync_log
 
+## Autosync schedule & Plaid rate limits
+
+The nightly auto-sync is one cron job (`plaid_daily_sync`) on an
+`AsyncIOScheduler` pinned to **UTC**. Its hour and minute come from the
+singleton row in `app_settings` and are editable live from Settings → App —
+see `docs/architecture.md#autosync-scheduler` for the wiring.
+
+We intentionally expose **Off / Daily only** in the UI (no "every N hours")
+because:
+
+- Plaid rate-limits `/transactions/sync` per item and surfaces new posted
+  transactions only a few times per day anyway, so polling more often buys
+  very little fresh data.
+- Every scheduled run counts as a call on our Plaid billing plan. One
+  pull per day per connected item is enough to keep transactions,
+  balances, recurring streams and net worth snapshots current; webhook
+  events (`SYNC_UPDATES_AVAILABLE`) already cover the "push as soon as new
+  data appears" case via `schedule_debounced_sync_item` — the cron job is
+  a safety net, not the primary data path.
+
+Each scheduled run also appends one `plaid.sync_scheduled` entry to
+`audit_log` so the Log tab shows the job fired even when the payload was
+empty.
+
 ## Capital One (`ins_128026`) and `min_last_updated_datetime`
 
 For Capital One, Plaid requires **`min_last_updated_datetime`** (ISO 8601 UTC) on

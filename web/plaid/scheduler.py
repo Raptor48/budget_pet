@@ -1,7 +1,7 @@
 """
-APScheduler job: sync all Plaid items daily — V2 version.
+APScheduler job: daily Plaid sync — V2.
 
-V2 sync flow per item:
+Sync flow per item:
   1. transactions/sync → import to transactions table
   2. accounts/balance/get → provision + update accounts table
   3. liabilities/get → update APR, min_payment, overdue on accounts
@@ -9,12 +9,21 @@ V2 sync flow per item:
   5. investments/holdings/get → upsert securities + investment_holdings
   6. snapshot net worth
   7. update cursor + log
+
+The job itself runs once a day at the time stored in ``app_settings``. The
+schedule is reloaded live when the user edits it in Settings → App.
 """
+from __future__ import annotations
+
 import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+_JOB_ID = "plaid_daily_sync"
+_scheduler = None  # set by start_scheduler()
+
 
 # Plaid environment → source tag stored on transactions
 _PLAID_ENV_SOURCE = {
@@ -197,18 +206,170 @@ async def sync_all_items() -> List[dict]:
     return results
 
 
-def start_scheduler():
-    """Start APScheduler with a daily sync job at 03:00."""
-    import asyncio
+# ---------------------------------------------------------------------------
+# Scheduler lifecycle
+# ---------------------------------------------------------------------------
+
+
+async def _scheduled_sync() -> None:
+    """Coroutine invoked by APScheduler at the configured cron time.
+
+    Runs the full sync for every connected item and appends one summary
+    row to ``audit_log`` so the Log tab shows a scheduled event even when
+    nothing changed on Plaid's side.
+    """
+    from web.audit import record as audit_record
+
+    logger.info("Scheduled Plaid sync starting")
+    results: List[dict] = []
+    exception: Optional[BaseException] = None
+    try:
+        results = await sync_all_items()
+    except BaseException as exc:  # noqa: BLE001 — we record and re-raise below
+        exception = exc
+        logger.error("Scheduled Plaid sync failed: %s", exc, exc_info=True)
+
+    items_synced = len(results)
+    txn_total = sum(int(r.get("transactions_added") or 0) for r in results)
+    balances_total = sum(int(r.get("balances_updated") or 0) for r in results)
+    errors = [r for r in results if r.get("status") != "ok"]
+
+    await audit_record(
+        "plaid.sync_scheduled",
+        source="scheduler",
+        metadata={
+            "items_synced": items_synced,
+            "transactions_added": txn_total,
+            "balances_updated": balances_total,
+            "errors": [
+                {"item_id": e.get("item_id"), "error": e.get("error_msg")}
+                for e in errors
+            ],
+            "failed": exception is not None,
+        },
+    )
+
+    if exception is not None:
+        # Let APScheduler surface the error in its own logs too.
+        raise exception
+
+    logger.info(
+        "Scheduled Plaid sync complete: items=%d txn_added=%d errors=%d",
+        items_synced,
+        txn_total,
+        len(errors),
+    )
+
+
+async def _load_autosync_config() -> dict:
+    """Read autosync schedule from app_settings, falling back to defaults."""
+    try:
+        from web.app_settings.repo import get_app_settings_repo
+        row = await get_app_settings_repo().get()
+        return {
+            "enabled": bool(row["autosync_enabled"]),
+            "hour_utc": int(row["autosync_hour_utc"]),
+            "minute_utc": int(row["autosync_minute_utc"]),
+        }
+    except Exception as exc:
+        logger.warning(
+            "Could not load autosync config, using defaults (03:00 UTC): %s", exc
+        )
+        return {"enabled": True, "hour_utc": 3, "minute_utc": 0}
+
+
+def _ensure_scheduler():
+    """Create the AsyncIOScheduler lazily (pinned to UTC)."""
+    global _scheduler
+    if _scheduler is not None:
+        return _scheduler
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-    scheduler = AsyncIOScheduler()
+    _scheduler = AsyncIOScheduler(timezone="UTC")
+    return _scheduler
 
-    def _run_sync():
-        loop = asyncio.get_event_loop()
-        loop.create_task(sync_all_items())
 
-    scheduler.add_job(_run_sync, "cron", hour=3, minute=0, id="plaid_daily_sync")
+def apply_autosync_config(*, enabled: bool, hour_utc: int, minute_utc: int) -> None:
+    """Reconcile the APScheduler job with the desired config.
+
+    Idempotent: adds, reschedules or removes the cron job as needed. Safe to
+    call from request handlers after the settings row changes.
+    """
+    scheduler = _ensure_scheduler()
+    existing = scheduler.get_job(_JOB_ID) if scheduler.running else None
+
+    if not enabled:
+        if existing is not None:
+            scheduler.remove_job(_JOB_ID)
+            logger.info("Autosync disabled — removed cron job")
+        return
+
+    if existing is None:
+        scheduler.add_job(
+            _scheduled_sync,
+            "cron",
+            hour=hour_utc,
+            minute=minute_utc,
+            id=_JOB_ID,
+            coalesce=True,
+            misfire_grace_time=3600,
+            replace_existing=True,
+        )
+        logger.info("Autosync scheduled daily at %02d:%02d UTC", hour_utc, minute_utc)
+    else:
+        from apscheduler.triggers.cron import CronTrigger
+
+        scheduler.reschedule_job(
+            _JOB_ID,
+            trigger=CronTrigger(hour=hour_utc, minute=minute_utc, timezone="UTC"),
+        )
+        logger.info("Autosync rescheduled to %02d:%02d UTC", hour_utc, minute_utc)
+
+
+def get_scheduler_status() -> Dict[str, Any]:
+    """Return a small dict describing the live cron job (for UI/status)."""
+    scheduler = _ensure_scheduler()
+    if not scheduler.running:
+        return {"running": False, "next_run_at": None}
+    job = scheduler.get_job(_JOB_ID)
+    return {
+        "running": True,
+        "next_run_at": getattr(job, "next_run_time", None) if job else None,
+    }
+
+
+def start_scheduler():
+    """Start APScheduler with the autosync job loaded from ``app_settings``."""
+    scheduler = _ensure_scheduler()
+
+    async def _bootstrap() -> None:
+        cfg = await _load_autosync_config()
+        if cfg["enabled"]:
+            scheduler.add_job(
+                _scheduled_sync,
+                "cron",
+                hour=cfg["hour_utc"],
+                minute=cfg["minute_utc"],
+                id=_JOB_ID,
+                coalesce=True,
+                misfire_grace_time=3600,
+                replace_existing=True,
+            )
+            logger.info(
+                "Plaid daily sync scheduler started (runs at %02d:%02d UTC)",
+                cfg["hour_utc"],
+                cfg["minute_utc"],
+            )
+        else:
+            logger.info("Plaid daily sync scheduler started (autosync disabled)")
+
     scheduler.start()
-    logger.info("Plaid daily sync scheduler started (runs at 03:00)")
+    # Load the saved schedule once the event loop is free.
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_bootstrap())
+    except RuntimeError:
+        # Not inside a running loop (e.g. unit tests) — run synchronously.
+        asyncio.get_event_loop().run_until_complete(_bootstrap())
+
     return scheduler

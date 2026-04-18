@@ -193,6 +193,42 @@ CREATE TABLE IF NOT EXISTS transaction_splits (
 )
 """
 
+CREATE_APP_SETTINGS = """
+CREATE TABLE IF NOT EXISTS app_settings (
+    id                    SMALLINT PRIMARY KEY DEFAULT 1,
+    autosync_enabled      BOOLEAN NOT NULL DEFAULT TRUE,
+    autosync_hour_utc     SMALLINT NOT NULL DEFAULT 3,
+    autosync_minute_utc   SMALLINT NOT NULL DEFAULT 0,
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_by            INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    CONSTRAINT app_settings_singleton_chk CHECK (id = 1),
+    CONSTRAINT app_settings_hour_chk CHECK (autosync_hour_utc BETWEEN 0 AND 23),
+    CONSTRAINT app_settings_minute_chk CHECK (autosync_minute_utc BETWEEN 0 AND 59)
+)
+"""
+
+SEED_APP_SETTINGS = """
+INSERT INTO app_settings (id, autosync_enabled, autosync_hour_utc, autosync_minute_utc)
+VALUES (1, TRUE, 3, 0)
+ON CONFLICT (id) DO NOTHING
+"""
+
+CREATE_AUDIT_LOG = """
+CREATE TABLE IF NOT EXISTS audit_log (
+    id              BIGSERIAL PRIMARY KEY,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actor_user_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    actor_username  TEXT,
+    event_type      TEXT NOT NULL,
+    source          TEXT NOT NULL DEFAULT 'manual',
+    target_kind     TEXT,
+    target_id       TEXT,
+    metadata        JSONB NOT NULL DEFAULT '{}'::jsonb,
+    request_ip      INET,
+    CONSTRAINT audit_log_source_chk CHECK (source IN ('manual', 'scheduler', 'webhook', 'system'))
+)
+"""
+
 CREATE_NET_WORTH_SNAPSHOTS = """
 CREATE TABLE IF NOT EXISTS net_worth_snapshots (
     id               SERIAL PRIMARY KEY,
@@ -249,6 +285,12 @@ TRANSACTIONS_COLUMNS = [
     "CREATE INDEX IF NOT EXISTS idx_transactions_display_title_lower ON transactions(lower(display_title))",
 ]
 
+AUDIT_LOG_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_audit_log_event_type ON audit_log(event_type, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_audit_log_actor ON audit_log(actor_user_id, created_at DESC)",
+]
+
 ALL_STATEMENTS = [
     CREATE_ACCOUNTS,
     CREATE_CATEGORIES,
@@ -261,6 +303,10 @@ ALL_STATEMENTS = [
     CREATE_CATEGORY_BUDGETS,
     CREATE_TRANSACTION_SPLITS,
     CREATE_NET_WORTH_SNAPSHOTS,
+    CREATE_APP_SETTINGS,
+    SEED_APP_SETTINGS,
+    CREATE_AUDIT_LOG,
+    *AUDIT_LOG_INDEXES,
     *CREATE_INDEXES,
     *CREATE_TRGM_INDEXES,
     *PLAID_ITEMS_COLUMNS,

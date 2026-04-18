@@ -9,6 +9,8 @@ from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 import os
 
+from web.audit import record as audit_record
+
 from .client import (
     create_link_token,
     exchange_public_token,
@@ -84,6 +86,18 @@ async def exchange_token(body: ExchangeTokenRequest, request: Request):
         webhook_url = (os.getenv("PLAID_WEBHOOK_URL") or "").strip() or None
         if webhook_url:
             update_item_webhook(access_token, webhook_url)
+
+        await audit_record(
+            "plaid.item_connect",
+            source="manual",
+            request=request,
+            target_kind="plaid_item",
+            target_id=item_id,
+            metadata={
+                "institution_name": body.institution_name,
+                "institution_id": institution_id,
+            },
+        )
 
         return PlaidItem(**item)
     except Exception as exc:
@@ -166,11 +180,39 @@ async def delete_item(
         summary = await repo.purge_item(item_id)
         if summary.get("plaid_items_deleted", 0) == 0:
             raise HTTPException(status_code=404, detail="Item not found")
+        await audit_record(
+            "plaid.item_remove",
+            source="manual",
+            request=request,
+            target_kind="plaid_item",
+            target_id=item_id,
+            metadata={
+                "purge": True,
+                "institution_name": row.get("institution_name"),
+                **{k: summary.get(k) for k in (
+                    "transactions_deleted",
+                    "accounts_deleted",
+                    "recurring_streams_deleted",
+                    "plaid_items_deleted",
+                ) if k in summary},
+            },
+        )
         return {"message": "Bank connection and imported data removed", **summary}
 
     deleted = await repo.delete_item(item_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Item not found")
+    await audit_record(
+        "plaid.item_remove",
+        source="manual",
+        request=request,
+        target_kind="plaid_item",
+        target_id=item_id,
+        metadata={
+            "purge": False,
+            "institution_name": row.get("institution_name"),
+        },
+    )
     return {"message": "Bank connection removed"}
 
 
@@ -190,14 +232,40 @@ async def reset_cursor(item_id: str, request: Request):
     ok = await repo.reset_cursor(item_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Item not found")
+    await audit_record(
+        "plaid.cursor_reset",
+        source="manual",
+        request=request,
+        target_kind="plaid_item",
+        target_id=item_id,
+        metadata={"institution_name": row.get("institution_name")},
+    )
     return {"message": "Cursor reset. Next sync will re-import all transactions."}
 
 
 @router.post("/sync", response_model=List[SyncResult])
-async def sync_now():
+async def sync_now(request: Request):
     """Manually trigger synchronization for all connected items."""
     from .scheduler import sync_all_items
     results = await sync_all_items()
+
+    txn_total = sum(int(r.get("transactions_added") or 0) for r in results)
+    balances_total = sum(int(r.get("balances_updated") or 0) for r in results)
+    errors = [r for r in results if r.get("status") != "ok"]
+    await audit_record(
+        "plaid.sync_manual",
+        source="manual",
+        request=request,
+        metadata={
+            "items_synced": len(results),
+            "transactions_added": txn_total,
+            "balances_updated": balances_total,
+            "errors": [
+                {"item_id": e.get("item_id"), "error": e.get("error_msg")}
+                for e in errors
+            ],
+        },
+    )
     return results
 
 
@@ -210,7 +278,7 @@ async def get_sync_log():
 
 
 @router.delete("/sandbox-data")
-async def delete_sandbox_data():
+async def delete_sandbox_data(request: Request):
     """
     Delete all data imported from Plaid sandbox environment.
     Only removes rows with source = 'plaid_sandbox' and their linked accounts/items.
@@ -218,6 +286,12 @@ async def delete_sandbox_data():
     """
     repo = get_plaid_repo()
     summary = await repo.delete_sandbox_data()
+    await audit_record(
+        "plaid.sandbox_wiped",
+        source="manual",
+        request=request,
+        metadata=dict(summary),
+    )
     return {"message": "Sandbox data deleted", **summary}
 
 
