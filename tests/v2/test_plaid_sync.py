@@ -127,6 +127,64 @@ class TestPlaidRepository:
         assert count == 2
 
 
+class TestManualSyncAudit:
+    @pytest.mark.asyncio
+    async def test_manual_sync_writes_audit_row(self):
+        """``POST /api/plaid/sync`` must leave one ``plaid.sync_manual`` audit
+        entry with the per-run summary so the Log tab shows who triggered it."""
+        from web.plaid import routes as plaid_routes
+
+        recorded: list[dict] = []
+
+        async def fake_record(event_type, *, source="manual", metadata=None, **_):
+            recorded.append(
+                {"event_type": event_type, "source": source, "metadata": metadata or {}}
+            )
+
+        fake_results = [
+            {
+                "item_id": "item-A",
+                "transactions_added": 5,
+                "balances_updated": 1,
+                "status": "ok",
+                "error_msg": None,
+            },
+            {
+                "item_id": "item-B",
+                "transactions_added": 0,
+                "balances_updated": 0,
+                "status": "error",
+                "error_msg": "rate limited",
+            },
+        ]
+
+        class FakeState:
+            user = {"id": 3, "username": "denis"}
+
+        class FakeRequest:
+            state = FakeState()
+            headers: dict[str, str] = {}
+            client = None
+            cookies: dict[str, str] = {}
+
+        with patch(
+            "web.plaid.scheduler.sync_all_items",
+            AsyncMock(return_value=fake_results),
+        ), patch.object(plaid_routes, "audit_record", fake_record):
+            results = await plaid_routes.sync_now(FakeRequest())  # type: ignore[arg-type]
+
+        assert results == fake_results
+        assert len(recorded) == 1
+        entry = recorded[0]
+        assert entry["event_type"] == "plaid.sync_manual"
+        assert entry["source"] == "manual"
+        assert entry["metadata"]["items_synced"] == 2
+        assert entry["metadata"]["transactions_added"] == 5
+        assert entry["metadata"]["balances_updated"] == 1
+        assert len(entry["metadata"]["errors"]) == 1
+        assert entry["metadata"]["errors"][0]["item_id"] == "item-B"
+
+
 class TestPlaidSyncScheduler:
     @pytest.mark.asyncio
     async def test_sync_all_items_handles_error_gracefully(self):

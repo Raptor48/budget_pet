@@ -34,7 +34,9 @@ web/
 ├── recurring/           — /api/recurring + price change detector
 ├── budgets/             — /api/budgets + progress calculation
 ├── investments/         — /api/investments/holdings
-└── reports/             — /api/reports/* (cash flow, net worth, forecast, health)
+├── reports/             — /api/reports/* (cash flow, net worth, forecast, health)
+├── app_settings/        — /api/settings/app (autosync schedule); singleton app_settings table
+└── audit/               — /api/audit feed + non-throwing `record()` helper (audit_log table)
 ```
 
 ## Data Flow
@@ -43,7 +45,7 @@ web/
 Plaid API
     │
     ▼
-plaid/scheduler.py (daily 03:00 + manual POST /api/plaid/sync)
+plaid/scheduler.py (daily @ app_settings.autosync_hour_utc:minute_utc + manual POST /api/plaid/sync)
     │
     ├── accounts/balance/get  ──→ accounts table (provision + update balances)
     ├── transactions/sync     ──→ transactions table (upsert by plaid_transaction_id)
@@ -53,6 +55,34 @@ plaid/scheduler.py (daily 03:00 + manual POST /api/plaid/sync)
     ├── investments/holdings  ──→ securities + investment_holdings tables
     └── snapshot_net_worth()  ──→ net_worth_snapshots table
 ```
+
+## Autosync scheduler
+
+- Backed by APScheduler's `AsyncIOScheduler` pinned to UTC.
+- Registered coroutine: `web.plaid.scheduler._scheduled_sync` (a coroutine
+  function — APScheduler's `AsyncIOExecutor` awaits it directly on the main
+  event loop). Pre-V2.1 the callable was a sync wrapper that submitted a
+  task on a worker thread; that thread had no running loop so
+  `asyncio.get_event_loop()` raised and the daily sync silently never ran.
+  Keep the registered job async.
+- Schedule source: the singleton row in `app_settings`. Loaded once on
+  startup (`start_scheduler` → `_load_autosync_config`) and reconciled live
+  by `PATCH /api/settings/app` via `apply_autosync_config(...)` — the UI
+  does not need a redeploy to change the hour/minute or flip the toggle.
+- Each scheduled run writes a summary row to `audit_log` with
+  `event_type = plaid.sync_scheduled` / `source = scheduler` so Settings →
+  Log always shows whether the nightly job fired, even when there were no
+  new transactions.
+
+## Audit log
+
+`web.audit.record(event_type, *, source, request=None, actor=None,
+target_kind=None, target_id=None, metadata=None)` is the single entry point
+for audit writes. Always non-throwing — insert failures are logged and
+swallowed so audit never breaks product flows. Called from auth/login,
+auth/logout (+ failures), Plaid item connect/remove/reset-cursor/sandbox
+wipe, manual + scheduled Plaid sync, and `settings.autosync_updated`.
+Writes go to the `audit_log` table (see `docs/data-model.md`).
 
 ## Authentication
 

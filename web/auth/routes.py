@@ -14,6 +14,8 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 
+from web.audit import record as audit_record
+
 from .models import LoginRequest, LoginResponse, UserCreate, UserPublic
 from .users_repo import get_auth_repo
 
@@ -117,6 +119,13 @@ async def login(login_data: LoginRequest, request: Request, response: Response):
         await repo.cleanup_expired_sessions()
         token = await repo.create_session(user["id"])
         _set_session_cookie(response, token, is_prod)
+        await audit_record(
+            "auth.login",
+            source="manual",
+            request=request,
+            actor={"id": user["id"], "username": user["username"]},
+            metadata={"method": "admin_env"},
+        )
         return LoginResponse(
             success=True,
             message="Login successful",
@@ -128,12 +137,25 @@ async def login(login_data: LoginRequest, request: Request, response: Response):
     user = await repo.get_user_by_username(login_data.username)
     if not user or not repo.verify_password(login_data.password, user["password_hash"]):
         _record_failed_attempt(ip)
+        await audit_record(
+            "auth.login_failed",
+            source="manual",
+            request=request,
+            metadata={"username": login_data.username},
+        )
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     _clear_failed_attempts(ip)
     await repo.cleanup_expired_sessions()
     token = await repo.create_session(user["id"])
     _set_session_cookie(response, token, is_prod)
+    await audit_record(
+        "auth.login",
+        source="manual",
+        request=request,
+        actor={"id": user["id"], "username": user["username"]},
+        metadata={"method": "password"},
+    )
     return LoginResponse(
         success=True,
         message="Login successful",
@@ -145,10 +167,18 @@ async def login(login_data: LoginRequest, request: Request, response: Response):
 @router.post("/logout")
 async def logout(request: Request, response: Response):
     token = request.cookies.get("session_token") or _extract_bearer(request)
+    actor = None
     if token:
         repo = get_auth_repo()
+        actor = await repo.get_session_user(token)
         await repo.delete_session(token)
     response.delete_cookie("session_token", path="/")
+    await audit_record(
+        "auth.logout",
+        source="manual",
+        request=request,
+        actor={"id": actor["id"], "username": actor["username"]} if actor else None,
+    )
     return {"success": True, "message": "Logged out successfully"}
 
 

@@ -21,6 +21,11 @@ const tabs: { href: string; label: string; match: (pathname: string) => boolean 
     label: "Budgets",
     match: (p) => p.startsWith("/settings/budgets"),
   },
+  {
+    href: "/settings/log",
+    label: "Log",
+    match: (p) => p.startsWith("/settings/log"),
+  },
 ];
 
 export function SettingsShell({ children }: { children: React.ReactNode }) {

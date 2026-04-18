@@ -18,6 +18,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { healthApi, plaidApi } from "@/lib/api";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { PlaidBankConnections } from "./plaid-bank-connections";
+import { AutosyncCard } from "./autosync-card";
 import {
   Settings as SettingsIcon,
   Palette,
@@ -149,6 +150,9 @@ export function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Autosync schedule */}
+      <AutosyncCard />
 
       {/* Bank Connections (Plaid) */}
       <PlaidBankConnections />

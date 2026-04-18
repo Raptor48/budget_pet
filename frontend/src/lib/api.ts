@@ -5,6 +5,10 @@
 import { getAuthHeaders } from '@/lib/auth';
 import type {
   Account,
+  AuditEntry,
+  AuditListResponse,
+  AutosyncConfig,
+  AutosyncConfigUpdate,
   Budget,
   BudgetProgress,
   CashFlowMonth,
@@ -493,6 +497,47 @@ export const piggyApi = {
   delete: (id: number): Promise<void> =>
     apiRequest(`/api/piggy/${id}`, { method: 'DELETE' }),
 };
+
+// ---------------------------------------------------------------------------
+// App settings (autosync schedule)
+// ---------------------------------------------------------------------------
+
+export const appSettingsApi = {
+  get: (): Promise<AutosyncConfig> => apiRequest('/api/settings/app'),
+
+  update: (patch: AutosyncConfigUpdate): Promise<AutosyncConfig> =>
+    apiRequest('/api/settings/app', {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+};
+
+// ---------------------------------------------------------------------------
+// Audit log
+// ---------------------------------------------------------------------------
+
+export interface AuditListParams {
+  limit?: number;
+  beforeId?: number | null;
+  eventType?: string | null;
+  category?: string | null;
+}
+
+export const auditApi = {
+  list: (params: AuditListParams = {}): Promise<AuditListResponse> => {
+    const qs = new URLSearchParams();
+    if (params.limit) qs.set('limit', String(params.limit));
+    if (params.beforeId) qs.set('before_id', String(params.beforeId));
+    if (params.eventType) qs.set('event_type', params.eventType);
+    if (params.category) qs.set('category', params.category);
+    const query = qs.toString();
+    return apiRequest(`/api/audit${query ? `?${query}` : ''}`);
+  },
+
+  eventTypes: (): Promise<string[]> => apiRequest('/api/audit/event-types'),
+};
+
+export type { AuditEntry, AuditListResponse, AutosyncConfig, AutosyncConfigUpdate };
 
 // ---------------------------------------------------------------------------
 // Health

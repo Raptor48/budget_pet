@@ -166,6 +166,34 @@ so the monthly totals never reveal a gift someone else is planning.
 | POST | /api/auth/users | Create user (owner only) |
 | DELETE | /api/auth/users/{id} | Delete user (owner only) |
 
+## App settings
+
+Every authenticated family member can read and update application-wide
+settings. The only setting currently stored here is the Plaid autosync
+schedule; the change takes effect live (no redeploy) because
+`PATCH /api/settings/app` reconciles the APScheduler cron job via
+`web.plaid.scheduler.apply_autosync_config`.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | /api/settings/app | Current `{ enabled, hour_utc, minute_utc, updated_at, updated_by_username, next_run_at }`. `next_run_at` is derived from the live APScheduler job (null when autosync is off or the scheduler is not running). |
+| PATCH | /api/settings/app | Partial update. Any of `enabled`, `hour_utc` (0-23), `minute_utc` (0-59). Reschedules the cron job immediately and writes a `settings.autosync_updated` row to `audit_log`. Responds with the same shape as GET. |
+
+## Audit log
+
+Append-only activity feed powering Settings → Log. Entries are written by the
+non-throwing helper `web.audit.record(...)` from auth, Plaid, settings and
+scheduler call sites.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | /api/audit | Newest-first paginated feed. Query: `limit` (1-200, default 50), `before_id` (cursor — pass the last id from the previous page), `event_type` (exact match), `category` (namespace — e.g. `plaid` → matches `plaid.*`). Returns `{ entries: AuditEntry[], next_before_id }`. |
+| GET | /api/audit/event-types | Distinct `event_type` values currently in the table (useful to populate a filter dropdown). |
+
+`AuditEntry` fields: `id`, `created_at`, `actor_user_id`, `actor_username`,
+`event_type`, `source` (`manual`|`scheduler`|`webhook`|`system`),
+`target_kind`, `target_id`, `metadata` (JSON), `request_ip`.
+
 ## Health
 
 | Method | Path | Description |
