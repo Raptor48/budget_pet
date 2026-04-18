@@ -98,6 +98,7 @@ All transactions from Plaid, cash wallet (`source=cash`), and legacy `manual` ro
 | source | TEXT | plaid \| plaid_sandbox \| cash \| manual (cash = offline cash via API). Whether `plaid_sandbox` participates in reports/budgets/export is controlled by `web.env_flags.reports_include_plaid_sandbox()` (see `docs/plaid.md`). |
 | user_note | TEXT | User annotation |
 | is_private | BOOLEAN NOT NULL DEFAULT FALSE | Hide the row from other family members. Enforced by a sparse index `idx_transactions_is_private` and the `viewer_user_id` filter applied in every list/detail/report/export/insight query. |
+| display_title | TEXT | Materialized output of `normalize_transaction_title(...)`. Written on every upsert/import (Plaid + cash) and recomputed when `merchant_name` is edited; `update_transaction` refreshes it in the same transaction. Indexed on `lower(display_title)` and used by merchant-rule matching to fall back when `merchant_name` is NULL (ACH / checks / bill pays). Historical rows are backfilled by `_migrate_transactions_display_title_backfill` in batches of 1000 (idempotent: rows with a non-NULL value are skipped). API clients should read this column; `_enrich` still falls back to runtime normalization if the column is NULL for any reason. |
 
 ### Cash wallet (accounts)
 One designated manual account per user: `name='Cash'`, `type=depository`, `subtype=cash`, `plaid_account_id` NULL, `is_cash_wallet=true`, `user_id` set. Created lazily via `GET /api/accounts/cash-wallet` or first cash transaction. `current_balance_cents` is adjusted when cash transactions are inserted/deleted; it may also be set via `PATCH /api/accounts/{id}` with `current_balance_cents` **only** on this wallet (not on Plaid-linked accounts). `DELETE /api/accounts/{id}` performs a soft delete (`is_active=false`); a new wallet is re-created the next time the user adds cash.
@@ -132,7 +133,15 @@ From Plaid `/transactions/recurring/get`, plus **manual** rows created via `POST
 | webhook_id | TEXT PK | Plaid `webhook_id` for idempotent processing |
 
 ### merchant_category_rules
-Family-wide rules: if a rule matches `merchant_entity_id` or normalized `merchant_name`, its `category_id` is applied on **import** (after PFC resolution) for all accounts. At most one row per `merchant_key`.
+Family-wide rules: on **import** (after PFC resolution) the rule whose `merchant_key` matches the incoming transaction overrides the resolved category. At most one row per `merchant_key`.
+
+Key-building priority (see `web/merchant_rules/keys.py`):
+1. `merchant_entity_id` → `eid:<lower>` — stable Plaid merchant id.
+2. `merchant_name`      → `name:<lower>` — Plaid's enriched label.
+3. `display_title`      → `name:<lower>` — fallback used for ACH / checks /
+   bill-pays where Plaid did not supply a merchant. The rule key and the
+   matching SQL both coalesce `NULLIF(merchant_name, '')` onto `display_title`,
+   so a rule created for "Pmts Sec: Ind" matches every such transaction.
 
 | Column | Type | Notes |
 |---|---|---|

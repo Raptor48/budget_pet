@@ -27,8 +27,8 @@ import { cn } from "@/lib/utils";
 import type { MerchantRule, MerchantRulePreviewResult } from "@/types/v2";
 import { Loader2, Sparkles, Tag, Trash2, Wand2 } from "lucide-react";
 
-const PREVIEW_DEBOUNCE_MS = 320;
-const MIN_MERCHANT_LEN = 2;
+const PREVIEW_DEBOUNCE_MS = 400;
+const MIN_MERCHANT_LEN = 3;
 
 export function MerchantRulesSection() {
   const queryClient = useQueryClient();
@@ -56,7 +56,8 @@ export function MerchantRulesSection() {
   const runDraftPreview = useCallback(async () => {
     const name = merchantName.trim();
     const cid = Number(categoryId);
-    if (name.length < MIN_MERCHANT_LEN || !Number.isFinite(cid) || cid <= 0) {
+    const hasCategory = Number.isFinite(cid) && cid > 0;
+    if (name.length < MIN_MERCHANT_LEN) {
       setPreview(null);
       setPreviewError(null);
       setPreviewLoading(false);
@@ -65,10 +66,11 @@ export function MerchantRulesSection() {
     setPreviewLoading(true);
     setPreviewError(null);
     try {
-      const data = await merchantRulesApi.preview({
-        merchant_name: name,
-        category_id: cid,
-      });
+      const data = await merchantRulesApi.preview(
+        hasCategory
+          ? { merchant_label: name, category_id: cid }
+          : { merchant_label: name },
+      );
       setPreview(data);
     } catch (e) {
       setPreview(null);
@@ -99,8 +101,12 @@ export function MerchantRulesSection() {
       if (!Number.isFinite(cid) || cid <= 0) {
         return Promise.reject(new Error("Choose a category."));
       }
+      // Send as merchant_label so the backend falls back through
+      // entity_id -> merchant_name -> display_title. For normal Plaid
+      // merchants this still produces name:<lower> keys, so rules stay
+      // compatible with historical ones.
       return merchantRulesApi.create({
-        merchant_name: merchantName.trim(),
+        merchant_label: merchantName.trim(),
         category_id: cid,
       });
     },
@@ -169,7 +175,9 @@ export function MerchantRulesSection() {
             <span>
               Family-wide rules: applied on Plaid import for matching merchants. Only{" "}
               <strong>Plaid</strong> transactions can be recategorized in bulk; rows with{" "}
-              <strong>custom</strong> categories or <strong>splits</strong> are skipped.
+              <strong>custom</strong> categories or <strong>splits</strong> are skipped. For ACH /
+              check / bill-pay rows without a Plaid merchant, type the description you see on the
+              transaction (e.g. <em>Pmts Sec: Ind</em>) — the rule will match on that.
             </span>
           </CardDescription>
         </CardHeader>
@@ -202,9 +210,16 @@ export function MerchantRulesSection() {
                   role="status"
                 >
                   <p className="font-medium text-foreground">
-                    {preview.eligible_count > 0
-                      ? `${preview.eligible_count} transaction(s) would be updated with this rule.`
-                      : "No matching Plaid transactions for this name (exact normalized match)."}
+                    {/* When category_id was supplied we get an exact "would be updated" count; otherwise we show the category-less match_count hint. */}
+                    {typeof preview.eligible_count === "number"
+                      ? preview.eligible_count > 0
+                        ? `${preview.eligible_count} transaction(s) would be updated with this rule.`
+                        : "No matching Plaid transactions for this name (exact normalized match)."
+                      : typeof preview.match_count === "number"
+                        ? preview.match_count > 0
+                          ? `${preview.match_count} transaction(s) match this merchant. Pick a category to save the rule.`
+                          : "No matching Plaid transactions for this name."
+                        : null}
                   </p>
                   {preview.sample_merchant_names.length > 0 ? (
                     <p>
@@ -212,14 +227,14 @@ export function MerchantRulesSection() {
                       {preview.sample_merchant_names.join(", ")}
                     </p>
                   ) : null}
-                  {(preview.skipped_splits_count > 0 ||
-                    preview.skipped_custom_category_count > 0 ||
-                    preview.skipped_has_entity_id_count > 0) && (
+                  {((preview.skipped_splits_count ?? 0) > 0 ||
+                    (preview.skipped_custom_category_count ?? 0) > 0 ||
+                    (preview.skipped_has_entity_id_count ?? 0) > 0) && (
                     <p className="text-muted-foreground/90">
-                      Skipped: {preview.skipped_splits_count} with splits,{" "}
-                      {preview.skipped_custom_category_count} with custom category,{" "}
-                      {preview.skipped_has_entity_id_count} with Plaid merchant ID (name-only rules do not
-                      apply).
+                      Skipped: {preview.skipped_splits_count ?? 0} with splits,{" "}
+                      {preview.skipped_custom_category_count ?? 0} with custom category,{" "}
+                      {preview.skipped_has_entity_id_count ?? 0} with Plaid merchant ID (name-only rules do
+                      not apply).
                     </p>
                   )}
                 </div>
@@ -333,8 +348,8 @@ export function MerchantRulesSection() {
           <DialogHeader>
             <DialogTitle>Apply rule to existing transactions</DialogTitle>
             <DialogDescription>
-              Only <code className="text-xs">category_id</code> on matching Plaid rows is updated.
-              Splits and custom categories are never changed.
+              Family-wide action: matching Plaid rows across <strong>all members&rsquo; accounts</strong>{" "}
+              will be recategorized. Splits and custom categories are never changed.
             </DialogDescription>
           </DialogHeader>
           {applyDialogRule ? (

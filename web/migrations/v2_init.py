@@ -245,6 +245,8 @@ ACCOUNTS_COLUMNS = [
 TRANSACTIONS_COLUMNS = [
     "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS is_private BOOLEAN NOT NULL DEFAULT FALSE",
     "CREATE INDEX IF NOT EXISTS idx_transactions_is_private ON transactions(is_private) WHERE is_private = TRUE",
+    "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS display_title TEXT",
+    "CREATE INDEX IF NOT EXISTS idx_transactions_display_title_lower ON transactions(lower(display_title))",
 ]
 
 ALL_STATEMENTS = [
@@ -561,6 +563,59 @@ async def _migrate_merchant_rules_global_family(conn) -> None:
     )
 
 
+async def _migrate_transactions_display_title_backfill(conn) -> None:
+    """
+    Populate `transactions.display_title` for rows where it is NULL by running
+    `normalize_transaction_title` in Python (the SQL pipeline is too complex to
+    reproduce reliably). Idempotent: already-filled rows are skipped; subsequent
+    runs just top-up new NULLs.
+
+    Batches of 1000 rows keep each transaction short to avoid long-lived locks.
+    Loop bound (max 2000 batches = 2M rows) is a safety net, not a hard limit.
+    """
+    import json as _json
+
+    from web.transactions.display import normalize_transaction_title
+
+    def _parse_cp(value):
+        if value is None or isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            try:
+                return _json.loads(value)
+            except Exception:
+                return None
+        return value
+
+    for _ in range(2000):
+        rows = await conn.fetch(
+            """
+            SELECT id, name, merchant_name, website, counterparties
+            FROM transactions
+            WHERE display_title IS NULL
+            ORDER BY id
+            LIMIT 1000
+            """
+        )
+        if not rows:
+            return
+        updates: list[tuple[int, str]] = []
+        for r in rows:
+            # asyncpg decodes JSONB as str by default; counterparties stays Python-safe.
+            txn = {
+                "id": r["id"],
+                "name": r["name"],
+                "merchant_name": r["merchant_name"],
+                "website": r["website"],
+                "counterparties": _parse_cp(r["counterparties"]),
+            }
+            updates.append((r["id"], normalize_transaction_title(txn)))
+        await conn.executemany(
+            "UPDATE transactions SET display_title = $2 WHERE id = $1 AND display_title IS NULL",
+            updates,
+        )
+
+
 async def run_v2_migrations(pool) -> None:
     """Execute all V2 DDL statements against the provided asyncpg pool."""
     logger.info("Running V2 database migrations...")
@@ -576,4 +631,5 @@ async def run_v2_migrations(pool) -> None:
         await _migrate_merchant_rules_global_family(conn)
         await _migrate_categories_parent_id(conn)
         await _migrate_recurring_price_change_signed(conn)
+        await _migrate_transactions_display_title_backfill(conn)
     logger.info("V2 database migrations completed successfully.")

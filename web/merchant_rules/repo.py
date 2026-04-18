@@ -16,8 +16,16 @@ class MerchantRulesRepository:
         self,
         merchant_entity_id: Optional[str],
         merchant_name: Optional[str],
+        fallback_display: Optional[str] = None,
     ) -> Optional[int]:
-        key = build_merchant_key(merchant_entity_id, merchant_name)
+        """
+        Resolve ``category_id`` from a saved rule matching this transaction.
+
+        ``fallback_display`` is used when neither a Plaid merchant entity id
+        nor a merchant name is available (ACH / checks / bill pays). It should
+        be the transaction's normalized ``display_title``.
+        """
+        key = build_merchant_key(merchant_entity_id, merchant_name, fallback_display)
         if not key:
             return None
         pool = await self._pool()
@@ -33,10 +41,11 @@ class MerchantRulesRepository:
         merchant_entity_id: Optional[str],
         merchant_name: Optional[str],
         category_id: int,
+        fallback_display: Optional[str] = None,
     ) -> dict:
-        key = build_merchant_key(merchant_entity_id, merchant_name)
+        key = build_merchant_key(merchant_entity_id, merchant_name, fallback_display)
         if not key:
-            raise ValueError("merchant_entity_id or merchant_name required")
+            raise ValueError("merchant_entity_id, merchant_name, or merchant_label required")
         pool = await self._pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
