@@ -158,17 +158,17 @@ function CashFlowBarGroups({ months }: { months: CashFlowMonth[] }) {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-end justify-between gap-1 sm:gap-2 h-52 pt-4 border-b border-border/60">
+      <div className="flex items-stretch justify-between gap-1 sm:gap-2 h-52 pt-4 border-b border-border/60">
         {sorted.map((row) => {
           const hIn = maxVal > 0 ? (row.income_cents / maxVal) * 100 : 0;
           const hEx = maxVal > 0 ? (row.expenses_cents / maxVal) * 100 : 0;
           return (
             <div
               key={row.month}
-              className="flex flex-1 flex-col items-center gap-1 min-w-0"
+              className="flex flex-1 flex-col items-center gap-1 min-w-0 h-full"
               title={`${row.month}: in ${formatMoney(row.income_cents)}, out ${formatMoney(row.expenses_cents)}`}
             >
-              <div className="flex h-full w-full max-w-[2.5rem] items-end justify-center gap-0.5 mx-auto">
+              <div className="flex flex-1 min-h-0 w-full max-w-[2.5rem] items-end justify-center gap-0.5 mx-auto">
                 <div
                   className="w-[42%] max-w-3 rounded-t-md bg-emerald-500/90 shadow-sm transition-all"
                   style={{ height: `${Math.max(hIn, 1)}%` }}
@@ -178,7 +178,7 @@ function CashFlowBarGroups({ months }: { months: CashFlowMonth[] }) {
                   style={{ height: `${Math.max(hEx, 1)}%` }}
                 />
               </div>
-              <span className="text-[10px] sm:text-xs text-muted-foreground truncate w-full text-center">
+              <span className="text-[10px] sm:text-xs text-muted-foreground truncate w-full text-center shrink-0">
                 {shortMonthLabel(row.month)}
               </span>
             </div>
