@@ -14,6 +14,8 @@ class CategoryOut(BaseModel):
     pfc_icon_url: Optional[str] = None
     source: Literal["plaid_pfc", "custom"] = "custom"
     created_at: datetime
+    # NULL = top-level (primary/custom root). Depth is always ≤ 2 in the DB.
+    parent_id: Optional[int] = None
 
     class Config:
         from_attributes = True

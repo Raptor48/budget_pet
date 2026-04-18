@@ -45,8 +45,22 @@ async def get_cash_flow_history(request: Request, months: int = Query(12, ge=1, 
 async def get_by_category(
     request: Request,
     month: str = Query(default_factory=lambda: date.today().strftime("%Y-%m"), regex=r"^\d{4}-\d{2}$"),
+    rollup: str = Query(
+        "primary",
+        regex=r"^(primary|detailed)$",
+        description="'primary' rolls detailed PFCs into their parent bucket (default). 'detailed' returns one row per detailed category.",
+    ),
+    parent_category_id: Optional[int] = Query(
+        None,
+        description="Only meaningful when rollup='detailed': scope results to children of this primary category.",
+    ),
 ):
-    return await _repo().get_by_category(month, viewer_user_id=_viewer_id(request))
+    return await _repo().get_by_category(
+        month,
+        viewer_user_id=_viewer_id(request),
+        rollup=rollup,  # type: ignore[arg-type]
+        parent_category_id=parent_category_id,
+    )
 
 
 @router.get("/by-tag", response_model=List[TagSpend])

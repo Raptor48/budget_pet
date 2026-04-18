@@ -3,7 +3,7 @@ ReportsRepository — DB queries for all report endpoints + net worth snapshots.
 """
 import logging
 from datetime import date
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from web.db import get_pool
 from web.env_flags import reports_include_plaid_sandbox
@@ -103,14 +103,48 @@ class ReportsRepository:
             })
         return result
 
-    async def get_by_category(self, month: str, viewer_user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    async def get_by_category(
+        self,
+        month: str,
+        viewer_user_id: Optional[int] = None,
+        rollup: Literal["primary", "detailed"] = "primary",
+        parent_category_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Aggregate spending by category for a month.
+
+        rollup='primary' (default): group detailed children into their parent
+            buckets so charts show ~10–15 meaningful slices instead of 40+.
+            `bucket_key='p:<id>'` and `children_count` reflects how many
+            detailed categories contributed to the bucket.
+        rollup='detailed': return one row per detailed category.
+            When `parent_category_id` is provided, scope to children of that
+            parent (including direct hits on the parent row itself).
+        """
         pool = await self._pool()
         private_filter = (
             _private_tx_filter_with_idx("t", 2) if viewer_user_id is not None else ""
         )
         params: list = [month]
+        idx = 2
         if viewer_user_id is not None:
             params.append(viewer_user_id)
+            idx += 1
+
+        parent_filter_txn = ""
+        parent_filter_split = ""
+        if rollup == "detailed" and parent_category_id is not None:
+            params.append(parent_category_id)
+            parent_filter_txn = (
+                f" AND (t.category_id = ${idx} "
+                f"OR t.category_id IN (SELECT id FROM categories WHERE parent_id = ${idx}))"
+            )
+            parent_filter_split = (
+                f" AND (ts.category_id = ${idx} "
+                f"OR ts.category_id IN (SELECT id FROM categories WHERE parent_id = ${idx}))"
+            )
+            idx += 1
+
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
@@ -123,6 +157,7 @@ class ReportsRepository:
                       AND NOT EXISTS (SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id)
                       {_sandbox_tx_filter("t")}
                       {private_filter}
+                      {parent_filter_txn}
                     GROUP BY t.category_id
 
                     UNION ALL
@@ -135,11 +170,50 @@ class ReportsRepository:
                       AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
                       {_sandbox_tx_filter("t")}
                       {private_filter}
+                      {parent_filter_split}
                     GROUP BY ts.category_id
                 ),
+                actual_enriched AS (
+                    SELECT
+                        a.category_id,
+                        a.amount_cents,
+                        c.parent_id,
+                        c.name AS self_name,
+                        c.color AS self_color
+                    FROM actual a
+                    LEFT JOIN categories c ON c.id = a.category_id
+                )
+                """
+                + (
+                    """,
+                agg AS (
+                    SELECT
+                        COALESCE(parent_id, category_id) AS bucket_id,
+                        SUM(amount_cents) AS amount_cents,
+                        COUNT(DISTINCT CASE WHEN parent_id IS NOT NULL THEN category_id END) AS child_hits
+                    FROM actual_enriched
+                    GROUP BY COALESCE(parent_id, category_id)
+                ),
+                total AS (SELECT SUM(amount_cents) AS total FROM agg)
+                SELECT
+                    agg.bucket_id AS category_id,
+                    COALESCE(c.name, 'Uncategorized') AS category_name,
+                    agg.amount_cents,
+                    CASE WHEN total.total > 0 THEN ROUND(agg.amount_cents::numeric / total.total * 100, 1) ELSE 0 END AS percent,
+                    c.color AS color,
+                    'p:' || COALESCE(agg.bucket_id::text, 'null') AS bucket_key,
+                    c.parent_id AS parent_category_id,
+                    COALESCE(agg.child_hits, 0)::int AS children_count
+                FROM agg
+                CROSS JOIN total
+                LEFT JOIN categories c ON c.id = agg.bucket_id
+                ORDER BY agg.amount_cents DESC
+                """
+                    if rollup == "primary"
+                    else """,
                 agg AS (
                     SELECT category_id, SUM(amount_cents) AS amount_cents
-                    FROM actual
+                    FROM actual_enriched
                     GROUP BY category_id
                 ),
                 total AS (SELECT SUM(amount_cents) AS total FROM agg)
@@ -147,12 +221,17 @@ class ReportsRepository:
                     agg.category_id,
                     COALESCE(c.name, 'Uncategorized') AS category_name,
                     agg.amount_cents,
-                    CASE WHEN total.total > 0 THEN ROUND(agg.amount_cents::numeric / total.total * 100, 1) ELSE 0 END AS percent
+                    CASE WHEN total.total > 0 THEN ROUND(agg.amount_cents::numeric / total.total * 100, 1) ELSE 0 END AS percent,
+                    c.color AS color,
+                    'c:' || COALESCE(agg.category_id::text, 'null') AS bucket_key,
+                    c.parent_id AS parent_category_id,
+                    0 AS children_count
                 FROM agg
                 CROSS JOIN total
                 LEFT JOIN categories c ON c.id = agg.category_id
                 ORDER BY agg.amount_cents DESC
-                """,
+                """
+                ),
                 *params,
             )
         return [dict(r) for r in rows]

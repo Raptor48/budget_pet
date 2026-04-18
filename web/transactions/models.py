@@ -74,6 +74,8 @@ class TransactionOut(BaseModel):
     account_mask: Optional[str] = None
     # Joined from users via accounts.user_id
     owner_username: Optional[str] = None
+    # Derived display title — short, human-friendly. See web/transactions/display.py.
+    display_title: Optional[str] = None
 
     class Config:
         from_attributes = True

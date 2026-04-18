@@ -112,6 +112,44 @@ class CategoriesRepository:
             )
         return result != "DELETE 0"
 
+    async def _ensure_primary_category_id(self, conn, pfc_primary: str) -> Optional[int]:
+        """
+        Upsert a primary-only category row for ``pfc_primary`` and return its id.
+        Idempotent. Invariant: primary rows have ``plaid_pfc_detailed IS NULL``
+        and ``parent_id IS NULL``.
+        """
+        if not pfc_primary:
+            return None
+        row = await conn.fetchrow(
+            """
+            SELECT id FROM categories
+            WHERE plaid_pfc_primary = $1 AND plaid_pfc_detailed IS NULL
+            ORDER BY CASE WHEN source = 'plaid_pfc' THEN 0 ELSE 1 END, id
+            LIMIT 1
+            """,
+            pfc_primary,
+        )
+        if row:
+            return row["id"]
+        label = PFC_PRIMARY_LABELS.get(pfc_primary, _pretty_name(pfc_primary, pfc_primary))
+        inserted = await conn.fetchrow(
+            """
+            INSERT INTO categories (name, plaid_pfc_primary, plaid_pfc_detailed, source)
+            VALUES ($1, $2, NULL, 'plaid_pfc')
+            ON CONFLICT (name) DO NOTHING
+            RETURNING id
+            """,
+            label,
+            pfc_primary,
+        )
+        if inserted:
+            return inserted["id"]
+        # Name collided with a pre-existing row (likely a custom row).
+        fallback = await conn.fetchrow(
+            "SELECT id FROM categories WHERE name = $1", label
+        )
+        return fallback["id"] if fallback else None
+
     async def resolve_category(
         self,
         pfc_detailed: Optional[str],
@@ -120,7 +158,8 @@ class CategoriesRepository:
     ) -> Optional[int]:
         """
         Return category id for a given PFC detailed value.
-        Auto-creates a new category row (source=plaid_pfc) if none exists yet.
+        Auto-creates a new category row (source=plaid_pfc) if none exists yet and
+        ensures the row is linked to its primary-parent via ``parent_id``.
         Returns None if both pfc_detailed and pfc_primary are None.
         """
         if not pfc_detailed and not pfc_primary:
@@ -128,34 +167,43 @@ class CategoriesRepository:
 
         pool = await self._pool()
         async with pool.acquire() as conn:
-            # 1. Try exact match on plaid_pfc_detailed
+            parent_id = (
+                await self._ensure_primary_category_id(conn, pfc_primary)
+                if pfc_primary
+                else None
+            )
+
+            # 1. Primary-only request → return the parent row id.
+            if pfc_primary and not pfc_detailed:
+                return parent_id
+
+            # 2. Try exact match on plaid_pfc_detailed
             if pfc_detailed:
                 row = await conn.fetchrow(
-                    "SELECT id FROM categories WHERE plaid_pfc_detailed = $1", pfc_detailed
+                    "SELECT id, parent_id FROM categories WHERE plaid_pfc_detailed = $1",
+                    pfc_detailed,
                 )
                 if row:
+                    if parent_id and row["parent_id"] != parent_id:
+                        await conn.execute(
+                            "UPDATE categories SET parent_id = $2 WHERE id = $1",
+                            row["id"],
+                            parent_id,
+                        )
                     return row["id"]
 
-            # 2. Try match on primary if no detailed match
-            if pfc_primary and not pfc_detailed:
-                row = await conn.fetchrow(
-                    "SELECT id FROM categories WHERE plaid_pfc_primary = $1 AND plaid_pfc_detailed IS NULL",
-                    pfc_primary,
-                )
-                if row:
-                    return row["id"]
-
-            # 3. Auto-create from Plaid PFC (never overwrite a custom row on name conflict)
+            # 3. Auto-create detailed row (source=plaid_pfc) and link to parent.
             name = _pretty_name(pfc_detailed or pfc_primary or "Other", pfc_primary)
             row = await conn.fetchrow(
                 """
-                INSERT INTO categories (name, plaid_pfc_primary, plaid_pfc_detailed, pfc_icon_url, source)
-                VALUES ($1, $2, $3, $4, 'plaid_pfc')
+                INSERT INTO categories (name, plaid_pfc_primary, plaid_pfc_detailed, pfc_icon_url, source, parent_id)
+                VALUES ($1, $2, $3, $4, 'plaid_pfc', $5)
                 ON CONFLICT (name) DO UPDATE SET
                     plaid_pfc_primary = EXCLUDED.plaid_pfc_primary,
                     plaid_pfc_detailed = EXCLUDED.plaid_pfc_detailed,
                     pfc_icon_url = EXCLUDED.pfc_icon_url,
-                    source = 'plaid_pfc'
+                    source = 'plaid_pfc',
+                    parent_id = COALESCE(categories.parent_id, EXCLUDED.parent_id)
                 WHERE categories.source = 'plaid_pfc'
                 RETURNING id
                 """,
@@ -163,6 +211,7 @@ class CategoriesRepository:
                 pfc_primary,
                 pfc_detailed,
                 pfc_icon_url,
+                parent_id,
             )
             if row:
                 return row["id"]
@@ -172,14 +221,4 @@ class CategoriesRepository:
                 )
                 if row:
                     return row["id"]
-            if pfc_primary:
-                row = await conn.fetchrow(
-                    """
-                    SELECT id FROM categories
-                    WHERE plaid_pfc_primary = $1 AND plaid_pfc_detailed IS NULL AND source = 'plaid_pfc'
-                    """,
-                    pfc_primary,
-                )
-                if row:
-                    return row["id"]
-            return None
+            return parent_id

@@ -408,6 +408,116 @@ async def _migrate_v21_addons(conn) -> None:
     )
 
 
+async def _migrate_categories_parent_id(conn) -> None:
+    """
+    Add categories.parent_id (self-FK) + index, then idempotently backfill a
+    primary-only row for every distinct plaid_pfc_primary and link each detailed
+    PFC row to its primary parent. Safe to run multiple times.
+
+    Invariant: depth ≤ 2. Primary rows have parent_id IS NULL; detail rows
+    reference their primary parent.
+    """
+    from web.categories.repo import PFC_PRIMARY_LABELS, _pretty_name
+
+    async with conn.transaction():
+        await _ddl(
+            conn,
+            "ALTER TABLE categories ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES categories(id) ON DELETE SET NULL",
+        )
+        await _ddl(
+            conn,
+            "CREATE INDEX IF NOT EXISTS idx_categories_parent_id ON categories(parent_id)",
+        )
+
+        # CHECK: a row cannot be its own parent. Depth-2 invariant is enforced
+        # in `resolve_category`; a SQL-level trigger is overkill for that.
+        chk = await conn.fetchval(
+            "SELECT 1 FROM pg_constraint WHERE conname = 'categories_parent_not_self_chk'"
+        )
+        if not chk:
+            try:
+                await _ddl(
+                    conn,
+                    "ALTER TABLE categories ADD CONSTRAINT categories_parent_not_self_chk CHECK (parent_id IS NULL OR parent_id <> id)",
+                )
+            except Exception as exc:
+                logger.warning("categories parent self-ref check skipped: %s", exc)
+
+        # 1. Upsert a primary-only category row for every known PFC primary.
+        #    A row is considered a primary-parent if plaid_pfc_primary matches
+        #    and plaid_pfc_detailed IS NULL. Reuse it if it already exists;
+        #    otherwise insert with the human-readable name.
+        #    We never overwrite custom-sourced rows that happen to share a name.
+        for primary_code, label in PFC_PRIMARY_LABELS.items():
+            existing = await conn.fetchval(
+                """
+                SELECT id FROM categories
+                WHERE plaid_pfc_primary = $1 AND plaid_pfc_detailed IS NULL
+                ORDER BY CASE WHEN source = 'plaid_pfc' THEN 0 ELSE 1 END, id
+                LIMIT 1
+                """,
+                primary_code,
+            )
+            if existing:
+                continue
+            # No primary-only row yet — insert one. If `name` collides with a
+            # custom row we just skip (DO NOTHING); the child rows will still
+            # work but roll-up will fall back to self.
+            await conn.execute(
+                """
+                INSERT INTO categories (name, plaid_pfc_primary, plaid_pfc_detailed, source)
+                VALUES ($1, $2, NULL, 'plaid_pfc')
+                ON CONFLICT (name) DO NOTHING
+                """,
+                label,
+                primary_code,
+            )
+
+        # 2. Link every detailed Plaid row to its primary parent. Idempotent.
+        await _ddl(
+            conn,
+            """
+            UPDATE categories AS c
+            SET parent_id = p.id
+            FROM categories p
+            WHERE c.plaid_pfc_primary IS NOT NULL
+              AND c.plaid_pfc_detailed IS NOT NULL
+              AND p.plaid_pfc_primary = c.plaid_pfc_primary
+              AND p.plaid_pfc_detailed IS NULL
+              AND p.source = 'plaid_pfc'
+              AND c.id <> p.id
+              AND (c.parent_id IS DISTINCT FROM p.id)
+            """,
+        )
+
+    # Silence unused-import warning; helper is kept importable from this module.
+    del _pretty_name
+
+
+async def _migrate_recurring_price_change_signed(conn) -> None:
+    """
+    One-shot backfill to rewrite `recurring_streams.price_change_pct` as a
+    **signed** percentage: positive = last > avg (got more expensive), negative
+    = cheaper. Historically the column stored ABS(), losing direction.
+
+    Idempotent: re-applying produces the same result for each row.
+    """
+    await _ddl(
+        conn,
+        """
+        UPDATE recurring_streams
+        SET price_change_pct = ROUND(
+            (last_amount_cents - average_amount_cents)::numeric
+            / NULLIF(ABS(average_amount_cents), 0) * 100,
+            2
+        )
+        WHERE last_amount_cents IS NOT NULL
+          AND average_amount_cents IS NOT NULL
+          AND average_amount_cents <> 0
+        """,
+    )
+
+
 async def _migrate_merchant_rules_global_family(conn) -> None:
     """
     One global rule per merchant_key (family-wide). Legacy table had (user_id, merchant_key).
@@ -464,4 +574,6 @@ async def run_v2_migrations(pool) -> None:
         await _migrate_categories_source(conn)
         await _migrate_v21_addons(conn)
         await _migrate_merchant_rules_global_family(conn)
+        await _migrate_categories_parent_id(conn)
+        await _migrate_recurring_price_change_signed(conn)
     logger.info("V2 database migrations completed successfully.")

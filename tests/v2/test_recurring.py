@@ -1,5 +1,6 @@
 """Tests for web/recurring/ — price change detection and forecast calculations."""
 from datetime import date, timedelta
+from decimal import Decimal
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -83,3 +84,123 @@ class TestRecurringPriceChange:
         # Verify threshold 0.10 is passed as argument
         args = call_args.args
         assert any(isinstance(a, float) and abs(a - 0.10) < 0.001 for a in args)
+
+
+class TestListStreamsEnrichment:
+    """`list_streams` must JOIN accounts/users/categories and populate the
+    enrichment fields the UI depends on (AccountChip, primary Category column,
+    normalized display_title)."""
+
+    @pytest.mark.asyncio
+    async def test_enriches_with_account_and_primary_category(self):
+        from web.recurring.repo import RecurringRepository
+
+        conn = AsyncMock()
+        pool = make_mock_pool(conn)
+        conn.fetch.return_value = [
+            {
+                "id": 1,
+                "plaid_stream_id": "abc",
+                "account_id": 42,
+                "direction": "outflow",
+                "description": "NFLX.COM 4029 LOS GATOS CA",
+                "merchant_name": "Netflix",
+                "frequency": "MONTHLY",
+                "average_amount_cents": -1549,
+                "last_amount_cents": -2299,
+                "currency": "USD",
+                "pfc_primary": "ENTERTAINMENT",
+                "pfc_detailed": "ENTERTAINMENT_TV_AND_MOVIES",
+                "first_date": None,
+                "last_date": None,
+                "is_active": True,
+                "status": "MATURE",
+                "category_id": 12,
+                "user_label": None,
+                "price_change_pct": Decimal("48.42"),
+                "last_synced_at": None,
+                "stream_source": "plaid",
+                "account_name": "Chase Sapphire",
+                "account_mask": "4242",
+                "owner_username": "denis",
+                "category_parent_id": 5,
+                "primary_category_id": 5,
+                "primary_category_name": "Entertainment",
+                "primary_category_color": "#9333ea",
+            }
+        ]
+        with patch("web.recurring.repo.get_pool", AsyncMock(return_value=pool)):
+            rows = await RecurringRepository().list_streams()
+
+        assert len(rows) == 1
+        r = rows[0]
+        assert r["account_name"] == "Chase Sapphire"
+        assert r["account_mask"] == "4242"
+        assert r["owner_username"] == "denis"
+        assert r["primary_category_id"] == 5
+        assert r["primary_category_name"] == "Entertainment"
+        assert r["primary_category_color"] == "#9333ea"
+        assert r["display_title"] == "Netflix"
+        assert "category_parent_id" not in r
+
+
+class TestUpsertSignedPriceChangePct:
+    """`price_change_pct` must be signed so the UI can colour drops vs hikes."""
+
+    @pytest.mark.asyncio
+    async def test_price_decrease_is_negative(self):
+        from web.recurring.repo import RecurringRepository
+
+        conn = AsyncMock()
+        pool = make_mock_pool(conn)
+        with patch("web.recurring.repo.get_pool", AsyncMock(return_value=pool)):
+            await RecurringRepository().upsert_streams(
+                [
+                    {
+                        "stream_id": "abc",
+                        "account_id": "plaid_acct_1",
+                        "description": "Adobe CC",
+                        "average_amount": {"amount": 29.02, "iso_currency_code": "USD"},
+                        "last_amount": {"amount": 21.76, "iso_currency_code": "USD"},
+                        "frequency": "MONTHLY",
+                        "is_active": True,
+                    }
+                ],
+                direction="outflow",
+                account_id_map={"plaid_acct_1": 42},
+            )
+
+        execute_call = conn.execute.call_args
+        assert execute_call is not None
+        pct_arg = execute_call.args[16]
+        assert pct_arg is not None and pct_arg < 0, (
+            f"expected negative signed pct for a price drop, got {pct_arg}"
+        )
+        assert abs(pct_arg + 25.02) < 0.1  # ~(21.76 - 29.02) / 29.02 * 100
+
+    @pytest.mark.asyncio
+    async def test_price_increase_is_positive(self):
+        from web.recurring.repo import RecurringRepository
+
+        conn = AsyncMock()
+        pool = make_mock_pool(conn)
+        with patch("web.recurring.repo.get_pool", AsyncMock(return_value=pool)):
+            await RecurringRepository().upsert_streams(
+                [
+                    {
+                        "stream_id": "xyz",
+                        "account_id": "plaid_acct_1",
+                        "description": "Netflix",
+                        "average_amount": {"amount": 15.49, "iso_currency_code": "USD"},
+                        "last_amount": {"amount": 22.99, "iso_currency_code": "USD"},
+                        "frequency": "MONTHLY",
+                        "is_active": True,
+                    }
+                ],
+                direction="outflow",
+                account_id_map={"plaid_acct_1": 42},
+            )
+
+        pct_arg = conn.execute.call_args.args[16]
+        assert pct_arg is not None and pct_arg > 0
+        assert abs(pct_arg - 48.42) < 0.1  # ~(22.99 - 15.49) / 15.49 * 100

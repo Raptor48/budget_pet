@@ -27,7 +27,7 @@ import {
 import { budgetsApi, categoriesApi, ApiError } from "@/lib/api";
 import { confirm } from "@/lib/notify";
 import { cn, formatCurrency } from "@/lib/utils";
-import type { BudgetProgress } from "@/types/v2";
+import type { BudgetProgress, Category } from "@/types/v2";
 import { ChevronLeft, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
 
 type BudgetRow = BudgetProgress & { budgetId: number };
@@ -53,7 +53,13 @@ export function BudgetsView() {
   const queryClient = useQueryClient();
   const [month, setMonth] = useState(() => format(new Date(), "yyyy-MM"));
   const [addOpen, setAddOpen] = useState(false);
-  const [createCategoryId, setCreateCategoryId] = useState<string>("");
+  /**
+   * Budget creation works in two steps so users can pick a primary bucket
+   * (default) or opt-in to "More precise" subcategory budgeting.
+   */
+  const [createPrimaryId, setCreatePrimaryId] = useState<string>("");
+  const [createDetailId, setCreateDetailId] = useState<string>("");
+  const [createPrecise, setCreatePrecise] = useState(false);
   const [createMonth, setCreateMonth] = useState(() => format(new Date(), "yyyy-MM"));
   const [createAmount, setCreateAmount] = useState("");
   const [editOpen, setEditOpen] = useState(false);
@@ -89,10 +95,108 @@ export function BudgetsView() {
 
   const categoriesWithBudgetIds = useMemo(() => new Set(rows.map((r) => r.category_id)), [rows]);
 
-  const createCategoriesOptions = useMemo(() => {
+  const categoriesById = useMemo(() => {
+    const map = new Map<number, Category>();
+    for (const c of categoriesQuery.data ?? []) map.set(c.id, c);
+    return map;
+  }, [categoriesQuery.data]);
+
+  const childrenByParent = useMemo(() => {
+    const map = new Map<number, Category[]>();
+    for (const c of categoriesQuery.data ?? []) {
+      if (c.parent_id == null) continue;
+      const arr = map.get(c.parent_id) ?? [];
+      arr.push(c);
+      map.set(c.parent_id, arr);
+    }
+    for (const arr of map.values()) arr.sort((a, b) => a.name.localeCompare(b.name));
+    return map;
+  }, [categoriesQuery.data]);
+
+  /**
+   * Group budget rows by their primary bucket so parent budgets are rendered
+   * before their detailed siblings and children appear indented underneath.
+   * Orphans (detailed categories whose parent has no data in `categories`) are
+   * still rendered as standalone cards.
+   */
+  const groupedRows = useMemo(() => {
+    const groups: Array<{ key: string; parent: BudgetRow | null; children: BudgetRow[] }> = [];
+    const byParentId = new Map<number, { parent: BudgetRow | null; children: BudgetRow[] }>();
+
+    for (const row of rows) {
+      const cat = categoriesById.get(row.category_id);
+      const parentId = cat?.parent_id ?? null;
+
+      if (parentId == null) {
+        const existing = byParentId.get(row.category_id);
+        if (existing) {
+          existing.parent = row;
+        } else {
+          byParentId.set(row.category_id, { parent: row, children: [] });
+        }
+      } else {
+        const existing = byParentId.get(parentId);
+        if (existing) {
+          existing.children.push(row);
+        } else {
+          byParentId.set(parentId, { parent: null, children: [row] });
+        }
+      }
+    }
+
+    for (const [parentId, g] of byParentId.entries()) {
+      groups.push({ key: `p:${parentId}`, parent: g.parent, children: g.children });
+    }
+
+    groups.sort((a, b) => {
+      const na = a.parent?.category_name ?? a.children[0]?.category_name ?? "";
+      const nb = b.parent?.category_name ?? b.children[0]?.category_name ?? "";
+      return na.localeCompare(nb);
+    });
+    for (const g of groups) {
+      g.children.sort((a, b) => a.category_name.localeCompare(b.category_name));
+    }
+    return groups;
+  }, [rows, categoriesById]);
+
+  const primaryOptions = useMemo(() => {
     const all = categoriesQuery.data ?? [];
-    return all.filter((c) => !categoriesWithBudgetIds.has(c.id));
+    return all
+      .filter((c) => c.parent_id == null)
+      .filter((c) => !categoriesWithBudgetIds.has(c.id))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [categoriesQuery.data, categoriesWithBudgetIds]);
+
+  const detailOptions = useMemo(() => {
+    if (!createPrecise || !createPrimaryId) return [] as Category[];
+    const parentId = Number(createPrimaryId);
+    const kids = childrenByParent.get(parentId) ?? [];
+    return kids.filter((c) => !categoriesWithBudgetIds.has(c.id));
+  }, [createPrecise, createPrimaryId, childrenByParent, categoriesWithBudgetIds]);
+
+  /**
+   * Primary can be locked if it already has a child budget for this month
+   * (server-side would 409 anyway — we prevent it client-side too).
+   */
+  const primaryHasChildBudgetForMonth = useMemo(() => {
+    const set = new Set<number>();
+    for (const r of rows) {
+      if (r.month !== createMonth) continue;
+      const cat = categoriesById.get(r.category_id);
+      if (cat?.parent_id != null) set.add(cat.parent_id);
+    }
+    return set;
+  }, [rows, createMonth, categoriesById]);
+
+  const childHasParentBudgetForMonth = useMemo(() => {
+    const set = new Set<number>();
+    for (const r of rows) {
+      if (r.month !== createMonth) continue;
+      const cat = categoriesById.get(r.category_id);
+      if (cat?.parent_id == null) set.add(r.category_id);
+    }
+    return set;
+  }, [rows, createMonth, categoriesById]);
 
   const invalidateBudgets = () => {
     queryClient.invalidateQueries({ queryKey: ["budgets"] });
@@ -100,21 +204,28 @@ export function BudgetsView() {
 
   const createMutation = useMutation({
     mutationFn: () => {
-      const category_id = Number(createCategoryId);
+      const primaryId = Number(createPrimaryId);
+      const detailId = createPrecise && createDetailId ? Number(createDetailId) : NaN;
+      const targetId = Number.isFinite(detailId) ? detailId : primaryId;
       const budget_cents = dollarsToCents(createAmount);
-      if (!Number.isFinite(category_id) || category_id <= 0) {
+      if (!Number.isFinite(primaryId) || primaryId <= 0) {
         return Promise.reject(new Error("Choose a category."));
+      }
+      if (createPrecise && (!Number.isFinite(detailId) || detailId <= 0)) {
+        return Promise.reject(new Error("Choose a subcategory or uncheck ‘More precise’."));
       }
       if (budget_cents == null) {
         return Promise.reject(new Error("Enter a positive amount."));
       }
-      return budgetsApi.create({ category_id, month: createMonth, budget_cents });
+      return budgetsApi.create({ category_id: targetId, month: createMonth, budget_cents });
     },
     onSuccess: () => {
       invalidateBudgets();
       setAddOpen(false);
       setCreateAmount("");
-      setCreateCategoryId("");
+      setCreatePrimaryId("");
+      setCreateDetailId("");
+      setCreatePrecise(false);
     },
   });
 
@@ -147,7 +258,9 @@ export function BudgetsView() {
 
   const openAdd = () => {
     setCreateMonth(month);
-    setCreateCategoryId("");
+    setCreatePrimaryId("");
+    setCreateDetailId("");
+    setCreatePrecise(false);
     setCreateAmount("");
     createMutation.reset();
     setAddOpen(true);
@@ -240,66 +353,64 @@ export function BudgetsView() {
           </CardHeader>
         </Card>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {rows.map((p) => {
-            const tone = progressTone(p);
-            const barValue = Math.min(Math.max(p.percent_used, 0), 100);
-            const indicatorClass =
-              tone === "red"
-                ? "[&>div]:bg-destructive"
-                : tone === "yellow"
-                  ? "[&>div]:bg-amber-500"
-                  : "[&>div]:bg-emerald-600";
-
+        <div className="space-y-6">
+          {groupedRows.map((group) => {
+            const parent = group.parent;
+            const hasKids = group.children.length > 0;
             return (
-              <Card key={p.budgetId} className="overflow-hidden">
-                <CardHeader className="pb-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="size-3 shrink-0 rounded-full border"
-                        style={{ backgroundColor: p.category_color }}
-                        title="Category color"
+              <section key={group.key} className="space-y-3">
+                {parent ? (
+                  <BudgetCard
+                    row={parent}
+                    variant="parent"
+                    subtitle={
+                      hasKids
+                        ? `Parent bucket · rolls up ${group.children.length} subcategory ${
+                            group.children.length === 1 ? "budget" : "budgets"
+                          }`
+                        : "Parent bucket"
+                    }
+                    onEdit={openEdit}
+                    onDelete={handleDelete}
+                    deleting={deleteMutation.isPending}
+                  />
+                ) : hasKids ? (
+                  <header className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    <span
+                      className="size-2.5 shrink-0 rounded-full border"
+                      style={{ backgroundColor: group.children[0]?.category_color }}
+                    />
+                    <span>
+                      {categoriesById.get(group.children[0]?.category_id)
+                        ? categoriesById
+                            .get(group.children[0]!.category_id)
+                            ?.parent_id != null
+                          ? (categoriesById.get(
+                              categoriesById.get(group.children[0]!.category_id)!
+                                .parent_id!,
+                            )?.name ?? "Other")
+                          : "Other"
+                        : "Other"}
+                    </span>
+                    <span className="text-muted-foreground/60">· subcategory budgets</span>
+                  </header>
+                ) : null}
+
+                {hasKids ? (
+                  <div className="grid gap-3 pl-4 border-l-2 border-muted sm:grid-cols-2 xl:grid-cols-3">
+                    {group.children.map((child) => (
+                      <BudgetCard
+                        key={child.budgetId}
+                        row={child}
+                        variant="child"
+                        onEdit={openEdit}
+                        onDelete={handleDelete}
+                        deleting={deleteMutation.isPending}
                       />
-                      <CardTitle className="text-base leading-snug">{p.category_name}</CardTitle>
-                    </div>
-                    <Badge variant="outline" className="tabular-nums">
-                      {p.percent_used.toFixed(0)}% used
-                    </Badge>
+                    ))}
                   </div>
-                  <CardDescription className="tabular-nums">
-                    Budget {formatCurrency(p.budget_cents)} · Spent {formatCurrency(p.actual_cents)}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <Progress value={barValue} className={cn("h-2", indicatorClass)} />
-                  {p.remaining_cents < 0 ? (
-                    <p className="text-destructive text-sm font-medium">
-                      Over by {formatCurrency(-p.remaining_cents)}
-                    </p>
-                  ) : (
-                    <p className="text-muted-foreground text-sm">
-                      Remaining {formatCurrency(p.remaining_cents)}
-                    </p>
-                  )}
-                </CardContent>
-                <CardFooter className="flex justify-end gap-2 border-t pt-4">
-                  <Button type="button" size="sm" variant="outline" onClick={() => openEdit(p)}>
-                    <Pencil className="size-3.5" />
-                    Edit
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="destructive"
-                    onClick={() => handleDelete(p)}
-                    disabled={deleteMutation.isPending}
-                  >
-                    <Trash2 className="size-3.5" />
-                    Delete
-                  </Button>
-                </CardFooter>
-              </Card>
+                ) : null}
+              </section>
             );
           })}
         </div>
@@ -313,26 +424,87 @@ export function BudgetsView() {
           </DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="grid gap-2">
-              <Label htmlFor="budget-category">Category</Label>
-              {createCategoriesOptions.length === 0 ? (
+              <Label htmlFor="budget-category">Primary category</Label>
+              {primaryOptions.length === 0 ? (
                 <p className="text-muted-foreground text-sm">
-                  Every category already has a budget for the selected month.
+                  Every primary bucket already has a budget for the selected month.
                 </p>
               ) : (
-                <Select value={createCategoryId} onValueChange={setCreateCategoryId}>
+                <Select
+                  value={createPrimaryId}
+                  onValueChange={(v) => {
+                    setCreatePrimaryId(v);
+                    setCreateDetailId("");
+                  }}
+                >
                   <SelectTrigger id="budget-category" className="w-full">
-                    <SelectValue placeholder="Select category" />
+                    <SelectValue placeholder="Select primary bucket" />
                   </SelectTrigger>
                   <SelectContent>
-                    {createCategoriesOptions.map((c) => (
-                      <SelectItem key={c.id} value={String(c.id)}>
-                        {c.name}
-                      </SelectItem>
-                    ))}
+                    {primaryOptions.map((c) => {
+                      const blockedByChild = primaryHasChildBudgetForMonth.has(c.id);
+                      return (
+                        <SelectItem key={c.id} value={String(c.id)} disabled={blockedByChild}>
+                          {c.name}
+                          {blockedByChild ? " — has subcategory budgets" : ""}
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               )}
             </div>
+
+            <div className="flex items-start gap-2">
+              <input
+                id="budget-precise"
+                type="checkbox"
+                className="mt-1 size-4 rounded border-border"
+                checked={createPrecise}
+                onChange={(e) => {
+                  setCreatePrecise(e.target.checked);
+                  if (!e.target.checked) setCreateDetailId("");
+                }}
+                disabled={
+                  !createPrimaryId || childHasParentBudgetForMonth.has(Number(createPrimaryId))
+                }
+              />
+              <div className="space-y-0.5">
+                <Label htmlFor="budget-precise" className="cursor-pointer">
+                  More precise — budget a subcategory
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Budget a specific Plaid subcategory (e.g. “Rent” inside Rent & Utilities) instead
+                  of the full primary bucket. You can’t mix parent and subcategory budgets for the
+                  same month.
+                </p>
+              </div>
+            </div>
+
+            {createPrecise && createPrimaryId ? (
+              <div className="grid gap-2">
+                <Label htmlFor="budget-detail">Subcategory</Label>
+                {detailOptions.length === 0 ? (
+                  <p className="text-muted-foreground text-sm">
+                    No unbudgeted subcategories under this primary bucket.
+                  </p>
+                ) : (
+                  <Select value={createDetailId} onValueChange={setCreateDetailId}>
+                    <SelectTrigger id="budget-detail" className="w-full">
+                      <SelectValue placeholder="Select subcategory" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {detailOptions.map((c) => (
+                        <SelectItem key={c.id} value={String(c.id)}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+            ) : null}
+
             <div className="grid gap-2">
               <Label htmlFor="budget-month">Month</Label>
               <Input
@@ -362,8 +534,9 @@ export function BudgetsView() {
               onClick={() => createMutation.mutate()}
               disabled={
                 createMutation.isPending ||
-                !createCategoryId ||
-                createCategoriesOptions.length === 0
+                !createPrimaryId ||
+                (createPrecise && !createDetailId) ||
+                primaryOptions.length === 0
               }
             >
               Save
@@ -406,5 +579,93 @@ export function BudgetsView() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+/**
+ * Renders a single budget card. `variant="parent"` adds a "Parent bucket" badge
+ * and slightly more prominent styling; `variant="child"` is the compact form
+ * used inside a parent group's indented list.
+ */
+function BudgetCard({
+  row,
+  variant,
+  subtitle,
+  onEdit,
+  onDelete,
+  deleting,
+}: {
+  row: BudgetRow;
+  variant: "parent" | "child";
+  subtitle?: string;
+  onEdit: (row: BudgetRow) => void;
+  onDelete: (row: BudgetRow) => void;
+  deleting: boolean;
+}) {
+  const tone = progressTone(row);
+  const barValue = Math.min(Math.max(row.percent_used, 0), 100);
+  const indicatorClass =
+    tone === "red"
+      ? "[&>div]:bg-destructive"
+      : tone === "yellow"
+        ? "[&>div]:bg-amber-500"
+        : "[&>div]:bg-emerald-600";
+  return (
+    <Card className={cn("overflow-hidden", variant === "parent" && "border-primary/20")}> 
+      <CardHeader className="pb-2">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span
+              className="size-3 shrink-0 rounded-full border"
+              style={{ backgroundColor: row.category_color }}
+              title="Category color"
+            />
+            <CardTitle className="text-base leading-snug">{row.category_name}</CardTitle>
+            {variant === "parent" ? (
+              <Badge variant="secondary" className="ml-1 text-[10px] uppercase tracking-wide">
+                Parent
+              </Badge>
+            ) : null}
+          </div>
+          <Badge variant="outline" className="tabular-nums">
+            {row.percent_used.toFixed(0)}% used
+          </Badge>
+        </div>
+        <CardDescription className="tabular-nums">
+          Budget {formatCurrency(row.budget_cents)} · Spent {formatCurrency(row.actual_cents)}
+        </CardDescription>
+        {subtitle ? (
+          <p className="text-xs text-muted-foreground/80">{subtitle}</p>
+        ) : null}
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <Progress value={barValue} className={cn("h-2", indicatorClass)} />
+        {row.remaining_cents < 0 ? (
+          <p className="text-destructive text-sm font-medium">
+            Over by {formatCurrency(-row.remaining_cents)}
+          </p>
+        ) : (
+          <p className="text-muted-foreground text-sm">
+            Remaining {formatCurrency(row.remaining_cents)}
+          </p>
+        )}
+      </CardContent>
+      <CardFooter className="flex justify-end gap-2 border-t pt-4">
+        <Button type="button" size="sm" variant="outline" onClick={() => onEdit(row)}>
+          <Pencil className="size-3.5" />
+          Edit
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="destructive"
+          onClick={() => onDelete(row)}
+          disabled={deleting}
+        >
+          <Trash2 className="size-3.5" />
+          Delete
+        </Button>
+      </CardFooter>
+    </Card>
   );
 }

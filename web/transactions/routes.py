@@ -17,6 +17,7 @@ from .models import (
 from web.env_flags import reports_include_plaid_sandbox
 
 from web.accounts.repo import AccountsRepository
+from web.transactions.display import normalize_transaction_title
 
 from .repo import TransactionsRepository
 from .splits_repo import SplitsRepository
@@ -33,14 +34,15 @@ def _splits() -> SplitsRepository:
 
 
 async def _enrich(txn: dict, repo: TransactionsRepository) -> dict:
-    """Attach tags and splits to a transaction dict."""
+    """Attach tags, splits and display_title to a transaction dict."""
     txn["tags"] = await repo.get_tags_for_transaction(txn["id"])
     txn["splits"] = await repo.get_splits_for_transaction(txn["id"])
+    txn["display_title"] = normalize_transaction_title(txn)
     return txn
 
 
 async def _enrich_many(rows: List[Dict[str, Any]], repo: TransactionsRepository) -> List[Dict[str, Any]]:
-    """Attach tags and splits for many transactions (two queries total)."""
+    """Attach tags, splits and display_title for many transactions (two queries total)."""
     if not rows:
         return rows
     ids = [r["id"] for r in rows]
@@ -50,6 +52,7 @@ async def _enrich_many(rows: List[Dict[str, Any]], repo: TransactionsRepository)
         tid = txn["id"]
         txn["tags"] = tags_map.get(tid, [])
         txn["splits"] = splits_map.get(tid, [])
+        txn["display_title"] = normalize_transaction_title(txn)
     return rows
 
 
@@ -181,7 +184,8 @@ async def export_transactions(
 
     output = io.StringIO()
     fieldnames = [
-        "id", "date", "authorized_date", "merchant_name", "name",
+        "id", "date", "authorized_date", "display_title",
+        "merchant_name", "name",
         "amount_cents", "amount", "currency", "category_id", "tags",
         "account_id", "payment_channel", "user_note", "is_pending",
         "source", "split_note", "parent_id",
@@ -195,6 +199,7 @@ async def export_transactions(
             "id": txn["id"],
             "date": txn["date"],
             "authorized_date": txn.get("authorized_date", ""),
+            "display_title": txn.get("display_title") or normalize_transaction_title(txn),
             "merchant_name": txn.get("merchant_name", ""),
             "name": txn["name"],
             "currency": txn.get("currency", "USD"),

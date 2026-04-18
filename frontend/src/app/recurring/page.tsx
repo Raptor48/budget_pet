@@ -37,9 +37,15 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Separator } from "@/components/ui/separator";
 import { recurringApi, categoriesApi, accountsApi, ApiError } from "@/lib/api";
 import { PlaidTxnAmount } from "@/components/ui/plaid-txn-amount";
+import { AccountChip } from "@/components/ui/account-chip";
+import { PriceChangeBadge, classifyPriceChange } from "@/components/ui/price-change-badge";
 import { cn } from "@/lib/utils";
+import { normalizeTransactionTitle } from "@/lib/transaction-display";
 import type { RecurringStream } from "@/types/v2";
 import { Pencil, Check, X, Plus } from "lucide-react";
+
+/** The sign of `price_change_pct` that should surface an alert (either direction). */
+const PRICE_CHANGE_THRESHOLD_PCT = 10;
 
 function formatFrequency(f: string | null): string {
   if (!f) return "—";
@@ -75,6 +81,22 @@ function parsePriceChangePct(raw: string | null): number | null {
   if (raw == null || raw === "") return null;
   const n = Number(raw);
   return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Pick the best stream title — prefers the user-edited label, then the backend
+ * normalized `display_title`, then the local title-normalizer as a fallback.
+ */
+function streamTitle(stream: RecurringStream): string {
+  const ul = stream.user_label?.trim();
+  if (ul) return ul;
+  const backendNorm = stream.display_title?.trim();
+  if (backendNorm) return backendNorm;
+  return normalizeTransactionTitle({
+    merchant_name: stream.merchant_name,
+    name: stream.description,
+    description: stream.description,
+  });
 }
 
 function annualCostCents(stream: RecurringStream): number | null {
@@ -225,11 +247,14 @@ export default function RecurringPage() {
     return (
       <div className="space-y-2">
         {rows.map((row) => {
-          const title = row.user_label?.trim() || row.description || row.merchant_name || "—";
+          const title = streamTitle(row);
           const pct = parsePriceChangePct(row.price_change_pct);
-          const showPriceWarning = pct != null && pct > 10;
+          const showPriceAlert = pct != null && Math.abs(pct) > PRICE_CHANGE_THRESHOLD_PCT;
           const annual = annualCostCents(row);
           const isEditing = editingId === row.id;
+          const categoryLabel =
+            row.primary_category_name ?? row.pfc_primary ?? null;
+          const categoryColor = row.primary_category_color ?? null;
 
           return (
             <div
@@ -295,9 +320,19 @@ export default function RecurringPage() {
                 <>
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
-                      <p className="line-clamp-2 text-sm font-medium leading-snug">{title}</p>
+                      <p
+                        className="line-clamp-2 text-sm font-medium leading-snug"
+                        title={row.description}
+                      >
+                        {title}
+                      </p>
                       {row.user_label?.trim() && row.description !== row.user_label ? (
-                        <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{row.description}</p>
+                        <p
+                          className="mt-0.5 line-clamp-2 text-xs text-muted-foreground"
+                          title={row.description}
+                        >
+                          {row.description}
+                        </p>
                       ) : null}
                     </div>
                     <Button
@@ -312,11 +347,29 @@ export default function RecurringPage() {
                       Edit
                     </Button>
                   </div>
-                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <div className="mt-2">
+                    <AccountChip
+                      accountName={row.account_name}
+                      mask={row.account_mask}
+                      owner={row.owner_username}
+                      variant="compact"
+                    />
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                     <span>{formatFrequency(row.frequency)}</span>
-                    {row.pfc_primary ? (
-                      <span className="max-w-[55%] truncate" title={row.pfc_primary}>
-                        {row.pfc_primary}
+                    {categoryLabel ? (
+                      <span
+                        className="inline-flex max-w-[55%] items-center gap-1 truncate"
+                        title={categoryLabel}
+                      >
+                        {categoryColor ? (
+                          <span
+                            className="size-2 shrink-0 rounded-full"
+                            style={{ backgroundColor: categoryColor }}
+                            aria-hidden
+                          />
+                        ) : null}
+                        <span className="truncate">{categoryLabel}</span>
                       </span>
                     ) : null}
                   </div>
@@ -350,15 +403,10 @@ export default function RecurringPage() {
                     </Badge>
                   </div>
                   <div className="mt-2 flex flex-wrap gap-1">
-                    {showPriceWarning ? (
-                      <Badge
-                        className="border-orange-500/60 bg-orange-500/15 text-[10px] text-orange-800 dark:text-orange-200"
-                        variant="outline"
-                      >
-                        Price +{pct!.toFixed(0)}%
-                      </Badge>
+                    {showPriceAlert ? (
+                      <PriceChangeBadge pct={pct} direction={row.direction} compact />
                     ) : null}
-                    {priceAlertIds.has(row.id) && !showPriceWarning ? (
+                    {priceAlertIds.has(row.id) && !showPriceAlert ? (
                       <Badge variant="outline" className="text-[10px]">
                         Price watch
                       </Badge>
@@ -379,10 +427,11 @@ export default function RecurringPage() {
         <TableHeader>
           <TableRow>
             <TableHead>Description</TableHead>
+            <TableHead>Charged to</TableHead>
             <TableHead>Frequency</TableHead>
             <TableHead className="text-right">Avg</TableHead>
             <TableHead className="text-right">Last</TableHead>
-            <TableHead>PFC</TableHead>
+            <TableHead>Category</TableHead>
             <TableHead>Status</TableHead>
             <TableHead className="text-right">Annual (est.)</TableHead>
             <TableHead className="w-[140px]" />
@@ -391,17 +440,20 @@ export default function RecurringPage() {
         <TableBody>
           {rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={8} className="text-muted-foreground h-24 text-center">
+              <TableCell colSpan={9} className="text-muted-foreground h-24 text-center">
                 No recurring streams for this tab.
               </TableCell>
             </TableRow>
           ) : (
             rows.map((row) => {
-              const title = row.user_label?.trim() || row.description || row.merchant_name || "—";
+              const title = streamTitle(row);
               const pct = parsePriceChangePct(row.price_change_pct);
-              const showPriceWarning = pct != null && pct > 10;
+              const showPriceAlert = pct != null && Math.abs(pct) > PRICE_CHANGE_THRESHOLD_PCT;
               const annual = annualCostCents(row);
               const isEditing = editingId === row.id;
+              const categoryLabel =
+                row.primary_category_name ?? row.pfc_primary ?? null;
+              const categoryColor = row.primary_category_color ?? null;
 
                 return (
                 <TableRow
@@ -441,21 +493,26 @@ export default function RecurringPage() {
                         </Select>
                       </div>
                     ) : (
-                      <div className="flex flex-col gap-1">
-                        <span className="font-medium leading-tight">{title}</span>
+                      <div className="flex min-w-0 flex-col gap-1">
+                        <span
+                          className="min-w-0 truncate font-medium leading-tight"
+                          title={row.description}
+                        >
+                          {title}
+                        </span>
                         {row.user_label?.trim() && row.description !== row.user_label ? (
-                          <span className="text-muted-foreground text-xs">{row.description}</span>
+                          <span
+                            className="min-w-0 truncate text-muted-foreground text-xs"
+                            title={row.description}
+                          >
+                            {row.description}
+                          </span>
                         ) : null}
                         <div className="flex flex-wrap gap-1">
-                          {showPriceWarning ? (
-                            <Badge
-                              className="border-orange-500/60 bg-orange-500/15 text-orange-800 dark:text-orange-200"
-                              variant="outline"
-                            >
-                              ⚠ Price changed {pct!.toFixed(0)}%
-                            </Badge>
+                          {showPriceAlert ? (
+                            <PriceChangeBadge pct={pct} direction={row.direction} />
                           ) : null}
-                          {priceAlertIds.has(row.id) && !showPriceWarning ? (
+                          {priceAlertIds.has(row.id) && !showPriceAlert ? (
                             <Badge variant="outline" className="text-xs">
                               Price watch
                             </Badge>
@@ -463,6 +520,13 @@ export default function RecurringPage() {
                         </div>
                       </div>
                     )}
+                  </TableCell>
+                  <TableCell>
+                    <AccountChip
+                      accountName={row.account_name}
+                      mask={row.account_mask}
+                      owner={row.owner_username}
+                    />
                   </TableCell>
                   <TableCell>{formatFrequency(row.frequency)}</TableCell>
                   <TableCell className="text-right tabular-nums">
@@ -472,12 +536,22 @@ export default function RecurringPage() {
                     <PlaidTxnAmount cents={row.last_amount_cents ?? 0} size="inherit" tone="flow" />
                   </TableCell>
                   <TableCell>
-                    {row.pfc_primary ? (
-                      <Badge variant="secondary" className="max-w-[160px] truncate font-normal">
-                        {row.pfc_primary}
-                      </Badge>
+                    {categoryLabel ? (
+                      <span
+                        className="inline-flex max-w-[180px] items-center gap-1.5 truncate rounded-full bg-muted/60 px-2 py-0.5 text-xs"
+                        title={categoryLabel}
+                      >
+                        {categoryColor ? (
+                          <span
+                            className="size-2 shrink-0 rounded-full"
+                            style={{ backgroundColor: categoryColor }}
+                            aria-hidden
+                          />
+                        ) : null}
+                        <span className="truncate">{categoryLabel}</span>
+                      </span>
                     ) : (
-                      "—"
+                      <span className="text-muted-foreground">—</span>
                     )}
                   </TableCell>
                   <TableCell>
@@ -559,28 +633,45 @@ export default function RecurringPage() {
           </div>
 
           {priceAlerts.length > 0 ? (
-            <Card className="border-orange-500/40 bg-orange-500/5">
+            <Card className="border-border/70 bg-muted/20">
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">Price changes</CardTitle>
                 <CardDescription>
-                  {priceAlerts.length} stream{priceAlerts.length === 1 ? "" : "s"} from{" "}
-                  <code className="text-xs">/api/recurring/price-changes</code>
+                  {priceAlerts.length} stream{priceAlerts.length === 1 ? "" : "s"} with notable
+                  movement vs long-term average (drops in green, hikes in orange).
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-wrap gap-2">
-                {priceAlerts.map((s) => (
-                  <Tooltip key={s.id}>
-                    <TooltipTrigger asChild>
-                      <Badge variant="outline" className="max-w-[240px] cursor-default truncate">
-                        {s.user_label?.trim() || s.description}
-                        {parsePriceChangePct(s.price_change_pct) != null
-                          ? ` · ${parsePriceChangePct(s.price_change_pct)!.toFixed(0)}%`
-                          : ""}
-                      </Badge>
-                    </TooltipTrigger>
-                    <TooltipContent>{s.description}</TooltipContent>
-                  </Tooltip>
-                ))}
+                {priceAlerts.map((s) => {
+                  const pct = parsePriceChangePct(s.price_change_pct);
+                  const tone = classifyPriceChange(pct, s.direction);
+                  const label = streamTitle(s);
+                  return (
+                    <Tooltip key={s.id}>
+                      <TooltipTrigger asChild>
+                        <span
+                          className={cn(
+                            "inline-flex max-w-[280px] items-center gap-1 rounded-md border px-2 py-0.5 text-xs",
+                            tone === "good" &&
+                              "border-emerald-500/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+                            tone === "warn" &&
+                              "border-orange-500/50 bg-orange-500/10 text-orange-800 dark:text-orange-200",
+                            tone === "neutral" && "border-border bg-background text-muted-foreground",
+                          )}
+                        >
+                          <span className="truncate font-medium">{label}</span>
+                          {pct != null ? (
+                            <span className="shrink-0 tabular-nums">
+                              {pct > 0 ? "+" : "−"}
+                              {Math.abs(pct).toFixed(0)}%
+                            </span>
+                          ) : null}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>{s.description}</TooltipContent>
+                    </Tooltip>
+                  );
+                })}
               </CardContent>
             </Card>
           ) : null}

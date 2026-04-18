@@ -31,7 +31,7 @@ Each category has `source`: **`plaid_pfc`** (created when syncing Plaid transact
 
 | Method | Path | Description |
 |---|---|---|
-| GET | /api/categories | List all categories |
+| GET | /api/categories | List all categories. Response rows include `parent_id` (nullable self-FK) so the frontend can render a two-level hierarchy (primary bucket → detailed subcategories). |
 | POST | /api/categories | Create **custom** category (`name`, optional `color`, `icon`; no Plaid PFC fields) |
 | GET | /api/categories/{id} | Get category |
 | PATCH | /api/categories/{id} | Update `name`, `color`, `icon` |
@@ -83,8 +83,8 @@ Rules are **family-wide** (one row per `merchant_key`). Import applies them afte
 
 | Method | Path | Description |
 |---|---|---|
-| GET | /api/recurring | List streams (direction=inflow|outflow, active_only) |
-| GET | /api/recurring/price-changes | Streams with >10% price change |
+| GET | /api/recurring | List streams (`direction=inflow\|outflow`, `active_only`). Each row is enriched with `account_name`, `account_mask`, `owner_username` (joined from the owning account/user), `primary_category_id`/`primary_category_name`/`primary_category_color` (rolled up via `categories.parent_id`), and `display_title` (normalized description via `web/transactions/display.py::normalize_transaction_title`). |
+| GET | /api/recurring/price-changes | Streams whose last charge diverges from the long-term average by more than 10%. The `price_change_pct` field is **signed** (positive = more expensive, negative = cheaper); the UI interprets the sign against `direction` to show good-news / heads-up coloring. |
 | GET | /api/recurring/{id} | Get stream |
 | PATCH | /api/recurring/{id} | Update user_label, category_id |
 | POST | /api/recurring | Create a **manual** recurring stream (same table as Plaid); `plaid_stream_id` is synthetic `manual:{uuid}`; excluded from Plaid upsert |
@@ -94,10 +94,10 @@ Rules are **family-wide** (one row per `merchant_key`). Import applies them afte
 | Method | Path | Description |
 |---|---|---|
 | GET | /api/budgets | List budgets (optional month filter) |
-| POST | /api/budgets | Create budget (category_id + month + budget_cents) |
+| POST | /api/budgets | Create budget (`category_id` + `month` + `budget_cents`). Rejects (`409 Conflict`) if the target conflicts with an existing budget in the category hierarchy for the same month — i.e. a child budget when a parent budget already exists, or a parent budget when any of its children already has a budget. |
 | PATCH | /api/budgets/{id} | Update budget_cents |
 | DELETE | /api/budgets/{id} | Delete budget |
-| GET | /api/budgets/progress | Budget vs actual for month (split-aware) |
+| GET | /api/budgets/progress | Budget vs actual for month (split-aware). Parent-level budgets roll up actuals from the parent row and all of its detailed children; child-level budgets use only their exact `category_id`. |
 
 ## Investments (stub)
 
@@ -121,7 +121,7 @@ so the monthly totals never reveal a gift someone else is planning.
 |---|---|---|
 | GET | /api/reports/cash-flow | Income vs expenses for a month (privacy-aware) |
 | GET | /api/reports/cash-flow/history | Last N months (default 12) |
-| GET | /api/reports/by-category | Spending by category for month, split-aware (privacy-aware) |
+| GET | /api/reports/by-category | Spending by category for month, split-aware (privacy-aware). Query params: `rollup=primary\|detailed` (default `primary` → rolls detailed PFC children into their parent bucket, returns ~10-15 slices, `bucket_key='p:<id>'`, plus `children_count`) and `parent_category_id` (used with `rollup=detailed` to scope the response to children of that primary bucket — powers the Reports "Focus mode" drilldown). |
 | GET | /api/reports/by-tag | Spending by tag (optional month + tag_id filter) |
 | GET | /api/reports/merchants | Top N merchants by spend |
 | GET | /api/reports/net-worth | Current net worth snapshot |

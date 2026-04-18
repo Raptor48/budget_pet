@@ -326,9 +326,27 @@ export const reportsApi = {
   getCashFlowHistory: (months = 12): Promise<CashFlowMonth[]> =>
     apiRequest(`/api/reports/cash-flow/history?months=${months}`),
 
-  getByCategory: (month?: string): Promise<CategorySpend[]> => {
-    const qs = month ? `?month=${month}` : '';
-    return apiRequest(`/api/reports/by-category${qs}`);
+  /**
+   * GET /api/reports/by-category
+   *
+   * - rollup='primary' (default) aggregates detailed PFC children into their
+   *   parent bucket so charts show ~10–15 slices. Each row has
+   *   `bucket_key='p:<id>'` and `children_count`.
+   * - rollup='detailed' + parent_category_id scopes the result to children of
+   *   that primary bucket — used for the Focus-mode drilldown on Reports.
+   */
+  getByCategory: (
+    month?: string,
+    opts?: { rollup?: "primary" | "detailed"; parent_category_id?: number },
+  ): Promise<CategorySpend[]> => {
+    const params = new URLSearchParams();
+    if (month) params.set("month", month);
+    if (opts?.rollup) params.set("rollup", opts.rollup);
+    if (opts?.parent_category_id != null) {
+      params.set("parent_category_id", String(opts.parent_category_id));
+    }
+    const qs = params.toString();
+    return apiRequest(`/api/reports/by-category${qs ? `?${qs}` : ""}`);
   },
 
   getTopMerchants: (month?: string, limit = 10): Promise<MerchantSpend[]> => {
