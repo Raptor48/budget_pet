@@ -33,17 +33,38 @@ Single source of truth for all financial accounts (checking, savings, credit car
 
 ### categories
 PFC-backed rows created on Plaid sync plus user-defined custom rows.
+Categories form a **two-level hierarchy**: every `plaid_pfc_primary` gets an
+own primary-only row (e.g. *Entertainment*), and each `plaid_pfc_detailed`
+row is linked to its parent via `parent_id`. Depth > 2 is not allowed (a
+CHECK constraint forbids `parent_id = id`; a category with `parent_id` never
+becomes a parent itself in practice).
 
 | Column | Type | Notes |
 |---|---|---|
 | id | SERIAL PK | |
 | name | TEXT UNIQUE | Human-readable name (display; may differ from raw PFC) |
-| plaid_pfc_primary | TEXT | e.g. FOOD_AND_DRINK |
-| plaid_pfc_detailed | TEXT UNIQUE | e.g. FOOD_AND_DRINK_RESTAURANTS (used for auto-mapping); NULL for primary-only or custom |
+| plaid_pfc_primary | TEXT | e.g. FOOD_AND_DRINK — set on BOTH the primary row and all detailed children for easy roll-up |
+| plaid_pfc_detailed | TEXT UNIQUE | e.g. FOOD_AND_DRINK_RESTAURANTS (used for auto-mapping); NULL for primary-only or custom rows |
+| parent_id | INTEGER NULL | Self-FK to `categories.id`. NULL on top-level primary or custom categories; filled for every PFC-detailed child. Index: `idx_categories_parent_id`. |
 | color | TEXT | Hex color |
 | icon | TEXT | Emoji or icon name |
 | pfc_icon_url | TEXT | From Plaid personal_finance_category_icon_url |
 | source | TEXT | `plaid_pfc` \| `custom` — Plaid rows come from sync; custom from API only |
+
+Resolution contract (`web/categories/repo.py::resolve_category`):
+1. If `pfc_primary` is provided, the primary-only parent row is upserted
+   (`name = prettified pfc_primary`, `parent_id = NULL`) before any detailed
+   work happens. This keeps the tree consistent even if Plaid ever changes a
+   taxonomy family.
+2. If only `pfc_primary` is given, the parent id is returned directly.
+3. If `pfc_detailed` is also given, the detailed child is upserted and its
+   `parent_id` is refreshed (relinking orphans created before the V2
+   hierarchy migration was available).
+
+Migration `web/migrations/v2_init.py::_migrate_categories_parent_id` adds
+`parent_id` + index + the self-FK check, then backfills primary-only rows
+for every known PFC family and links existing detailed rows. Custom rows
+with matching names are never overwritten (`ON CONFLICT (name) DO NOTHING`).
 
 ### transactions
 All transactions from Plaid, cash wallet (`source=cash`), and legacy `manual` rows.
@@ -96,7 +117,7 @@ From Plaid `/transactions/recurring/get`, plus **manual** rows created via `POST
 | frequency | TEXT | WEEKLY\|BIWEEKLY\|SEMI_MONTHLY\|MONTHLY\|ANNUALLY\|UNKNOWN |
 | average_amount_cents | BIGINT | |
 | last_amount_cents | BIGINT | |
-| price_change_pct | NUMERIC(6,2) | Computed on sync: \|last-avg\|/avg * 100 |
+| price_change_pct | NUMERIC(6,2) | Computed on sync as a **signed** percentage: `(last - avg) / abs(avg) * 100`. Positive = last charge higher than the long-term average, negative = lower. Historical rows are backfilled by `_migrate_recurring_price_change_signed` (idempotent). |
 | status | TEXT | MATURE\|EARLY_DETECTION\|TOMBSTONED\|MANUAL (manual rows) |
 | stream_source | TEXT | `plaid` (default) \| `manual` — Plaid `ON CONFLICT` update does not overwrite `manual` |
 
@@ -128,7 +149,17 @@ Family-wide rules: if a rule matches `merchant_entity_id` or normalized `merchan
 Plaid may surface the same spend as **pending** then **posted** with different `plaid_transaction_id`s. Aggregates and budgets use **posted** rows as they appear in `transactions`; when both exist in the same month, treat as one economic event in UI (dedupe / pair) — see `docs/plaid.md` for sync behavior.
 
 ### category_budgets
-Budget envelopes: limit per category per month.
+Budget envelopes: limit per category per month. Participate in the
+two-level category hierarchy:
+
+- A **parent-level** budget (`categories.parent_id IS NULL`) rolls up actuals
+  from both the parent row itself and any of its detailed children via
+  `COALESCE(parent_id, category_id)` in `web/budgets/repo.py::get_progress`.
+- A **child-level** budget (`categories.parent_id IS NOT NULL`) sums only
+  transactions with the child's exact `category_id`.
+- Parent and child budgets for the same month are **mutually exclusive**.
+  `web/budgets/repo.py::create_budget` raises `ValueError` (surfaced as HTTP
+  409 by the API layer) if they would conflict.
 
 ### transaction_splits
 Split a transaction into multiple category/tag parts.

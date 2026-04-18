@@ -159,8 +159,8 @@ function DashboardContent() {
   });
 
   const byCategoryQuery = useQuery({
-    queryKey: ["reports", "by-category", spendMonth],
-    queryFn: () => reportsApi.getByCategory(spendMonth),
+    queryKey: ["reports", "by-category", spendMonth, "primary"],
+    queryFn: () => reportsApi.getByCategory(spendMonth, { rollup: "primary" }),
     staleTime: 60_000,
   });
 
@@ -347,8 +347,16 @@ function DashboardContent() {
         <Card className="lg:col-span-2">
           <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-4 space-y-0">
             <div>
-              <CardTitle>Spending by category</CardTitle>
-              <CardDescription>Month total (split-aware)</CardDescription>
+              <CardTitle className="flex items-center gap-2">
+                <span>Spending by category</span>
+                <Link
+                  href="/reports"
+                  className="text-primary text-xs font-medium hover:underline"
+                >
+                  View full breakdown →
+                </Link>
+              </CardTitle>
+              <CardDescription>Month total (split-aware, primary categories)</CardDescription>
             </div>
             <MonthYearPicker value={spendMonth} onChange={setSpendMonth} />
           </CardHeader>

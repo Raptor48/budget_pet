@@ -63,6 +63,7 @@ export function CategoryDonutChart({
   lockedIdx,
   onHover,
   onLock,
+  onSliceClick,
   innerRadius = 72,
   outerRadius = 108,
   height = 260,
@@ -72,6 +73,12 @@ export function CategoryDonutChart({
   lockedIdx: number | null;
   onHover: (i: number | null) => void;
   onLock: (i: number | null) => void;
+  /**
+   * Optional drilldown callback for Reports' Focus-mode. When defined, clicking
+   * a slice dispatches here instead of toggling lock. The caller is expected to
+   * change the query (rollup/parent_category_id) in response.
+   */
+  onSliceClick?: (row: CategorySpend, index: number) => void;
   innerRadius?: number;
   outerRadius?: number;
   height?: number;
@@ -99,7 +106,13 @@ export function CategoryDonutChart({
             {...({ activeIndex: activeIdx, activeShape: ActiveShape } as unknown as object)}
             onMouseEnter={(_, i) => onHover(i)}
             onMouseLeave={() => onHover(null)}
-            onClick={(_, i) => onLock(lockedIdx === i ? null : i)}
+            onClick={(_, i) => {
+              if (onSliceClick && data[i]) {
+                onSliceClick(data[i], i);
+              } else {
+                onLock(lockedIdx === i ? null : i);
+              }
+            }}
             style={{ cursor: "pointer", outline: "none" }}
           >
             {pieData.map((_, i) => (
@@ -159,6 +172,7 @@ export function CategoryLegend({
   lockedIdx,
   onHover,
   onLock,
+  onSliceClick,
   maxHeight = 280,
 }: {
   data: CategorySpend[];
@@ -166,6 +180,8 @@ export function CategoryLegend({
   lockedIdx: number | null;
   onHover: (i: number | null) => void;
   onLock: (i: number | null) => void;
+  /** If provided, a click on a row triggers drilldown instead of locking. */
+  onSliceClick?: (row: CategorySpend, index: number) => void;
   maxHeight?: number;
 }) {
   const activeIdx = hoveredIdx ?? lockedIdx;
@@ -174,6 +190,8 @@ export function CategoryLegend({
       {data.map((row, i) => {
         const isActive = activeIdx === i;
         const isDimmed = activeIdx != null && !isActive;
+        const hasChildren = (row.children_count ?? 0) > 0;
+        const canDrill = Boolean(onSliceClick) && hasChildren;
         return (
           <button
             key={`${row.category_name}-${i}`}
@@ -186,7 +204,14 @@ export function CategoryLegend({
             )}
             onMouseEnter={() => onHover(i)}
             onMouseLeave={() => onHover(null)}
-            onClick={() => onLock(lockedIdx === i ? null : i)}
+            onClick={() => {
+              if (onSliceClick) {
+                onSliceClick(row, i);
+              } else {
+                onLock(lockedIdx === i ? null : i);
+              }
+            }}
+            title={canDrill ? `Drill into ${row.category_name} (${row.children_count} subcategories)` : undefined}
           >
             <span
               className={cn(
@@ -196,6 +221,11 @@ export function CategoryLegend({
               style={{ backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length] }}
             />
             <span className="min-w-0 flex-1 truncate font-medium">{row.category_name}</span>
+            {canDrill ? (
+              <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                {row.children_count}×
+              </span>
+            ) : null}
             <span className="shrink-0 tabular-nums text-muted-foreground">
               {formatMoney(row.amount_cents)}
             </span>

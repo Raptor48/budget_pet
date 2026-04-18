@@ -16,6 +16,16 @@ class CategorySpend(BaseModel):
     category_name: str
     amount_cents: int
     percent: float
+    # Color/icon come from the bucket (parent when rolled up, self otherwise).
+    color: Optional[str] = None
+    # Stable id for the UI, e.g. "p:12" (primary parent) or "c:45" (child).
+    bucket_key: Optional[str] = None
+    # When the bucket rolls up children, which primary parent it represents
+    # (None for already-top-level custom categories).
+    parent_category_id: Optional[int] = None
+    # In `rollup='primary'` mode, number of child categories sagged into this bucket.
+    # In `rollup='detailed'` mode, this is 0.
+    children_count: int = 0
 
 
 class TagSpend(BaseModel):

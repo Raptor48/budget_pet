@@ -7,6 +7,7 @@ import { CreditCard, EyeOff, Loader2, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PlaidTxnAmount } from "@/components/ui/plaid-txn-amount";
+import { normalizeTransactionTitle, rawTransactionTitle } from "@/lib/transaction-display";
 import { cn } from "@/lib/utils";
 import type { Transaction } from "@/types/v2";
 
@@ -18,7 +19,7 @@ function initialsFromName(name: string): string {
 }
 
 function displayName(tx: Transaction): string {
-  return (tx.merchant_name || tx.name || "Transaction").trim();
+  return normalizeTransactionTitle(tx);
 }
 
 function displayDateShort(tx: Transaction): string {
@@ -107,7 +108,12 @@ export function TransactionMobileCard({
       <div className="min-w-0 flex-1 space-y-0.5">
         <div className="flex min-w-0 items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <p className="line-clamp-2 text-sm font-medium leading-snug">{title}</p>
+            <p
+              className="line-clamp-2 min-w-0 break-words text-sm font-medium leading-snug"
+              title={rawTransactionTitle(tx) || title}
+            >
+              {title}
+            </p>
             <MobileAccountLine tx={tx} />
           </div>
           <div className="flex shrink-0 flex-col items-end gap-0.5">

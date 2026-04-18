@@ -91,16 +91,78 @@ pending                → is_pending
 
 There is **no** separate Plaid endpoint for the full PFC catalog; taxonomy reference is Plaid’s [CSV](https://plaid.com/documents/pfc-taxonomy-all.csv). Do **not** use deprecated **`/categories/get`** for PFC (that endpoint is for legacy `category` / `category_id` only).
 
-When a transaction is imported:
-1. Check if a category exists with `plaid_pfc_detailed = pfc_detailed` (or primary-only match when `detailed` is absent).
-2. If not found, auto-create a row with `source = plaid_pfc`:
-   - `name` = human-readable label derived from PFC strings
-   - `plaid_pfc_primary`, `plaid_pfc_detailed`, `pfc_icon_url` from Plaid
-3. Return `category_id`.
+PFC rows are **stored as a two-level hierarchy** in `categories` (see
+`docs/data-model.md`): one primary-only parent row per
+`personal_finance_category.primary`, and one row per
+`personal_finance_category.detailed` child linked to that parent via
+`categories.parent_id`.
 
-**Startup does not seed generic categories.** Rows appear only after sync sees real PFC values (or the user creates `source = custom` via `POST /api/categories`).
+When a transaction is imported (`web/categories/repo.py::resolve_category`):
+1. Ensure the primary parent row exists (idempotent upsert keyed on
+   `name = prettified pfc_primary`, never overwrites custom rows).
+2. If only `pfc_primary` is present (no detailed), return that parent id.
+3. Otherwise look up the detailed row by `plaid_pfc_detailed`; if present,
+   refresh its `parent_id` when the link is missing or stale; if absent,
+   insert `(name, plaid_pfc_primary, plaid_pfc_detailed, parent_id, ...)`.
+4. Return the resolved `category_id` (detailed id when `detailed` was
+   supplied, primary id otherwise).
 
-Users can rename or recolor any category for display; Plaid-derived rows cannot be deleted (only custom categories). Transactions can still be reassigned to another `category_id` via the transactions API.
+**Startup does not seed generic categories.** Rows appear only after sync
+sees real PFC values (or the user creates `source = custom` via
+`POST /api/categories`). Migration
+`_migrate_categories_parent_id` backfills the parent column on upgrade.
+
+Users can rename or recolor any category for display; Plaid-derived rows
+cannot be deleted (only custom categories). Transactions can still be
+reassigned to another `category_id` via the transactions API. Reports and
+budgets aggregate by default on the **primary** level and expose an opt-in
+"detailed / Focus mode" rollup (see `docs/api.md`,
+`/api/reports/by-category?rollup=`).
+
+## Transaction Title Normalization
+
+Raw Plaid `transactions.name` is frequently unformatted bank text (upper
+case, reference numbers, store IDs) and can overflow UI rows. Every
+transaction / recurring stream is enriched with a `display_title` field
+derived by `web/transactions/display.py::normalize_transaction_title` at
+read time.
+
+Source priority (first non-empty wins):
+1. `merchant_name` (from Plaid enrichment) when it already looks
+   human-friendly.
+2. Non-duplicate Plaid `counterparties[].name`.
+3. Hostname from `website` (`www.`, TLD stripped).
+4. Heuristically cleaned `name` / `description` — drops long alphanumeric
+   IDs, `POS`/`PURCHASE` prefixes, dates, known geographic suffixes, then
+   applies smart title casing.
+5. Last resort: the literal string `"Transaction"`.
+
+The normalizer is mirrored in `frontend/src/lib/transaction-display.ts` so
+legacy rows (no backend `display_title`) still look clean. Both sides
+truncate to a conservative length (≈42 chars) and always return a
+non-empty string.
+
+## Recurring price-change semantics
+
+`recurring_streams.price_change_pct` is stored as a **signed** percentage:
+
+```text
+price_change_pct = (last_amount_cents - average_amount_cents) / abs(average_amount_cents) * 100
+```
+
+Positive values mean the most recent charge is higher than the long-term
+average (subscription got more expensive); negative values mean cheaper.
+Historical `ABS(...)` rows are backfilled by
+`_migrate_recurring_price_change_signed` on migration.
+
+The interpretation depends on `direction`:
+
+- `outflow`: `+` = heads-up (warn tone), `−` = good news (price drop).
+- `inflow`: `+` = good news (more income), `−` = heads-up.
+
+The insights feed (`web/insights/feed.py`) emits separate `price_changes_warn`
+(severity `warn`) and `price_changes_good` (severity `info`) cards with the
+top three streams by absolute percentage.
 
 ## Environments
 

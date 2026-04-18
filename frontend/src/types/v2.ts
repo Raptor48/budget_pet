@@ -70,6 +70,8 @@ export interface Category {
   /** plaid_pfc = from Plaid sync; custom = user-created */
   source: "plaid_pfc" | "custom";
   created_at: string;
+  /** FK to categories.id; null = top-level primary (depth ≤ 2 enforced). */
+  parent_id: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -192,6 +194,8 @@ export interface Transaction {
   account_mask: string | null;
   /** Username of the account owner (joined via accounts.user_id → users) */
   owner_username: string | null;
+  /** Derived display title — short, human-friendly. Server-computed via web/transactions/display.py. */
+  display_title?: string | null;
 }
 
 export interface TransactionFilters {
@@ -257,10 +261,30 @@ export interface RecurringStream {
   status: string | null;
   category_id: number | null;
   user_label: string | null;
+  /**
+   * Signed percentage change of `last_amount_cents` vs `average_amount_cents`.
+   * Positive = last payment is higher than average (got more expensive).
+   * Negative = cheaper. Decoded as string by the backend (NUMERIC(6,2)).
+   */
   price_change_pct: string | null;
   last_synced_at: string | null;
   /** plaid | manual — manual streams are not overwritten by Plaid sync */
   stream_source?: string;
+  // --- Enrichment (joined, optional for backwards compatibility) ---
+  /** Joined from accounts.name. */
+  account_name?: string | null;
+  /** Last 4 of the card / account (accounts.mask). */
+  account_mask?: string | null;
+  /** Owner of the account (users.username via accounts.user_id). */
+  owner_username?: string | null;
+  /** Primary (rolled-up) category id — always at the top of the hierarchy. */
+  primary_category_id?: number | null;
+  /** Primary category human name, e.g. "Rent & Utilities". */
+  primary_category_name?: string | null;
+  /** Primary category color (hex) for chips and dots. */
+  primary_category_color?: string | null;
+  /** Short, human-friendly label for the stream (normalized from description). */
+  display_title?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -333,6 +357,14 @@ export interface CategorySpend {
   category_name: string;
   amount_cents: number;
   percent: number;
+  /** Hex color inherited from the bucket category (parent or self). */
+  color?: string | null;
+  /** Stable id for the UI, e.g. "p:12" (primary bucket) or "c:45" (child). */
+  bucket_key?: string | null;
+  /** Parent category id when known; null for top-level rows. */
+  parent_category_id?: number | null;
+  /** In rollup='primary' mode, number of detailed children aggregated. 0 otherwise. */
+  children_count?: number;
 }
 
 export interface TagSpend {

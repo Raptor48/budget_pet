@@ -8,10 +8,11 @@ import {
   CategoryDonutChart,
   CategoryLegend,
 } from "@/components/charts/category-donut-chart";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MonthYearPicker } from "@/components/ui/month-year-picker";
-import { PieChart } from "lucide-react";
+import { ArrowLeft, PieChart } from "lucide-react";
 import { reportsApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type {
@@ -226,7 +227,37 @@ export default function Reports() {
   const [month, setMonth] = useState(getCurrentMonth);
   const [catHoveredIdx, setCatHoveredIdx] = useState<number | null>(null);
   const [catLockedIdx, setCatLockedIdx] = useState<number | null>(null);
+  /**
+   * Focus-mode: when the user drills into a primary category, we pin it here
+   * and switch the query to rollup=detailed with parent_category_id.
+   * null = show primary (rolled-up) view.
+   */
+  const [focusedParent, setFocusedParent] = useState<CategorySpend | null>(null);
   const catActiveIdx = catHoveredIdx ?? catLockedIdx;
+
+  const resetCategoryHighlight = () => {
+    setCatHoveredIdx(null);
+    setCatLockedIdx(null);
+  };
+
+  const exitFocus = () => {
+    setFocusedParent(null);
+    resetCategoryHighlight();
+  };
+
+  const handleSliceDrilldown = (row: CategorySpend, index: number) => {
+    if (focusedParent) {
+      setCatLockedIdx((prev) => (prev === index ? null : index));
+      return;
+    }
+    const hasChildren = (row.children_count ?? 0) > 0;
+    if (!hasChildren) {
+      setCatLockedIdx((prev) => (prev === index ? null : index));
+      return;
+    }
+    setFocusedParent(row);
+    resetCategoryHighlight();
+  };
 
   const cashFlowQuery = useQuery({
     queryKey: ["reports", "cash-flow", month],
@@ -239,8 +270,17 @@ export default function Reports() {
   });
 
   const byCategoryQuery = useQuery({
-    queryKey: ["reports", "by-category", month],
-    queryFn: () => reportsApi.getByCategory(month),
+    queryKey: [
+      "reports",
+      "by-category",
+      month,
+      focusedParent ? `parent:${focusedParent.category_id}` : "primary",
+    ],
+    queryFn: () =>
+      reportsApi.getByCategory(month, {
+        rollup: focusedParent ? "detailed" : "primary",
+        parent_category_id: focusedParent?.category_id ?? undefined,
+      }),
   });
 
   const netWorthQuery = useQuery({
@@ -370,13 +410,45 @@ export default function Reports() {
           <TabsContent value="category" className="space-y-6">
             <Card className="border-border/80 shadow-sm">
               <CardHeader className="flex flex-row flex-wrap items-end justify-between gap-4">
-                <div>
-                  <CardTitle>Spending by category</CardTitle>
-                  <CardDescription>Share of expenses per category for the month.</CardDescription>
+                <div className="min-w-0 space-y-1">
+                  <CardTitle className="flex flex-wrap items-center gap-2">
+                    {focusedParent ? (
+                      <>
+                        <span className="text-muted-foreground font-normal">Spending in</span>
+                        <span className="truncate">{focusedParent.category_name}</span>
+                      </>
+                    ) : (
+                      <>Spending by category</>
+                    )}
+                  </CardTitle>
+                  <CardDescription>
+                    {focusedParent
+                      ? `Subcategories under ${focusedParent.category_name} for the selected month.`
+                      : "Share of expenses per category for the month. Click a slice to focus on its subcategories."}
+                  </CardDescription>
                 </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs font-medium text-muted-foreground">Month</span>
-                  <MonthYearPicker value={month} onChange={(m) => { setMonth(m); setCatLockedIdx(null); setCatHoveredIdx(null); }} />
+                <div className="flex items-end gap-3">
+                  {focusedParent ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={exitFocus}
+                      className="gap-1"
+                    >
+                      <ArrowLeft className="size-3.5" aria-hidden />
+                      Back to all
+                    </Button>
+                  ) : null}
+                  <div className="flex flex-col gap-1">
+                    <span className="text-xs font-medium text-muted-foreground">Month</span>
+                    <MonthYearPicker
+                      value={month}
+                      onChange={(m) => {
+                        setMonth(m);
+                        resetCategoryHighlight();
+                      }}
+                    />
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-6">
@@ -396,6 +468,7 @@ export default function Reports() {
                         lockedIdx={catLockedIdx}
                         onHover={setCatHoveredIdx}
                         onLock={setCatLockedIdx}
+                        onSliceClick={focusedParent ? undefined : handleSliceDrilldown}
                       />
                       <CategoryLegend
                         data={byCategoryQuery.data}
@@ -403,8 +476,14 @@ export default function Reports() {
                         lockedIdx={catLockedIdx}
                         onHover={setCatHoveredIdx}
                         onLock={setCatLockedIdx}
+                        onSliceClick={focusedParent ? undefined : handleSliceDrilldown}
                       />
                     </div>
+                    {!focusedParent && (
+                      <p className="text-xs text-muted-foreground">
+                        Tip: click a slice or legend row to focus on subcategories.
+                      </p>
+                    )}
 
                     {/* Detailed table */}
                     <div className="overflow-x-auto rounded-lg border border-border/60">
@@ -419,6 +498,8 @@ export default function Reports() {
                         <tbody>
                           {byCategoryQuery.data.map((row: CategorySpend, i: number) => {
                             const isActive = catActiveIdx === i;
+                            const hasChildren = (row.children_count ?? 0) > 0;
+                            const canDrill = !focusedParent && hasChildren;
                             return (
                               <tr
                                 key={row.category_name}
@@ -428,7 +509,13 @@ export default function Reports() {
                                 )}
                                 onMouseEnter={() => setCatHoveredIdx(i)}
                                 onMouseLeave={() => setCatHoveredIdx(null)}
-                                onClick={() => setCatLockedIdx((prev) => (prev === i ? null : i))}
+                                onClick={() => {
+                                  if (canDrill) {
+                                    handleSliceDrilldown(row, i);
+                                  } else {
+                                    setCatLockedIdx((prev) => (prev === i ? null : i));
+                                  }
+                                }}
                               >
                                 <td className="px-4 py-3">
                                   <span className="inline-flex items-center gap-2 font-medium">
@@ -436,7 +523,12 @@ export default function Reports() {
                                       className="size-2.5 shrink-0 rounded-full"
                                       style={{ backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length] }}
                                     />
-                                    {row.category_name}
+                                    <span className="truncate">{row.category_name}</span>
+                                    {canDrill ? (
+                                      <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                        {row.children_count}×
+                                      </span>
+                                    ) : null}
                                   </span>
                                 </td>
                                 <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
@@ -472,10 +564,22 @@ export default function Reports() {
                     <div className="flex size-12 items-center justify-center rounded-full bg-muted">
                       <PieChart className="size-6 text-muted-foreground" />
                     </div>
-                    <p className="font-medium">No spending in this month</p>
-                    <p className="text-muted-foreground max-w-xs text-sm">
-                      Pick a different month or add a cash transaction to see your spending breakdown.
+                    <p className="font-medium">
+                      {focusedParent
+                        ? `No subcategory spending in ${focusedParent.category_name}`
+                        : "No spending in this month"}
                     </p>
+                    <p className="text-muted-foreground max-w-xs text-sm">
+                      {focusedParent
+                        ? "This primary bucket has no subcategory detail for the selected month."
+                        : "Pick a different month or add a cash transaction to see your spending breakdown."}
+                    </p>
+                    {focusedParent ? (
+                      <Button variant="outline" size="sm" onClick={exitFocus} className="mt-2 gap-1">
+                        <ArrowLeft className="size-3.5" aria-hidden />
+                        Back to all categories
+                      </Button>
+                    ) : null}
                   </div>
                 )}
               </CardContent>

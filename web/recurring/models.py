@@ -42,6 +42,18 @@ class RecurringStreamOut(BaseModel):
     last_synced_at: Optional[datetime] = None
     stream_source: str = "plaid"
 
+    # ------------------------------------------------------------------
+    # Enrichment fields (populated by list_streams via JOINs).
+    # None when the row is loaded without enrichment (older code paths).
+    # ------------------------------------------------------------------
+    account_name: Optional[str] = None
+    account_mask: Optional[str] = None
+    owner_username: Optional[str] = None
+    primary_category_id: Optional[int] = None
+    primary_category_name: Optional[str] = None
+    primary_category_color: Optional[str] = None
+    display_title: Optional[str] = None
+
     class Config:
         from_attributes = True
 

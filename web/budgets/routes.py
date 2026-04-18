@@ -30,7 +30,11 @@ async def get_progress(
 
 @router.post("", response_model=BudgetOut, status_code=201)
 async def create_budget(body: BudgetCreate):
-    return await _repo().create_budget(body.model_dump())
+    try:
+        return await _repo().create_budget(body.model_dump())
+    except ValueError as exc:
+        # Hierarchy conflict (parent+child budgets in same month) or unknown id.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.patch("/{budget_id}", response_model=BudgetOut)

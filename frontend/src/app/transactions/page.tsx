@@ -65,6 +65,7 @@ import {
   formatPlaidTxnAmountForDisplay,
   formatPlaidTxnAmountLegacy,
 } from "@/lib/plaid-transaction-amount";
+import { normalizeTransactionTitle, rawTransactionTitle } from "@/lib/transaction-display";
 import { cn } from "@/lib/utils";
 import type {
   Category,
@@ -96,7 +97,7 @@ function initialsFromName(name: string): string {
 }
 
 function displayName(tx: Transaction): string {
-  return (tx.merchant_name || tx.name || "Transaction").trim();
+  return normalizeTransactionTitle(tx);
 }
 
 function displayDate(tx: Transaction): string {
@@ -425,7 +426,12 @@ function TransactionDetailsDialog({
             <div className="mt-3 flex min-w-0 items-start gap-3">
               <MerchantAvatar tx={transaction} />
               <div className="min-w-0 flex-1 space-y-1">
-                <p className="font-semibold leading-tight">{displayName(transaction)}</p>
+                <p
+                  className="break-words font-semibold leading-tight"
+                  title={rawTransactionTitle(transaction) || displayName(transaction)}
+                >
+                  {displayName(transaction)}
+                </p>
                 {bankName && bankName !== merchantLabel ? (
                   <p className="text-xs text-muted-foreground" title={bankName}>
                     Bank description: {bankName}
@@ -891,7 +897,7 @@ function SplitTransactionDialog({
             <div className="mt-1 flex min-w-0 items-center gap-2">
               <p
                 className="min-w-0 flex-1 truncate text-sm text-muted-foreground"
-                title={displayName(transaction)}
+                title={rawTransactionTitle(transaction) || displayName(transaction)}
               >
                 {displayName(transaction)}
               </p>
@@ -1618,10 +1624,15 @@ function FragmentRow({
         <TableCell className="align-middle">
           <MerchantAvatar tx={tx} />
         </TableCell>
-        <TableCell className="max-w-[280px] align-middle">
-          <div className="flex flex-col gap-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-medium leading-tight">{displayName(tx)}</span>
+        <TableCell className="max-w-[280px] min-w-0 align-middle">
+          <div className="flex min-w-0 flex-col gap-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <span
+                className="line-clamp-1 min-w-0 break-all font-medium leading-tight"
+                title={rawTransactionTitle(tx) || displayName(tx)}
+              >
+                {displayName(tx)}
+              </span>
               {tx.is_pending ? (
                 <Badge
                   variant="secondary"

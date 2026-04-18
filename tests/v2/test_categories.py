@@ -33,9 +33,13 @@ class TestCategoriesRepository:
     async def test_resolve_category_creates_new(self, repo):
         conn = AsyncMock()
         pool = make_mock_pool(conn)
+        # Sequence: primary lookup → primary insert (returns id) → detailed
+        #           lookup → detailed insert (returns id).
         conn.fetchrow.side_effect = [
-            None,       # no match by pfc_detailed
-            {"id": 42}, # inserted row
+            None,          # _ensure_primary_category_id: no existing primary row
+            {"id": 9},     # primary row inserted
+            None,          # no match by pfc_detailed
+            {"id": 42},    # detailed row inserted
         ]
 
         with patch("web.categories.repo.get_pool", AsyncMock(return_value=pool)):
@@ -51,7 +55,10 @@ class TestCategoriesRepository:
     async def test_resolve_category_existing(self, repo):
         conn = AsyncMock()
         pool = make_mock_pool(conn)
-        conn.fetchrow.return_value = {"id": 7}
+        conn.fetchrow.side_effect = [
+            {"id": 9},                  # existing primary parent row
+            {"id": 7, "parent_id": 9},  # existing detailed row, already linked
+        ]
 
         with patch("web.categories.repo.get_pool", AsyncMock(return_value=pool)):
             cid = await repo.resolve_category(
@@ -60,6 +67,47 @@ class TestCategoriesRepository:
             )
 
         assert cid == 7
+
+    @pytest.mark.asyncio
+    async def test_resolve_primary_only_returns_parent(self, repo):
+        """When only `pfc_primary` is provided, the parent id is returned directly."""
+        conn = AsyncMock()
+        pool = make_mock_pool(conn)
+        conn.fetchrow.side_effect = [
+            {"id": 11},  # existing primary row
+        ]
+
+        with patch("web.categories.repo.get_pool", AsyncMock(return_value=pool)):
+            cid = await repo.resolve_category(
+                pfc_detailed=None,
+                pfc_primary="TRANSPORTATION",
+            )
+
+        assert cid == 11
+
+    @pytest.mark.asyncio
+    async def test_resolve_relinks_orphan_detailed(self, repo):
+        """A detailed row with stale parent_id gets updated to the correct parent."""
+        conn = AsyncMock()
+        pool = make_mock_pool(conn)
+        conn.fetchrow.side_effect = [
+            {"id": 9},                      # ensure primary row
+            {"id": 7, "parent_id": None},   # detailed row without a parent
+        ]
+
+        with patch("web.categories.repo.get_pool", AsyncMock(return_value=pool)):
+            cid = await repo.resolve_category(
+                pfc_detailed="FOOD_AND_DRINK_RESTAURANTS",
+                pfc_primary="FOOD_AND_DRINK",
+            )
+
+        assert cid == 7
+        # parent_id relink happens via conn.execute(UPDATE ...)
+        conn.execute.assert_any_call(
+            "UPDATE categories SET parent_id = $2 WHERE id = $1",
+            7,
+            9,
+        )
 
     @pytest.mark.asyncio
     async def test_resolve_none_when_no_pfc(self, repo):

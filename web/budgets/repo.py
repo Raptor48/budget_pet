@@ -36,8 +36,61 @@ class BudgetsRepository:
         return dict(row) if row else None
 
     async def create_budget(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Upsert a budget row for (category, month).
+
+        Validates against hierarchy conflicts:
+        - If `category_id` is a detailed child and a parent-level budget already
+          exists for that month, the detailed budget is rejected (parent would
+          over-count).
+        - If `category_id` is a primary parent and any of its children already
+          has a budget for that month, the primary budget is rejected.
+        Callers should surface the ValueError as a 409.
+        """
         pool = await self._pool()
+        category_id = int(data["category_id"])
+        month = data["month"]
         async with pool.acquire() as conn:
+            category = await conn.fetchrow(
+                "SELECT id, parent_id FROM categories WHERE id = $1", category_id
+            )
+            if not category:
+                raise ValueError("Category not found")
+            parent_id = category["parent_id"]
+            if parent_id is not None:
+                # Child row: reject if a budget already exists on the parent for
+                # the same month. Allow upsert of the same row (same category_id).
+                parent_budget = await conn.fetchrow(
+                    """
+                    SELECT 1 FROM category_budgets
+                    WHERE category_id = $1 AND month = $2
+                    """,
+                    parent_id,
+                    month,
+                )
+                if parent_budget:
+                    raise ValueError(
+                        "A parent-category budget already exists for this month; "
+                        "remove it before creating a more precise child budget."
+                    )
+            else:
+                # Parent row (or top-level custom): reject if any child already
+                # has a budget this month.
+                child_budget = await conn.fetchrow(
+                    """
+                    SELECT 1 FROM category_budgets cb
+                    JOIN categories c ON c.id = cb.category_id
+                    WHERE c.parent_id = $1 AND cb.month = $2
+                    """,
+                    category_id,
+                    month,
+                )
+                if child_budget:
+                    raise ValueError(
+                        "A more precise child budget already exists for this month; "
+                        "remove child budgets before setting a parent-level budget."
+                    )
+
             row = await conn.fetchrow(
                 """
                 INSERT INTO category_budgets (category_id, month, budget_cents)
@@ -45,8 +98,8 @@ class BudgetsRepository:
                 ON CONFLICT (category_id, month) DO UPDATE SET budget_cents = EXCLUDED.budget_cents
                 RETURNING *
                 """,
-                data["category_id"],
-                data["month"],
+                category_id,
+                month,
                 data["budget_cents"],
             )
         return dict(row)
@@ -76,6 +129,14 @@ class BudgetsRepository:
     async def get_progress(self, month: str, viewer_user_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         For each budget in the given month, return actual spending.
+
+        Respects category hierarchy:
+        - If the budget is on a *parent* (`parent_id IS NULL`), actuals sum
+          transactions whose category is the parent itself OR any child (via
+          `COALESCE(parent_id, id) = parent_id`).
+        - If the budget is on a *child* (`parent_id IS NOT NULL`), actuals sum
+          only transactions directly on that child.
+
         Actual spending uses splits if they exist, otherwise uses transaction.category_id.
         Only counts expenses (amount_cents > 0). Excludes ``plaid_sandbox`` when
         ``reports_include_plaid_sandbox()`` is false. Excludes private transactions
@@ -95,11 +156,13 @@ class BudgetsRepository:
             rows = await conn.fetch(
                 f"""
                 WITH actual AS (
-                    -- Transactions without splits: use their own category
+                    -- Transactions without splits: use their own category + parent link
                     SELECT
                         t.category_id,
+                        c.parent_id,
                         SUM(t.amount_cents) AS spent
                     FROM transactions t
+                    LEFT JOIN categories c ON c.id = t.category_id
                     WHERE
                         t.amount_cents > 0
                         {sandbox_ex}
@@ -109,29 +172,39 @@ class BudgetsRepository:
                         AND NOT EXISTS (
                             SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id
                         )
-                    GROUP BY t.category_id
+                    GROUP BY t.category_id, c.parent_id
 
                     UNION ALL
 
-                    -- Transactions with splits: use split category and amount
+                    -- Transactions with splits: use split category + its parent link
                     SELECT
                         ts.category_id,
+                        sc.parent_id,
                         SUM(ts.amount_cents) AS spent
                     FROM transaction_splits ts
                     JOIN transactions t ON t.id = ts.parent_transaction_id
+                    LEFT JOIN categories sc ON sc.id = ts.category_id
                     WHERE
                         t.amount_cents > 0
                         {sandbox_ex}
                         {private_ex}
                         AND COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
                         AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
-                    GROUP BY ts.category_id
+                    GROUP BY ts.category_id, sc.parent_id
                 ),
-                aggregated AS (
+                -- Child-level aggregate: spent on a specific detailed category.
+                aggregated_child AS (
                     SELECT category_id, SUM(spent) AS actual_cents
                     FROM actual
                     WHERE category_id IS NOT NULL
                     GROUP BY category_id
+                ),
+                -- Parent-level aggregate: for each bucket (self or parent), sum spending.
+                aggregated_parent AS (
+                    SELECT COALESCE(parent_id, category_id) AS bucket_id, SUM(spent) AS actual_cents
+                    FROM actual
+                    WHERE category_id IS NOT NULL
+                    GROUP BY COALESCE(parent_id, category_id)
                 )
                 SELECT
                     cb.id,
@@ -140,15 +213,37 @@ class BudgetsRepository:
                     COALESCE(c.color, '#3b82f6') AS category_color,
                     cb.month,
                     cb.budget_cents,
-                    COALESCE(a.actual_cents, 0) AS actual_cents,
-                    cb.budget_cents - COALESCE(a.actual_cents, 0) AS remaining_cents,
+                    COALESCE(
+                        CASE
+                            WHEN c.parent_id IS NULL THEN ap.actual_cents
+                            ELSE ach.actual_cents
+                        END,
+                        0
+                    ) AS actual_cents,
+                    cb.budget_cents - COALESCE(
+                        CASE
+                            WHEN c.parent_id IS NULL THEN ap.actual_cents
+                            ELSE ach.actual_cents
+                        END,
+                        0
+                    ) AS remaining_cents,
                     CASE
                         WHEN cb.budget_cents = 0 THEN 0
-                        ELSE ROUND(COALESCE(a.actual_cents, 0)::numeric / cb.budget_cents * 100, 1)
+                        ELSE ROUND(
+                            COALESCE(
+                                CASE
+                                    WHEN c.parent_id IS NULL THEN ap.actual_cents
+                                    ELSE ach.actual_cents
+                                END,
+                                0
+                            )::numeric / cb.budget_cents * 100,
+                            1
+                        )
                     END AS percent_used
                 FROM category_budgets cb
                 JOIN categories c ON c.id = cb.category_id
-                LEFT JOIN aggregated a ON a.category_id = cb.category_id
+                LEFT JOIN aggregated_child  ach ON ach.category_id = cb.category_id
+                LEFT JOIN aggregated_parent ap  ON ap.bucket_id   = cb.category_id
                 WHERE cb.month = $1
                 ORDER BY percent_used DESC
                 """,

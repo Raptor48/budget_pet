@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from web.accounts.repo import AccountsRepository
 from web.db import get_pool
+from web.transactions.display import normalize_transaction_title
 
 logger = logging.getLogger(__name__)
 
@@ -23,23 +24,61 @@ class RecurringRepository:
     async def list_streams(
         self, direction: Optional[str] = None, active_only: bool = True
     ) -> List[Dict[str, Any]]:
+        """List recurring streams, enriched with account + owner + primary
+        category metadata so the UI can render "Charged to <card · @owner>"
+        and a collapsed "Category" column without N+1 follow-up fetches.
+
+        The returned dict follows `RecurringStreamOut`'s enrichment contract:
+        `account_name`, `account_mask`, `owner_username`,
+        `primary_category_{id,name,color}`, and `display_title`.
+        """
         pool = await self._pool()
-        conditions = []
-        params = []
+        conditions: List[str] = []
+        params: List[Any] = []
         idx = 1
         if direction:
-            conditions.append(f"direction = ${idx}")
+            conditions.append(f"rs.direction = ${idx}")
             params.append(direction)
             idx += 1
         if active_only:
-            conditions.append("is_active = TRUE")
+            conditions.append("rs.is_active = TRUE")
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                f"SELECT * FROM recurring_streams {where} ORDER BY last_amount_cents DESC NULLS LAST",
+                f"""
+                SELECT
+                    rs.*,
+                    a.name                 AS account_name,
+                    a.mask                 AS account_mask,
+                    u.username             AS owner_username,
+                    c.parent_id            AS category_parent_id,
+                    COALESCE(pc.id, c.id)     AS primary_category_id,
+                    COALESCE(pc.name, c.name) AS primary_category_name,
+                    COALESCE(pc.color, c.color) AS primary_category_color
+                FROM recurring_streams rs
+                LEFT JOIN accounts a   ON a.id = rs.account_id
+                LEFT JOIN users u      ON u.id = a.user_id
+                LEFT JOIN categories c ON c.id = rs.category_id
+                LEFT JOIN categories pc ON pc.id = c.parent_id
+                {where}
+                ORDER BY rs.last_amount_cents DESC NULLS LAST
+                """,
                 *params,
             )
-        return [dict(r) for r in rows]
+        enriched: List[Dict[str, Any]] = []
+        for row in rows:
+            d = dict(row)
+            d.pop("category_parent_id", None)
+            d["display_title"] = normalize_transaction_title(
+                {
+                    "merchant_name": d.get("merchant_name"),
+                    "name": d.get("description"),
+                    "description": d.get("description"),
+                    "user_label": d.get("user_label"),
+                }
+            )
+            enriched.append(d)
+        return enriched
 
     async def get_stream(self, stream_id: int) -> Optional[Dict[str, Any]]:
         pool = await self._pool()
@@ -48,7 +87,15 @@ class RecurringRepository:
         return dict(row) if row else None
 
     async def get_price_changes(self) -> List[Dict[str, Any]]:
-        """Return streams where last amount differs from average by more than 10%."""
+        """Return streams where |last / avg - 1| > PRICE_CHANGE_THRESHOLD.
+
+        `price_change_pct` is stored as a *signed* percentage where a positive
+        value means the latest charge exceeds the long-term average. Callers
+        (insights, UI) interpret the sign against `direction` to decide whether
+        a change is favourable (e.g. price drop on an outflow subscription).
+        Filtering still uses the absolute magnitude so drops and increases both
+        surface as notable.
+        """
         pool = await self._pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
@@ -155,10 +202,14 @@ class RecurringRepository:
                     else None
                 )
 
-                # Calculate price change pct
+                # Calculate SIGNED price change pct. Positive = last charge
+                # exceeds the long-term average; negative = latest is lower.
+                # Using `abs(avg_cents)` as the denominator keeps the sign from
+                # flipping for inflow streams where amounts are already
+                # negative in Plaid's contract.
                 price_change_pct = None
                 if avg_cents and last_cents and avg_cents != 0:
-                    pct = abs(last_cents - avg_cents) / abs(avg_cents)
+                    pct = (last_cents - avg_cents) / abs(avg_cents)
                     price_change_pct = round(pct * 100, 2)
 
                 pfc = stream.get("personal_finance_category") or {}
