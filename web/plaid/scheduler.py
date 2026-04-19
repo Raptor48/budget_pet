@@ -48,8 +48,19 @@ def _investments_enabled() -> bool:
     return val in ("1", "true", "yes")
 
 
-async def _sync_item_payload(item: Dict[str, Any], source: str) -> Dict[str, Any]:
-    """Run full Plaid sync for one item dict (from plaid_items row)."""
+async def _sync_item_payload(
+    item: Dict[str, Any],
+    source: str,
+    *,
+    audit_source: str = "manual",
+) -> Dict[str, Any]:
+    """Run full Plaid sync for one item dict (from plaid_items row).
+
+    ``source`` tags ingested transactions (``plaid`` / ``plaid_sandbox``),
+    while ``audit_source`` tells the audit log which driver triggered this
+    run (``scheduler`` / ``webhook`` / ``manual``). They are separate
+    because Plaid env tagging and who-did-it attribution are independent.
+    """
     import asyncio
     from .repo import get_plaid_repo
     from .client import (
@@ -59,6 +70,7 @@ async def _sync_item_payload(item: Dict[str, Any], source: str) -> Dict[str, Any
         get_recurring_transactions,
         get_investment_holdings,
     )
+    from web.accounts.missing_fields import detect_and_record_missing
     from web.accounts.repo import AccountsRepository
     from web.categories.repo import CategoriesRepository
     from web.recurring.repo import RecurringRepository
@@ -107,6 +119,10 @@ async def _sync_item_payload(item: Dict[str, Any], source: str) -> Dict[str, Any
 
         liabilities = await asyncio.to_thread(get_liabilities, access_token)
         await repo.sync_liabilities_to_accounts(liabilities)
+        try:
+            await detect_and_record_missing(item_id=item_id, source=audit_source)
+        except Exception as exc:  # defensive: detection must never break sync
+            logger.warning("missing-fields detection failed for %s: %s", item_id, exc)
 
         recurring_data = await asyncio.to_thread(get_recurring_transactions, access_token)
         rec_repo = RecurringRepository()
@@ -155,8 +171,15 @@ async def _sync_item_payload(item: Dict[str, Any], source: str) -> Dict[str, Any
     }
 
 
-async def sync_single_item(item_id: str) -> Optional[dict]:
-    """Sync one Plaid item by id. Returns result dict or None if item missing."""
+async def sync_single_item(
+    item_id: str, *, audit_source: str = "webhook"
+) -> Optional[dict]:
+    """Sync one Plaid item by id. Returns result dict or None if item missing.
+
+    Defaults ``audit_source='webhook'`` because the only current caller is
+    the debounced webhook handler; manual single-item syncs should pass
+    ``audit_source='manual'`` explicitly.
+    """
     from .repo import get_plaid_repo
 
     repo = get_plaid_repo()
@@ -164,7 +187,7 @@ async def sync_single_item(item_id: str) -> Optional[dict]:
     if not item:
         return None
     source = _get_source()
-    return await _sync_item_payload(item, source)
+    return await _sync_item_payload(item, source, audit_source=audit_source)
 
 
 _debounce_tasks: dict[str, asyncio.Task] = {}
@@ -190,10 +213,13 @@ def schedule_debounced_sync_item(item_id: str, delay_sec: float = 12.0) -> None:
     _debounce_tasks[item_id] = loop.create_task(_job())
 
 
-async def sync_all_items() -> List[dict]:
+async def sync_all_items(*, audit_source: str = "manual") -> List[dict]:
     """
     Sync all connected Plaid items.
     Called by the daily scheduler and by the manual /api/plaid/sync endpoint.
+
+    ``audit_source`` flags who drove this run for the audit log — the
+    scheduler passes ``scheduler``, manual endpoints pass ``manual``.
     """
     from .repo import get_plaid_repo
 
@@ -202,7 +228,9 @@ async def sync_all_items() -> List[dict]:
     source = _get_source()
     results: List[dict] = []
     for item in items:
-        results.append(await _sync_item_payload(item, source))
+        results.append(
+            await _sync_item_payload(item, source, audit_source=audit_source)
+        )
     return results
 
 
@@ -224,7 +252,7 @@ async def _scheduled_sync() -> None:
     results: List[dict] = []
     exception: Optional[BaseException] = None
     try:
-        results = await sync_all_items()
+        results = await sync_all_items(audit_source="scheduler")
     except BaseException as exc:  # noqa: BLE001 — we record and re-raise below
         exception = exc
         logger.error("Scheduled Plaid sync failed: %s", exc, exc_info=True)
