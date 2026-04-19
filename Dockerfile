@@ -46,7 +46,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PORT=8000
+    APP_PORT=8000
 
 # Minimal runtime OS deps:
 #   * `ca-certificates` — outbound TLS to Plaid / Telegram / Stripe-style APIs.
@@ -76,7 +76,15 @@ USER app
 EXPOSE 8000
 
 # `tini` as init so SIGTERM from Railway propagates to uvicorn cleanly and
-# APScheduler's worker threads get a chance to shut down. `sh -c` lets the
-# Railway-injected `$PORT` expand at container start time.
+# APScheduler's worker threads get a chance to shut down.
+#
+# PORT handling: Railway's HTTP proxy for this service has its target port
+# pinned to 8000 (matching the original `EXPOSE 8000` contract). Changing
+# the listening port without also updating the Railway service's
+# networking config produced a 502 from the edge on every request — this
+# broke login until we rebuilt. We therefore respect `APP_PORT` (defaults
+# to 8000) rather than the Railway-injected `$PORT`, which can differ at
+# runtime. Override `APP_PORT` (and `EXPOSE`) only if you also reconfigure
+# Railway's target port to match.
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["sh", "-c", "exec uvicorn web.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "exec uvicorn web.main:app --host 0.0.0.0 --port ${APP_PORT:-8000}"]
