@@ -64,6 +64,7 @@ export function CategoryDonutChart({
   onHover,
   onLock,
   onSliceClick,
+  totalCents: totalCentsOverride,
   innerRadius = 72,
   outerRadius = 108,
   height = 260,
@@ -79,12 +80,20 @@ export function CategoryDonutChart({
    * change the query (rollup/parent_category_id) in response.
    */
   onSliceClick?: (row: CategorySpend, index: number) => void;
+  /**
+   * Optional override for the center-overlay "Total". Pass this when `data` has
+   * been visually trimmed (e.g. tail merged into an "Other" bucket) but you want
+   * the centerpiece to reflect the full, un-trimmed month total — keeping the
+   * Dashboard donut consistent with Reports → Cash Flow expenses.
+   */
+  totalCents?: number;
   innerRadius?: number;
   outerRadius?: number;
   height?: number;
 }) {
   const activeIdx = hoveredIdx ?? lockedIdx ?? undefined;
-  const totalCents = data.reduce((s, r) => s + r.amount_cents, 0);
+  const totalCents =
+    totalCentsOverride ?? data.reduce((s, r) => s + r.amount_cents, 0);
   const displayRow = activeIdx != null ? data[activeIdx] : null;
   const pieData = data.map((r) => ({ name: r.category_name, value: r.amount_cents }));
 
@@ -251,7 +260,58 @@ export function CategoryLegend({
 // ---------------------------------------------------------------------------
 // Self-contained widget (manages own hover/lock state) — for Dashboard
 // ---------------------------------------------------------------------------
-export function CategoryDonutWidget({ data }: { data: CategorySpend[] }) {
+
+/**
+ * Collapse the long tail of categories into a single synthetic "Other" row so
+ * the dashboard donut stays readable while still summing to the full month
+ * total (the centerpiece number must match Reports → Cash Flow expenses).
+ *
+ * Contract:
+ *   - Input rows already come from the backend sorted by amount desc.
+ *   - We keep the first `maxSlices - 1` rows untouched.
+ *   - Everything else is folded into one `category_id: null` row labeled "Other".
+ *   - Percent for the "Other" row is recomputed against the full total so the
+ *     legend shares add up to ~100% even after the fold.
+ *   - The total returned is the un-folded sum of the input — that's what the
+ *     chart displays in its center overlay.
+ */
+function collapseTailIntoOther(
+  data: CategorySpend[],
+  maxSlices: number,
+): { displayData: CategorySpend[]; totalCents: number } {
+  const totalCents = data.reduce((s, r) => s + r.amount_cents, 0);
+
+  if (data.length <= maxSlices) {
+    return { displayData: data, totalCents };
+  }
+
+  const head = data.slice(0, maxSlices - 1);
+  const tail = data.slice(maxSlices - 1);
+  const tailAmount = tail.reduce((s, r) => s + r.amount_cents, 0);
+  const tailPercent =
+    totalCents > 0 ? (tailAmount / totalCents) * 100 : 0;
+
+  const otherRow: CategorySpend = {
+    category_id: null,
+    category_name: `Other (${tail.length})`,
+    amount_cents: tailAmount,
+    percent: tailPercent,
+    bucket_key: "other",
+    parent_category_id: null,
+    children_count: 0,
+  };
+
+  return { displayData: [...head, otherRow], totalCents };
+}
+
+export function CategoryDonutWidget({
+  data,
+  maxSlices = 12,
+}: {
+  data: CategorySpend[];
+  /** Visual cap on slices; the (maxSlices-1)+1 rows shown roll the rest into "Other". */
+  maxSlices?: number;
+}) {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [lockedIdx, setLockedIdx] = useState<number | null>(null);
 
@@ -261,10 +321,13 @@ export function CategoryDonutWidget({ data }: { data: CategorySpend[] }) {
     );
   }
 
+  const { displayData, totalCents } = collapseTailIntoOther(data, maxSlices);
+
   return (
     <div className="grid gap-4 sm:grid-cols-[240px_1fr]">
       <CategoryDonutChart
-        data={data}
+        data={displayData}
+        totalCents={totalCents}
         hoveredIdx={hoveredIdx}
         lockedIdx={lockedIdx}
         onHover={setHoveredIdx}
@@ -274,7 +337,7 @@ export function CategoryDonutWidget({ data }: { data: CategorySpend[] }) {
         height={240}
       />
       <CategoryLegend
-        data={data}
+        data={displayData}
         hoveredIdx={hoveredIdx}
         lockedIdx={lockedIdx}
         onHover={setHoveredIdx}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -184,11 +184,6 @@ function DashboardContent() {
   const insights = insightsQuery.data;
   const insightsTeaser = pickTeaser(insights);
 
-  const pieData = useMemo(
-    () => byCategory.filter((c) => c.amount_cents > 0).slice(0, 12),
-    [byCategory],
-  );
-
   const COMPACT_DEFAULT = 3;
   const visibleForecast = forecastExpanded ? forecastSorted : forecastSorted.slice(0, COMPACT_DEFAULT);
   const visiblePriceChanges = priceChangesExpanded ? priceChanges : priceChanges.slice(0, COMPACT_DEFAULT);
@@ -370,7 +365,7 @@ function DashboardContent() {
             ) : byCategoryQuery.isError ? (
               <p className="text-destructive text-sm">Could not load category data.</p>
             ) : (
-              <CategoryDonutWidget data={pieData} />
+              <CategoryDonutWidget data={byCategory} />
             )}
           </CardContent>
         </Card>
