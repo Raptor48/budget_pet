@@ -10,6 +10,9 @@ The rules live in ``classify_row`` in the priority order documented in
 3. Pair match depository ↔ depository (classic Plaid TRANSFER_OUT/IN).
 4. Name match (Zelle counterparty name in ``app_settings.internal_transfer_names``).
 5. Income by category (``categories.is_income = TRUE`` AND ``amount_cents < 0``).
+5.5. Orphan ``TRANSFER_IN`` on a depository account with negative amount —
+    money genuinely arriving from a bank we don't track yet. Counts as
+    income, not an expense refund.
 6. Expense fallback (depository / credit / cash outflow that is not a transfer).
 7. Uncategorized (investment/loan outflows that do not pair).
 
@@ -176,10 +179,31 @@ def classify_row(
         # diagnostics instead of silently inflating either bucket.
         return "uncategorized"
 
+    acct_type = (row.account_type or "").lower()
+
+    # Rule 5.5: orphan incoming depository transfer.
+    #
+    # A ``TRANSFER_IN`` that survived rules 2–4 did not pair with an outflow
+    # and did not name-match any family member. On a depository account with
+    # the typical Plaid credit sign (amount_cents < 0) it reads as money
+    # genuinely arriving from outside the tracked set — e.g. a wire from a
+    # bank we haven't connected, a Zelle from a non-family sender without a
+    # name hit, a refund issued via ACH. Falling through to Rule 6 would tag
+    # it as an expense refund, polluting the expense bucket with income-like
+    # inflow. Keeping it out of Rule 7 (uncategorized) ensures it still
+    # shows up on the income side of the cash-flow identity. Positive-amount
+    # TRANSFER_IN rows are unusual (Plaid sometimes posts them on the send
+    # leg) and stay in the expense fallback.
+    if (
+        row.pfc_primary == "TRANSFER_IN"
+        and row.amount_cents < 0
+        and acct_type == "depository"
+    ):
+        return "income"
+
     # Rule 6: everything that looks spendable is an expense — even with a
     # negative sign (refunds), because refunds reduce the month's spend in
     # the same category they came from.
-    acct_type = (row.account_type or "").lower()
     if row.source == "cash" or acct_type in _SPENDABLE_ACCOUNT_TYPES:
         return "expense"
 

@@ -218,6 +218,103 @@ class TestRule5IncomeByCategory:
         assert classify_row(row, paired_ids=set(), name_matches=[]) == "uncategorized"
 
 
+class TestRule5_5OrphanTransferIn:
+    """Rule 5.5: an unpaired, unnamed ``TRANSFER_IN`` on a depository
+    account with negative amount is money arriving from outside the
+    tracked set. It must land in ``income``, not in ``expense``.
+
+    This rule only runs AFTER the pair matcher (rules 2-3) and the name
+    matcher (rule 4) both failed — i.e. the counterparty bank isn't
+    connected to Plaid, or the sender's name isn't in the family list.
+    """
+
+    def test_orphan_transfer_in_negative_depository_is_income(self):
+        """The canonical case: wire from an unlinked bank lands on
+        Chase checking as TRANSFER_IN / -$250. Classifier must treat it
+        as income, not an expense refund."""
+        row = _row(
+            amount_cents=-25_000,
+            account_type="depository",
+            pfc_primary="TRANSFER_IN",
+        )
+        assert classify_row(row, paired_ids=set(), name_matches=[]) == "income"
+
+    def test_paired_transfer_in_still_internal(self):
+        """Pair matcher (rules 2-3) wins over rule 5.5 — a matched transfer
+        never leaks into income."""
+        row = _row(
+            id=907,
+            amount_cents=-25_000,
+            account_type="depository",
+            pfc_primary="TRANSFER_IN",
+        )
+        assert (
+            classify_row(row, paired_ids={907, 377}, name_matches=[])
+            == "internal_transfer"
+        )
+
+    def test_name_matched_transfer_in_still_internal(self):
+        """A Zelle from a family member is an internal transfer even if
+        the pair matcher couldn't find a sibling outflow (the other side
+        might live outside the horizon). Rule 4 runs before rule 5.5."""
+        row = _row(
+            amount_cents=-20_000,
+            account_type="depository",
+            pfc_primary="TRANSFER_IN",
+            name="Zelle payment from SPOUSE",
+        )
+        assert (
+            classify_row(row, paired_ids=set(), name_matches=["SPOUSE"])
+            == "internal_transfer"
+        )
+
+    def test_positive_transfer_in_stays_in_expense_fallback(self):
+        """Positive-amount TRANSFER_IN is unusual but can happen on the
+        send leg of some rails. Keep the conservative behaviour — let it
+        land in expense so it surfaces in the user's face instead of
+        silently inflating income."""
+        row = _row(
+            amount_cents=50_000,
+            account_type="depository",
+            pfc_primary="TRANSFER_IN",
+        )
+        assert classify_row(row, paired_ids=set(), name_matches=[]) == "expense"
+
+    def test_transfer_in_on_credit_account_stays_expense_fallback(self):
+        """Rule 5.5 is depository-only. A negative TRANSFER_IN on a credit
+        card is almost always a payment reversal / stmt credit — cash-
+        flow-wise still an expense reduction, not outside income."""
+        row = _row(
+            amount_cents=-10_000,
+            account_type="credit",
+            pfc_primary="TRANSFER_IN",
+        )
+        assert classify_row(row, paired_ids=set(), name_matches=[]) == "expense"
+
+    def test_income_category_still_wins_over_5_5(self):
+        """If the user (or Plaid) already flagged the category as income,
+        rule 5 (income-by-category) runs first and classifies the row as
+        income — we don't want rule 5.5 to shadow the explicit signal."""
+        row = _row(
+            amount_cents=-30_000,
+            account_type="depository",
+            pfc_primary="TRANSFER_IN",
+            category_is_income=True,
+        )
+        assert classify_row(row, paired_ids=set(), name_matches=[]) == "income"
+
+    def test_non_transfer_in_pfc_unaffected(self):
+        """A generic refund (-$30 on GENERAL_MERCHANDISE) must keep the
+        existing Rule 6 behaviour so it nets against the original
+        category's spend."""
+        row = _row(
+            amount_cents=-3_000,
+            account_type="depository",
+            pfc_primary="GENERAL_MERCHANDISE",
+        )
+        assert classify_row(row, paired_ids=set(), name_matches=[]) == "expense"
+
+
 class TestRule6ExpenseFallback:
     """Rule 6: spendable-account rows that did not pair → expense. Refunds
     stay in ``expense`` with a negative amount so month totals net out."""

@@ -72,7 +72,11 @@ Implemented in `web.classification.classifier.classify_row`:
    payments from checking accounts.
 3. **Pair match — depository ↔ depository.** Classic
    `TRANSFER_OUT` / `TRANSFER_IN` pair between two different family depository
-   accounts within ±3 days. Both rows → `internal_transfer`.
+   accounts within ±3 days. Cent-exact match in the first pass; a fee-
+   tolerant second pass catches the same shape with a date window of ±1
+   day and an amount delta of at most `max($5, 1 % of the outflow)`, so
+   PayPal Instant Transfer fees and small wires still close the loop (see
+   `docs/plaid.md` for the full predicate set). Both rows → `internal_transfer`.
 4. **Name match.** `pfc_primary IN ('TRANSFER_IN', 'TRANSFER_OUT')` with a
    counterparty name matching the family-wide
    `app_settings.internal_transfer_names` list (Zelle between spouses etc.).
@@ -81,6 +85,16 @@ Implemented in `web.classification.classifier.classify_row`:
    `amount_cents < 0` → `income`. A row whose category is flagged income but
    whose sign says debit (`amount > 0`) is **not** silently reclassified —
    it becomes `uncategorized` so the inconsistency surfaces in diagnostics.
+5.5. **Orphan `TRANSFER_IN`.** A row with `pfc_primary = 'TRANSFER_IN'`
+   and `amount_cents < 0` on a `depository` account that survived rules
+   2-4 represents money genuinely arriving from outside the tracked set
+   (a wire from a bank we haven't connected, a Zelle from a non-family
+   sender). It lands in `income` — routing it into the expense fallback
+   would inflate negative spend even though nothing was actually bought.
+   Positive-amount `TRANSFER_IN` rows are unusual and stay in the Rule 6
+   fallback. This rule is depository-only; a negative `TRANSFER_IN` on a
+   credit card is almost always a statement credit and stays in `expense`
+   so it nets against the original charges.
 6. **Expense fallback.** Any remaining row on a `depository`, `credit`,
    `other` account or `source = 'cash'` → `expense`. Sign is preserved, so
    refunds (`amount < 0`) stay in expense and reduce the aggregate.
