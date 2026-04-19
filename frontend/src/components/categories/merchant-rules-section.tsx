@@ -25,7 +25,7 @@ import {
 import { categoriesApi, merchantRulesApi, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { MerchantRule, MerchantRulePreviewResult } from "@/types/v2";
-import { Loader2, Sparkles, Tag, Trash2, Wand2 } from "lucide-react";
+import { ChevronDown, Loader2, Sparkles, Tag, Trash2, Wand2 } from "lucide-react";
 
 const PREVIEW_DEBOUNCE_MS = 400;
 const MIN_MERCHANT_LEN = 3;
@@ -42,6 +42,7 @@ export function MerchantRulesSection() {
   const [applyDialogRule, setApplyDialogRule] = useState<MerchantRule | null>(null);
   const [applyPreview, setApplyPreview] = useState<MerchantRulePreviewResult | null>(null);
   const [applyPreviewError, setApplyPreviewError] = useState<string | null>(null);
+  const [savedRulesExpanded, setSavedRulesExpanded] = useState(false);
 
   const rulesQuery = useQuery({
     queryKey: ["merchant-rules"],
@@ -286,13 +287,41 @@ export function MerchantRulesSection() {
           </div>
 
           <div className="border-border/60 space-y-3 border-t pt-4">
-            <p className="text-muted-foreground text-sm font-medium">Saved rules</p>
             {rulesQuery.isLoading ? (
-              <p className="text-muted-foreground text-sm">Loading…</p>
+              <>
+                <p className="text-muted-foreground text-sm font-medium">Saved rules</p>
+                <p className="text-muted-foreground text-sm">Loading…</p>
+              </>
             ) : rules.length === 0 ? (
-              <p className="text-muted-foreground text-sm">No rules yet.</p>
+              <>
+                <p className="text-muted-foreground text-sm font-medium">Saved rules</p>
+                <p className="text-muted-foreground text-sm">No rules yet.</p>
+              </>
             ) : (
-              <ul className="space-y-2">
+              <>
+                <button
+                  type="button"
+                  onClick={() => setSavedRulesExpanded((v) => !v)}
+                  aria-expanded={savedRulesExpanded}
+                  aria-controls="saved-rules-list"
+                  className="group flex w-full items-center justify-between gap-2 rounded-md text-left transition-colors hover:text-foreground"
+                >
+                  <span className="text-muted-foreground text-sm font-medium group-hover:text-foreground">
+                    Saved rules
+                    <span className="text-muted-foreground ml-2 rounded-full border border-border/60 bg-muted/50 px-2 py-0.5 text-xs tabular-nums">
+                      {rules.length}
+                    </span>
+                  </span>
+                  <ChevronDown
+                    className={cn(
+                      "text-muted-foreground size-4 transition-transform duration-200",
+                      savedRulesExpanded && "rotate-180",
+                    )}
+                    aria-hidden
+                  />
+                </button>
+                {savedRulesExpanded ? (
+              <ul id="saved-rules-list" className="space-y-2">
                 {rules.map((r, i) => (
                   <li
                     key={r.id}
@@ -338,6 +367,8 @@ export function MerchantRulesSection() {
                   </li>
                 ))}
               </ul>
+                ) : null}
+              </>
             )}
           </div>
         </CardContent>
