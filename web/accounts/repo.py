@@ -17,6 +17,30 @@ from web.db import get_pool
 logger = logging.getLogger(__name__)
 
 
+def _normalize_missing_fields(value: Any) -> List[str]:
+    """Decode ``accounts.plaid_missing_fields`` JSONB into a stable list."""
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            return []
+        return [str(v) for v in parsed] if isinstance(parsed, list) else []
+    return []
+
+
+def _decorate(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Post-process a DB row before returning it to callers/serializers."""
+    row["is_cash_wallet"] = is_designated_cash_wallet(row)
+    row["plaid_missing_fields"] = _normalize_missing_fields(
+        row.get("plaid_missing_fields")
+    )
+    return row
+
+
 class AccountsRepository:
     async def _pool(self):
         return await get_pool()
@@ -43,10 +67,7 @@ class AccountsRepository:
                 rows = await conn.fetch(
                     self._SELECT_WITH_BRANDING + "ORDER BY a.type, a.name"
                 )
-        out = [dict(r) for r in rows]
-        for d in out:
-            d["is_cash_wallet"] = is_designated_cash_wallet(d)
-        return out
+        return [_decorate(dict(r)) for r in rows]
 
     async def get_account(self, account_id: int) -> Optional[Dict[str, Any]]:
         pool = await self._pool()
@@ -57,9 +78,7 @@ class AccountsRepository:
             )
         if not row:
             return None
-        d = dict(row)
-        d["is_cash_wallet"] = is_designated_cash_wallet(d)
-        return d
+        return _decorate(dict(row))
 
     async def ensure_cash_wallet(self, user_id: int) -> Dict[str, Any]:
         """
@@ -114,7 +133,7 @@ class AccountsRepository:
                     self._SELECT_WITH_BRANDING + "WHERE a.id = $1",
                     aid,
                 )
-        d = dict(row)
+        d = _decorate(dict(row))
         d["is_cash_wallet"] = True
         return d
 
@@ -152,9 +171,7 @@ class AccountsRepository:
                 data.get("holder_category"),
                 data.get("is_active", True),
             )
-        d = dict(row)
-        d["is_cash_wallet"] = is_designated_cash_wallet(d)
-        return d
+        return _decorate(dict(row))
 
     async def update_account(self, account_id: int, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Partial update — only keys present in data are changed."""
@@ -165,6 +182,9 @@ class AccountsRepository:
             "last_payment_date", "last_statement_balance_cents", "expected_payoff_date",
             "ytd_interest_paid_cents", "currency", "holder_category", "is_active",
             "last_synced_at", "user_id",
+            # Manual overrides — only accepted here after the route layer
+            # has confirmed the corresponding Plaid value is NULL.
+            "credit_limit_cents_manual", "apr_percent_manual",
         }
         fields = {k: v for k, v in data.items() if k in allowed}
         if not fields:

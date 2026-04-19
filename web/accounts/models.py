@@ -1,6 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -18,6 +18,14 @@ class AccountOut(BaseModel):
     available_balance_cents: Optional[int] = None
     credit_limit_cents: Optional[int] = None
     apr_percent: Optional[Decimal] = None
+    # Manual fallbacks — shown only when the corresponding Plaid field is
+    # NULL. See ``web.accounts.missing_fields`` and ``docs/plaid.md``.
+    credit_limit_cents_manual: Optional[int] = None
+    apr_percent_manual: Optional[Decimal] = None
+    # Which Plaid-sourced liability fields are currently missing on this
+    # account. UI uses this list to surface "Not reported by bank" hints
+    # and unlock the manual-override inputs.
+    plaid_missing_fields: List[str] = Field(default_factory=list)
     min_payment_cents: Optional[int] = None
     due_day: Optional[int] = None
     is_overdue: Optional[bool] = None
@@ -59,3 +67,9 @@ class AccountUpdate(BaseModel):
     holder_category: Optional[str] = None
     user_id: Optional[int] = None
     current_balance_cents: Optional[int] = None
+    # Manual fallbacks for banks Plaid doesn't cover fully. The route
+    # layer enforces that the matching Plaid value is NULL before
+    # accepting a non-null override. Sending ``null`` clears the override
+    # and is always allowed.
+    credit_limit_cents_manual: Optional[int] = Field(None, ge=0)
+    apr_percent_manual: Optional[Decimal] = Field(None, ge=0, le=Decimal("100"))
