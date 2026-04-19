@@ -21,8 +21,8 @@ one member’s accounts in the UI). The filter uses
 | GET | /api/accounts | List accounts (active_only=true default); each row includes `is_cash_wallet` when applicable |
 | GET | /api/accounts/cash-wallet | Ensure and return the per-user **Cash** wallet (no Plaid link) |
 | POST | /api/accounts | Create manual account |
-| GET | /api/accounts/{id} | Get account |
-| PATCH | /api/accounts/{id} | Update account; **`current_balance_cents` allowed only** on the designated Cash wallet (422 otherwise) |
+| GET | /api/accounts/{id} | Get account. Response includes `credit_limit_cents_manual`, `apr_percent_manual` (user overrides) and `plaid_missing_fields: string[]` (subset of `["apr","credit_limit"]` currently missing from Plaid). |
+| PATCH | /api/accounts/{id} | Update account. **`current_balance_cents` allowed only** on the designated Cash wallet (422 otherwise). **`credit_limit_cents_manual` / `apr_percent_manual`** follow the manual-override guard: setting a non-null value is rejected with `409 Conflict` when the corresponding Plaid column (`credit_limit_cents` / `apr_percent`) is populated; clearing (explicit `null`) always works. Owner of the account — or any user with `is_owner` — may edit; anyone else gets `403`. See `docs/plaid.md#missing-liability-fields--manual-overrides`. |
 | DELETE | /api/accounts/{id} | Soft-delete account |
 
 ## Categories
@@ -162,6 +162,7 @@ expense totals by the class predicate itself (no separate
 | POST | /api/plaid/items/{item_id}/reset-cursor | Reset sync cursor |
 | POST | /api/plaid/sync | Trigger manual sync for all items |
 | GET | /api/plaid/sync/log | Last 50 sync log entries |
+| DELETE | /api/plaid/sync/log | **Owner-only.** Deletes every row in `plaid_sync_log`. Writes a `plaid.sync_log_cleared` audit entry with `{ deleted }`. Used by Settings → Log "Clear sync log" button. |
 | POST | /api/plaid/webhook | Plaid webhooks (HTTPS); verifies Plaid JWT; handles `ITEM_LOGIN_REQUIRED`, `SYNC_UPDATES_AVAILABLE` |
 | DELETE | /api/plaid/sandbox-data | **Sandbox only:** delete all rows tied to `source=plaid_sandbox` (transactions, accounts, recurring, net worth snapshots, Plaid items). Preserves manual/cash data, categories, tags, budgets. |
 
@@ -239,6 +240,7 @@ scheduler call sites.
 |---|---|---|
 | GET | /api/audit | Newest-first paginated feed. Query: `limit` (1-200, default 50), `before_id` (cursor — pass the last id from the previous page), `event_type` (exact match), `category` (namespace — e.g. `plaid` → matches `plaid.*`). Returns `{ entries: AuditEntry[], next_before_id }`. |
 | GET | /api/audit/event-types | Distinct `event_type` values currently in the table (useful to populate a filter dropdown). |
+| DELETE | /api/audit | **Owner-only.** Deletes audit entries. Optional query params: `category` (namespace prefix — e.g. `plaid` removes all `plaid.*` rows) and `before_id` (keep rows with `id > before_id`). No filters = wipe everything. Returns `{ deleted }`; writes one `audit.log_cleared` entry with the filter used and the deleted count. Used by Settings → Log "Clear log" button (respects the active category tab). |
 
 `AuditEntry` fields: `id`, `created_at`, `actor_user_id`, `actor_username`,
 `event_type`, `source` (`manual`|`scheduler`|`webhook`|`system`),

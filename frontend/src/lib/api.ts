@@ -474,6 +474,9 @@ export const plaidApi = {
   getSyncLog: (): Promise<PlaidSyncLogEntry[]> =>
     apiRequest('/api/plaid/sync/log'),
 
+  clearSyncLog: (): Promise<{ deleted: number; cleared_by: string | null }> =>
+    apiRequest('/api/plaid/sync/log', { method: 'DELETE' }),
+
   deleteSandboxData: (): Promise<{
     message: string;
     transactions_deleted: number;
@@ -664,6 +667,16 @@ export const auditApi = {
   },
 
   eventTypes: (): Promise<string[]> => apiRequest('/api/audit/event-types'),
+
+  clear: (
+    params: { category?: string | null; beforeId?: number | null } = {},
+  ): Promise<{ deleted: number; cleared_by: string | null }> => {
+    const qs = new URLSearchParams();
+    if (params.category) qs.set('category', params.category);
+    if (params.beforeId) qs.set('before_id', String(params.beforeId));
+    const query = qs.toString();
+    return apiRequest(`/api/audit${query ? `?${query}` : ''}`, { method: 'DELETE' });
+  },
 };
 
 export type { AuditEntry, AuditListResponse, AutosyncConfig, AutosyncConfigUpdate };

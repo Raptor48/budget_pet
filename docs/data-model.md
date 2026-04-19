@@ -17,8 +17,11 @@ Single source of truth for all financial accounts (checking, savings, credit car
 | subtype | TEXT | checking\|savings\|credit card\|student\|mortgage\|... |
 | current_balance_cents | BIGINT | Current balance (cents) |
 | available_balance_cents | BIGINT | Available (depository) or available credit |
-| credit_limit_cents | BIGINT | Credit limit (credit accounts) |
-| apr_percent | NUMERIC(6,3) | APR from liabilities |
+| credit_limit_cents | BIGINT | Credit limit (credit accounts), sourced from Plaid `/liabilities/get`. NULL when the issuer doesn't report it (common for Capital One credit cards). |
+| apr_percent | NUMERIC(6,3) | APR from Plaid `/liabilities/get`. NULL when `aprs[]` is empty. |
+| credit_limit_cents_manual | BIGINT | User-entered override, editable **only** when `credit_limit_cents IS NULL`. Set/cleared via `PATCH /api/accounts/{id}`. The UI falls back to this value for utilization math and the account tile. Protects the override against a future Plaid backfill — if Plaid ever starts returning `credit_limit_cents`, the API returns `409 Conflict` for fresh writes but keeps the manual value readable until the user clears it. |
+| apr_percent_manual | NUMERIC(6,3) | User-entered APR override with the same write guard (`apr_percent IS NULL`) and same fallback semantics. |
+| plaid_missing_fields | JSONB | Cached set of liability fields currently missing from Plaid for this account (subset of `["apr", "credit_limit"]`). Only populated for `type IN ('credit','loan')`. Recomputed after every Plaid sync in `web/accounts/missing_fields.py::detect_and_record_missing`; an `audit_log` entry (`plaid.liabilities.missing_field`) is written **only when the set changes**, so idempotent syncs don't spam the log. Consumed by the frontend `ManualOverrideField` to decide whether to show the "Enter manually" CTA. |
 | min_payment_cents | BIGINT | Minimum payment due |
 | due_day | SMALLINT | Day of month payment due |
 | is_overdue | BOOLEAN | From liabilities |
@@ -215,7 +218,7 @@ flows: insert failures are logged and swallowed.
 | created_at | TIMESTAMPTZ | Indexed DESC for reverse chronological list |
 | actor_user_id | INTEGER FK | `users.id`, ON DELETE SET NULL (nullable for scheduler/system events) |
 | actor_username | TEXT | Snapshotted so deleted users still render |
-| event_type | TEXT | Namespaced, e.g. `auth.login`, `auth.logout`, `auth.login_failed`, `plaid.sync_manual`, `plaid.sync_scheduled`, `plaid.item_connect`, `plaid.item_remove`, `plaid.cursor_reset`, `plaid.sandbox_wiped`, `settings.autosync_updated` |
+| event_type | TEXT | Namespaced, e.g. `auth.login`, `auth.logout`, `auth.login_failed`, `plaid.sync_manual`, `plaid.sync_scheduled`, `plaid.item_connect`, `plaid.item_remove`, `plaid.cursor_reset`, `plaid.sandbox_wiped`, `plaid.liabilities.missing_field` (set-changed), `plaid.sync_log_cleared`, `audit.log_cleared`, `settings.autosync_updated` |
 | source | TEXT | `manual` \| `scheduler` \| `webhook` \| `system` (CHECK enforced) |
 | target_kind | TEXT | e.g. `plaid_item` |
 | target_id | TEXT | Free-form id (institution item_id, etc.) |
