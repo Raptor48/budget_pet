@@ -204,21 +204,33 @@ async def match_pairs(
     Find internal-transfer pairs across family accounts and return the set
     of transaction ids that should be classified as ``internal_transfer``.
 
-    Two complementary queries are ORed together:
+    Three queries are combined (first two are cent-exact, third is a
+    fee-tolerant fallback):
 
-    1. **Cash ↔ debt** — the common credit-card-bill / loan-payment case.
-       Source is an outflow (``amount > 0``) on a ``depository`` account
-       with ``pfc_primary IN ('LOAN_PAYMENTS', 'TRANSFER_OUT')``. Sink is
-       the opposite sign on a ``credit`` or ``loan`` account within ±3
-       days. Both accounts must belong to the same family (any
-       identifiable owner is enough — see ``match_family_account_transfers``).
-    2. **Depository ↔ depository** — the classic Plaid TRANSFER_OUT /
-       TRANSFER_IN pair (savings ↔ checking, PayPal → Chase …) already
-       implemented in ``match_family_account_transfers``.
+    1. **Cash ↔ debt (exact)** — the common credit-card-bill / loan-payment
+       case. Source is an outflow (``amount > 0``) on a ``depository``
+       account with ``pfc_primary IN ('LOAN_PAYMENTS', 'TRANSFER_OUT')``.
+       Sink is the opposite sign on a ``credit`` or ``loan`` account
+       within ±3 days. Both accounts must belong to the same family (any
+       identifiable owner is enough).
+    2. **Depository ↔ depository (exact)** — the classic Plaid
+       TRANSFER_OUT / TRANSFER_IN pair (savings ↔ checking, PayPal →
+       Chase …) with matching cents within ±3 days.
+    3. **Depository ↔ depository (tolerant)** — same shape as #2 but the
+       counterparties' amounts may differ by up to
+       ``max(500¢, 1% of the outflow)`` and the date window is tighter
+       (±1 day). Catches PayPal Instant Transfer fees, small wire fees
+       and sub-dollar FX rounding where Plaid posts the net on one side.
+       Runs **after** the exact matchers and **excludes** rows they
+       already paired, so exact matches always win. Tie-breaking in
+       ROW_NUMBER prefers the smallest amount delta first, then the
+       smallest date delta, so an outflow with a fee-adjusted candidate
+       and a cent-exact candidate still pairs with the cent-exact one.
 
     ``horizon_days=None`` scans the whole history; otherwise only rows
-    within the last N days participate. ROW_NUMBER() dedupes candidates so
-    an outflow with two same-amount inflow candidates still pairs 1:1.
+    within the last N days participate. ROW_NUMBER() dedupes candidates
+    in every query so an outflow with two inflow candidates still pairs
+    1:1.
     """
     if horizon_days is not None and horizon_days <= 0:
         return set()
@@ -317,6 +329,67 @@ async def match_pairs(
     for r in depository_rows:
         paired.add(r["out_id"])
         paired.add(r["in_id"])
+
+    # Third pass: depository ↔ depository tolerance matcher. Covers fee-split
+    # pairs like PayPal Instant Transfer (1.75% fee) and small wire / FX
+    # rounding. Runs *after* the exact matchers and excludes rows they
+    # already paired so cent-exact matches always win.
+    tolerance_rows = await conn.fetch(
+        """
+        WITH scoped AS (
+          SELECT t.id, t.account_id, t.amount_cents, t.date,
+                 t.pfc_primary,
+                 a.type AS account_type,
+                 COALESCE(a.user_id, p.user_id) AS owner_uid
+          FROM transactions t
+          JOIN accounts a ON a.id = t.account_id
+          LEFT JOIN plaid_items p ON p.item_id = a.plaid_item_id
+          WHERE t.source IN ('plaid', 'plaid_sandbox')
+            AND t.is_internal_transfer_manual = FALSE
+            AND t.pfc_primary IN ('TRANSFER_IN', 'TRANSFER_OUT')
+            AND NOT (t.id = ANY($2::int[]))
+            AND ($1::int IS NULL OR t.date >= CURRENT_DATE - $1::int * INTERVAL '1 day')
+        ),
+        pairs AS (
+          SELECT
+            o.id AS out_id, i.id AS in_id,
+            ROW_NUMBER() OVER (
+              PARTITION BY o.id
+              ORDER BY ABS(o.amount_cents + i.amount_cents), ABS(o.date - i.date), i.id
+            ) AS rn_out,
+            ROW_NUMBER() OVER (
+              PARTITION BY i.id
+              ORDER BY ABS(o.amount_cents + i.amount_cents), ABS(o.date - i.date), o.id
+            ) AS rn_in
+          FROM scoped o
+          JOIN scoped i
+            ON o.pfc_primary = 'TRANSFER_OUT'
+           AND i.pfc_primary = 'TRANSFER_IN'
+           AND i.account_id <> o.account_id
+           AND i.owner_uid IS NOT NULL
+           AND o.owner_uid IS NOT NULL
+           AND o.amount_cents > 0
+           AND i.amount_cents < 0
+           AND o.account_type = 'depository'
+           AND i.account_type = 'depository'
+           -- Fee / FX tolerance: max(500¢ floor, 1% of out) covers PayPal
+           -- Instant Transfer (1.75% but usually <$5 delta), small wire
+           -- fees, and sub-dollar FX rounding.
+           AND ABS(o.amount_cents + i.amount_cents) <= GREATEST(500, o.amount_cents / 100)
+           AND ABS(o.amount_cents + i.amount_cents) > 0
+           AND ABS(o.date - i.date) <= 1
+        )
+        SELECT out_id, in_id
+        FROM pairs
+        WHERE rn_out = 1 AND rn_in = 1
+        """,
+        horizon_days,
+        list(paired),
+    )
+    for r in tolerance_rows:
+        paired.add(r["out_id"])
+        paired.add(r["in_id"])
+
     return paired
 
 

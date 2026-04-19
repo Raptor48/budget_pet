@@ -247,6 +247,37 @@ absolute date difference then row id. The matcher runs:
   returns `name_rows_updated` and `pair_rows_updated` separately so the
   UI can report what each stage contributed.
 
+#### Fee-tolerant third pass
+
+Some rails debit a fee on one side of the transfer so Plaid posts
+different cent amounts (PayPal Instant Transfer's 1.75 % fee is the
+canonical example — a $261.05 outflow arrives as a −$256.48 inflow).
+The cent-exact matcher above skips these by design, so
+`web/classification/classifier.py::match_pairs` adds a third SQL pass
+that runs **after** the two cent-exact passes and **only** against rows
+they didn't already pair:
+
+* both sides still must be `TRANSFER_OUT` / `TRANSFER_IN` on two
+  different `depository` accounts in the same family;
+* the amount delta `ABS(out.amount_cents + in.amount_cents)` must be
+  strictly positive (equal amounts belong to the exact matcher) and at
+  most `GREATEST(500, out.amount_cents / 100)` cents — i.e. a flat $5
+  floor for small transfers plus a 1 % ramp for larger ones. This
+  absorbs typical PayPal / small wire fees without false-pairing
+  unrelated same-day transfers;
+* the date window is tightened to **±1 day** (vs ±3 for cent-exact) so
+  the looser amount predicate doesn't latch onto coincidental hits;
+* `is_internal_transfer_manual = FALSE` and `source IN ('plaid',
+  'plaid_sandbox')` continue to apply;
+* `ROW_NUMBER()` orders candidates by smallest amount delta first, then
+  smallest date delta, then id — so if a row still has an alternative
+  cent-exact partner the tolerant pass never outranks the exact one.
+
+Credit-card-bill and loan-payment pairs keep the strict cent match —
+card/loan principal never floats — so the tolerance pass is limited to
+`depository ↔ depository` moves. The union of all three passes is what
+`classify_row` treats as `transaction_class = 'internal_transfer'`.
+
 ## PFC Category Auto-Mapping
 
 There is **no** separate Plaid endpoint for the full PFC catalog; taxonomy reference is Plaid’s [CSV](https://plaid.com/documents/pfc-taxonomy-all.csv). Do **not** use deprecated **`/categories/get`** for PFC (that endpoint is for legacy `category` / `category_id` only).
