@@ -27,16 +27,27 @@ async def create_stream(request: Request, body: RecurringStreamCreate):
 
 @router.get("", response_model=List[RecurringStreamOut])
 async def list_streams(
+    request: Request,
     direction: Optional[str] = Query(None, pattern=r"^(inflow|outflow)$"),
     active_only: bool = Query(True),
 ):
-    return await _repo().list_streams(direction=direction, active_only=active_only)
+    user = getattr(request.state, "user", None) or {}
+    viewer_user_id = user.get("id")
+    return await _repo().list_streams(
+        direction=direction,
+        active_only=active_only,
+        viewer_user_id=int(viewer_user_id) if viewer_user_id is not None else None,
+    )
 
 
 @router.get("/price-changes", response_model=List[RecurringStreamOut])
-async def get_price_changes():
+async def get_price_changes(request: Request):
     """Return recurring streams where last price differs from average by more than 10%."""
-    return await _repo().get_price_changes()
+    user = getattr(request.state, "user", None) or {}
+    viewer_user_id = user.get("id")
+    return await _repo().get_price_changes(
+        viewer_user_id=int(viewer_user_id) if viewer_user_id is not None else None,
+    )
 
 
 @router.get("/{stream_id}", response_model=RecurringStreamOut)
