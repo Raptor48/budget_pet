@@ -35,6 +35,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Separator } from "@/components/ui/separator";
+import { formatAccountPickerLabel } from "@/lib/account-picker-label";
 import { recurringApi, categoriesApi, accountsApi, ApiError } from "@/lib/api";
 import { PlaidTxnAmount } from "@/components/ui/plaid-txn-amount";
 import { AccountChip } from "@/components/ui/account-chip";
@@ -773,7 +774,7 @@ export default function RecurringPage() {
                     <SelectContent>
                       {(accountsQuery.data ?? []).map((a) => (
                         <SelectItem key={a.id} value={String(a.id)}>
-                          {a.name}
+                          {formatAccountPickerLabel(a)}
                         </SelectItem>
                       ))}
                     </SelectContent>

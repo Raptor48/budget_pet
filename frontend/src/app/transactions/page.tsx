@@ -53,6 +53,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { PlaidTxnAmount } from "@/components/ui/plaid-txn-amount";
+import { formatAccountPickerLabel } from "@/lib/account-picker-label";
 import { getAuthHeaders } from "@/lib/auth";
 import {
   accountsApi,
@@ -1482,8 +1483,7 @@ export default function TransactionsPage() {
                     <SelectItem value={ALL}>All accounts</SelectItem>
                     {accounts.map((a) => (
                       <SelectItem key={a.id} value={String(a.id)}>
-                        {a.name}
-                        {a.mask ? ` · ${a.mask}` : ""}
+                        {formatAccountPickerLabel(a)}
                       </SelectItem>
                     ))}
                   </SelectContent>
