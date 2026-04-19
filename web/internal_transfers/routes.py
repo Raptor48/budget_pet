@@ -18,7 +18,11 @@ from fastapi import APIRouter, HTTPException, Request
 
 from web.audit import record as audit_record
 from web.db import get_pool
-from web.plaid.internal_transfer import normalize_names, rescan_internal_transfers
+from web.plaid.internal_transfer import (
+    match_family_account_transfers,
+    normalize_names,
+    rescan_internal_transfers,
+)
 
 from .models import (
     InternalTransferRescanRequest,
@@ -42,11 +46,24 @@ def _actor_uid(request: Request) -> Optional[int]:
         return None
 
 
-async def _rescan(horizon_days: Optional[int]) -> int:
-    """Acquire a connection and invoke the classifier's rescan routine."""
+async def _rescan(horizon_days: Optional[int]) -> tuple[int, int]:
+    """Run both internal-transfer classification stages over the same horizon.
+
+    Stage 1 is the name-matcher (Zelle between spouses etc.), stage 2 is the
+    family-account pair-matcher (same cent amount on TRANSFER_OUT/IN across
+    two accounts with known owners). Both write to ``is_internal_transfer``
+    and both respect ``is_internal_transfer_manual``. Returning the two
+    counts separately lets the UI tell the user which rule actually fired.
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
-        return await rescan_internal_transfers(conn, horizon_days=horizon_days)
+        name_updated = await rescan_internal_transfers(
+            conn, horizon_days=horizon_days
+        )
+        pair_updated = await match_family_account_transfers(
+            conn, horizon_days=horizon_days
+        )
+    return name_updated, pair_updated
 
 
 @router.get("", response_model=InternalTransferSettingsOut)
@@ -68,12 +85,17 @@ async def update_internal_transfer_settings(
 
     # After editing the list, auto-reclassify the last 90 days so the change
     # shows up in the UI immediately. Full-history cleanups remain a
-    # separate explicit action because they can touch many rows.
+    # separate explicit action because they can touch many rows. The
+    # pair-matcher also runs here so the user gets the same "apply to
+    # recent history" behavior for the newly-added names and any
+    # same-amount transfer pairs that were waiting for the other side to
+    # sync.
+    name_updated = 0
+    pair_updated = 0
     try:
-        updated = await _rescan(horizon_days=90)
+        name_updated, pair_updated = await _rescan(horizon_days=90)
     except Exception as exc:
         logger.warning("Auto-rescan after names update failed: %s", exc)
-        updated = 0
 
     await audit_record(
         "settings.internal_transfer_names_updated",
@@ -81,7 +103,9 @@ async def update_internal_transfer_settings(
         request=request,
         metadata={
             "count": len(stored),
-            "rescan_rows_updated": updated,
+            "rescan_rows_updated": name_updated + pair_updated,
+            "name_rows_updated": name_updated,
+            "pair_rows_updated": pair_updated,
         },
     )
 
@@ -98,7 +122,7 @@ async def rescan_internal_transfer_matches(
 ):
     horizon_days: Optional[int] = 90 if body.horizon == "last_90_days" else None
     try:
-        updated = await _rescan(horizon_days=horizon_days)
+        name_updated, pair_updated = await _rescan(horizon_days=horizon_days)
     except Exception as exc:
         logger.error("Internal-transfer rescan failed: %s", exc)
         raise HTTPException(status_code=500, detail="Rescan failed") from exc
@@ -106,19 +130,24 @@ async def rescan_internal_transfer_matches(
     repo = get_internal_transfer_settings_repo()
     names = await repo.get_names()
 
+    total_updated = name_updated + pair_updated
     await audit_record(
         "settings.internal_transfer_rescan",
         source="manual",
         request=request,
         metadata={
             "horizon": body.horizon,
-            "rows_updated": updated,
+            "rows_updated": total_updated,
+            "name_rows_updated": name_updated,
+            "pair_rows_updated": pair_updated,
             "configured_names_count": len(names),
         },
     )
 
     return InternalTransferRescanResult(
-        rows_updated=updated,
+        rows_updated=total_updated,
+        name_rows_updated=name_updated,
+        pair_rows_updated=pair_updated,
         horizon=body.horizon,
         configured_names_count=len(names),
     )

@@ -24,6 +24,7 @@ import pytest
 from tests.v2.conftest import make_mock_pool
 from web.plaid.internal_transfer import (
     classify_internal_transfer,
+    match_family_account_transfers,
     normalize_name,
     normalize_names,
 )
@@ -265,3 +266,116 @@ class TestReportsExcludeInternalTransfers:
         assert sqls, "income-breakdown must hit the DB"
         for sql in sqls:
             assert "is_internal_transfer" in sql
+
+
+# ---------------------------------------------------------------------------
+# match_family_account_transfers: SQL contract
+# ---------------------------------------------------------------------------
+
+
+class TestMatchFamilyAccountTransfers:
+    """The pair-matcher is one SQL statement; behavioural assertions (same-user
+    match, off-by-1-cent miss, 4-day miss, manual-override protection, 2x2
+    greedy pairing) live in the SQL itself and would require a live
+    Postgres to verify end-to-end. These tests pin the SQL contract — the
+    predicates, join shape, dedup strategy, and manual-flag guard — so
+    regressions that silently weaken the classifier fail loudly here.
+
+    The behavioural matrix documented in the plan:
+        * self->self match (two accounts owned by the same user)
+        * cross-user match (Denis -> Anastasiia)
+        * unknown owner_uid on either side -> no pair
+        * amount mismatch by 1 cent -> no pair
+        * date gap > 3 days -> no pair
+        * is_internal_transfer_manual=TRUE -> never touched
+        * 2x2 greedy pairing (ROW_NUMBER deduplication)
+
+    is enforced by the SQL predicates asserted below.
+    """
+
+    @pytest.mark.asyncio
+    async def test_sql_contains_pair_matching_rules(self):
+        conn = AsyncMock()
+        conn.fetch = AsyncMock(return_value=[])
+        pool = make_mock_pool(conn)
+        with patch("web.plaid.internal_transfer.asyncpg"):
+            pass
+
+        # Call directly with the mock connection rather than a pool since the
+        # matcher is designed to run inside an existing connection (used
+        # by both import_transactions and the rescan route).
+        await match_family_account_transfers(conn, horizon_days=30)
+
+        assert conn.fetch.await_count == 1, "matcher runs exactly one SQL statement"
+        sql = conn.fetch.call_args[0][0]
+        args = conn.fetch.call_args[0][1:]
+
+        # horizon is passed as a positional placeholder, not inlined.
+        assert args == (30,)
+
+        # PFC gate: only TRANSFER_IN/OUT are considered.
+        assert "TRANSFER_IN" in sql and "TRANSFER_OUT" in sql
+
+        # Amount must match exactly to the cent (opposite signs).
+        assert "i.amount_cents = -o.amount_cents" in sql
+        assert "o.amount_cents > 0" in sql
+
+        # Date window +/- 3 days.
+        assert "ABS(o.date - i.date) <= 3" in sql
+
+        # Different accounts (otherwise a single row would self-match).
+        assert "i.account_id <> o.account_id" in sql
+
+        # Both sides need a resolvable owner; the matcher falls back from
+        # accounts.user_id to plaid_items.user_id.
+        assert "COALESCE(a.user_id, p.user_id)" in sql
+        assert "i.owner_uid IS NOT NULL" in sql
+        assert "o.owner_uid IS NOT NULL" in sql
+
+        # Manual overrides stay put on both the candidate filter and the
+        # final UPDATE WHERE clause.
+        assert "is_internal_transfer_manual = FALSE" in sql
+
+        # Only Plaid-sourced rows participate (cash transfers have no
+        # matching counterparty anyway).
+        assert "'plaid'" in sql and "'plaid_sandbox'" in sql
+
+        # Greedy pairing uses ROW_NUMBER on both sides so each txn pairs
+        # with at most one counterpart.
+        assert "ROW_NUMBER()" in sql
+        assert "rn_out = 1" in sql and "rn_in = 1" in sql
+
+        # The UPDATE only flips rows that are currently FALSE and not
+        # manually overridden.
+        assert "is_internal_transfer = TRUE" in sql
+        assert "RETURNING id" in sql
+
+    @pytest.mark.asyncio
+    async def test_returns_updated_row_count(self):
+        """The function reports how many rows flipped to TRUE — the value the
+        UI surfaces as ``pair_rows_updated``."""
+        conn = AsyncMock()
+        conn.fetch = AsyncMock(
+            return_value=[{"id": 11}, {"id": 12}, {"id": 13}, {"id": 14}]
+        )
+        count = await match_family_account_transfers(conn, horizon_days=90)
+        assert count == 4
+
+    @pytest.mark.asyncio
+    async def test_none_horizon_means_full_history(self):
+        """horizon_days=None must pass NULL through so the SQL scans everything."""
+        conn = AsyncMock()
+        conn.fetch = AsyncMock(return_value=[])
+        await match_family_account_transfers(conn, horizon_days=None)
+        assert conn.fetch.await_count == 1
+        assert conn.fetch.call_args[0][1] is None
+
+    @pytest.mark.asyncio
+    async def test_non_positive_horizon_short_circuits(self):
+        """Negative/zero horizons are a programming error upstream; we return
+        0 without touching the DB rather than corrupt the predicate."""
+        conn = AsyncMock()
+        conn.fetch = AsyncMock(return_value=[])
+        assert await match_family_account_transfers(conn, horizon_days=0) == 0
+        assert await match_family_account_transfers(conn, horizon_days=-5) == 0
+        assert conn.fetch.await_count == 0

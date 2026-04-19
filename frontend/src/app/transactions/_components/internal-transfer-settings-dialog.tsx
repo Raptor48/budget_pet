@@ -1,15 +1,24 @@
 "use client";
 
 /**
- * Manage the family-wide list of counterparty names that should flag a
- * Plaid ``TRANSFER_IN`` / ``TRANSFER_OUT`` transaction as an internal
- * transfer (e.g. a spouse-to-spouse Zelle). Saving the list auto-rescans
- * the last 90 days so new names apply retroactively without a second
- * click; a separate "Re-scan all history" button covers back-fills.
+ * Settings surface for two independent internal-transfer classifiers:
  *
- * The classifier and the exclusion rules in reports live on the backend
- * (``web/plaid/internal_transfer.py`` and ``web/reports/repo.py``); this
- * dialog only edits the names list and triggers the rescan RPC.
+ * 1. **Name list** — flags Plaid ``TRANSFER_IN`` / ``TRANSFER_OUT`` rows
+ *    whose counterparty name matches one of the configured strings (e.g.
+ *    a spouse-to-spouse Zelle). The user edits the list here.
+ * 2. **Family-account pair matcher** — auto-flags matching cent amounts
+ *    on ``TRANSFER_OUT`` / ``TRANSFER_IN`` across two different accounts
+ *    that both have a known owner, within ±3 days. Always on; no
+ *    configuration. Catches own-account transfers (Chase → PayPal) and
+ *    cross-user pairs (Denis' PayPal → Anastasiia's Chase).
+ *
+ * Both stages run automatically during Plaid sync; the "Re-scan all
+ * history" button re-applies them to the entire transaction history, and
+ * Save re-applies them to the last 90 days. Manual user toggles are
+ * never overwritten (``is_internal_transfer_manual`` guards them).
+ *
+ * Backend: ``web/plaid/internal_transfer.py`` (classifiers),
+ * ``web/reports/repo.py`` (exclusion).
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -70,7 +79,7 @@ export function InternalTransferSettingsDialog({ open, onOpenChange }: Props) {
       await queryClient.invalidateQueries({ queryKey: ["internal-transfer-settings"] });
       // Exclusion rules reach into every report + transaction list, so bust
       // all consumer caches after saving the list (the backend already
-      // auto-rescanned the last 90 days).
+      // auto-rescanned the last 90 days — both name-matcher and pair-matcher).
       await queryClient.invalidateQueries({ queryKey: ["reports"] });
       await queryClient.invalidateQueries({ queryKey: ["transactions"] });
       await queryClient.invalidateQueries({ queryKey: ["budgets"] });
@@ -87,11 +96,24 @@ export function InternalTransferSettingsDialog({ open, onOpenChange }: Props) {
       await queryClient.invalidateQueries({ queryKey: ["reports"] });
       await queryClient.invalidateQueries({ queryKey: ["transactions"] });
       await queryClient.invalidateQueries({ queryKey: ["budgets"] });
-      notify.success(
-        res.rows_updated === 0
-          ? "Re-scanned full history. Nothing changed."
-          : `Re-scanned full history. ${res.rows_updated} transaction(s) updated.`,
-      );
+      if (res.rows_updated === 0) {
+        notify.success("Re-scanned full history. Nothing changed.");
+      } else {
+        // Prefer the detailed breakdown when the backend supplies it so
+        // the user sees how each rule contributed. Fall back to the
+        // aggregate count for older backends that only send rows_updated.
+        const nameCount = res.name_rows_updated ?? 0;
+        const pairCount = res.pair_rows_updated ?? 0;
+        if (nameCount || pairCount) {
+          notify.success(
+            `Re-scanned full history. ${nameCount} matched by name, ${pairCount} matched by pair.`,
+          );
+        } else {
+          notify.success(
+            `Re-scanned full history. ${res.rows_updated} transaction(s) updated.`,
+          );
+        }
+      }
     },
     onError: (err) => {
       notify.error((err as Error)?.message || "Rescan failed.");
@@ -123,7 +145,6 @@ export function InternalTransferSettingsDialog({ open, onOpenChange }: Props) {
     rescanAllMutation.mutate();
   };
 
-  const hasServerList = data?.names?.length ?? 0;
   const dirty =
     data !== undefined &&
     (names.length !== data.names.length ||
@@ -135,10 +156,13 @@ export function InternalTransferSettingsDialog({ open, onOpenChange }: Props) {
         <DialogHeader>
           <DialogTitle>Internal transfers</DialogTitle>
           <DialogDescription>
-            Payments between family members (e.g. Zelle spouse-to-spouse)
-            get double-counted if both sides land in the app. Add the
-            counterparty names here — matching transfers are flagged and
-            excluded from income/expense totals.
+            Payments between family members (e.g. Zelle spouse-to-spouse) get
+            double-counted if both sides land in the app. Add counterparty
+            names here — matching transfers are flagged and excluded from
+            income/expense totals. We also auto-detect transfers between any
+            two of your family accounts (e.g. Chase &rarr; PayPal) when
+            amounts match within &plusmn;3 days. Manually-flagged transactions
+            are never overwritten.
           </DialogDescription>
         </DialogHeader>
 
@@ -228,28 +252,25 @@ export function InternalTransferSettingsDialog({ open, onOpenChange }: Props) {
             </ul>
           )}
 
-          {hasServerList > 0 ? (
-            <>
-              <Separator />
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-xs text-muted-foreground">
-                  Need to fix older months? Re-scan full history.
-                </div>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleRescanAll}
-                  disabled={rescanAllMutation.isPending || saveMutation.isPending}
-                >
-                  {rescanAllMutation.isPending ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : null}
-                  Re-scan all history
-                </Button>
-              </div>
-            </>
-          ) : null}
+          <Separator />
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-xs text-muted-foreground">
+              Apply to existing transactions — re-runs name matching and
+              own/family-account pair detection across your full history.
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={handleRescanAll}
+              disabled={rescanAllMutation.isPending || saveMutation.isPending}
+            >
+              {rescanAllMutation.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : null}
+              Re-scan all history
+            </Button>
+          </div>
         </div>
 
         <DialogFooter>

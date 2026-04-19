@@ -197,23 +197,33 @@ settings. Two settings are currently stored here:
 
 ## Internal transfers (Settings)
 
-Family-wide list of counterparty names that marks Plaid `TRANSFER_IN` /
-`TRANSFER_OUT` transactions as intra-family transfers. Flagged rows are
-excluded from every income/expense aggregate so that, for example, a Zelle
-from spouse A to spouse B is not double-counted (sender's `TRANSFER_OUT`
-plus whatever the recipient actually spends with that money).
+Two classifiers cooperate to flag intra-family transfers on
+`transactions.is_internal_transfer`; flagged rows are excluded from every
+income/expense aggregate so the same dollar isn't counted twice (sender's
+`TRANSFER_OUT` plus whatever the recipient actually spends with that money).
 
-Matching is case-insensitive and tolerates bank boilerplate (`Zelle payment
-from J DOE`, `ACH credit J DOE`, raw counterparty names from the JSONB
-blob — see `web/plaid/internal_transfer.py::normalize_name`). Manual user
-toggles set `transactions.is_internal_transfer_manual = TRUE`, which
-protects them from future auto-rescans.
+1. **Name matcher** — a family-wide list of counterparty names. A Plaid
+   `TRANSFER_IN` / `TRANSFER_OUT` row is flagged when any configured name
+   appears in `merchant_name`, `name`, or `counterparties[].name`.
+   Matching is case-insensitive and tolerates bank boilerplate (`Zelle
+   payment from J DOE`, `ACH credit J DOE`, raw counterparty names from
+   the JSONB blob — see `web/plaid/internal_transfer.py::normalize_name`).
+2. **Family-account pair matcher** — always on, no configuration. Flags
+   matching-cent `TRANSFER_OUT` / `TRANSFER_IN` pairs across two different
+   accounts within ±3 days, provided both accounts have a resolvable
+   owner. Covers own-account transfers (Chase → PayPal) and cross-user
+   transfers between connected family banks. See
+   `docs/plaid.md#family-account-pair-matching`.
+
+Manual user toggles set `transactions.is_internal_transfer_manual = TRUE`,
+which protects them from **both** classifiers on every subsequent
+rescan.
 
 | Method | Path | Description |
 |---|---|---|
 | GET | /api/settings/internal-transfers | Current `{ names: string[], normalized_names: string[] }`. The normalized list is an echo of how the classifier sees the raw values (useful for debugging). |
-| PUT | /api/settings/internal-transfers | Replace the full names list (`{ names: string[] }`). Sanitizes entries (trims, dedupes on uppercase) and auto-rescans the last 90 days so the change is visible immediately. Writes a `settings.internal_transfer_names_updated` audit row. |
-| POST | /api/settings/internal-transfers/rescan | Re-run the classifier over the last 90 days (`horizon: "last_90_days"`, default) or the full history (`horizon: "all_time"`). Returns `{ rows_updated, horizon, configured_names_count }` and writes a `settings.internal_transfer_rescan` audit row. Manual flags are always preserved. |
+| PUT | /api/settings/internal-transfers | Replace the full names list (`{ names: string[] }`). Sanitizes entries (trims, dedupes on uppercase) and auto-rescans the last 90 days through **both** classifiers (name-matcher + family-account pair-matcher) so any newly-matching rows are visible immediately. Writes a `settings.internal_transfer_names_updated` audit row. |
+| POST | /api/settings/internal-transfers/rescan | Re-run **both** classifiers over the last 90 days (`horizon: "last_90_days"`, default) or the full history (`horizon: "all_time"`). Returns `{ rows_updated, name_rows_updated, pair_rows_updated, horizon, configured_names_count }` where `rows_updated = name_rows_updated + pair_rows_updated`. Writes a `settings.internal_transfer_rescan` audit row. Manual flags are always preserved. |
 
 ## Audit log
 
