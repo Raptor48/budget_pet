@@ -7,8 +7,9 @@ from web.insights.feed import build_insights_feed
 
 
 class _FakeReports:
-    def __init__(self):
+    def __init__(self, *, liquid_cents: int = 10_000_000):
         self.last_viewer_user_id = object()  # sentinel to detect default
+        self._liquid_cents = liquid_cents
 
     async def get_financial_health_data(self, viewer_user_id=None):
         self.last_viewer_user_id = viewer_user_id
@@ -42,6 +43,14 @@ class _FakeReports:
     async def get_category_rolling(self, _month: str, months=3, viewer_user_id=None):
         self.last_viewer_user_id = viewer_user_id
         return []
+
+    async def get_net_worth(self):
+        return {
+            "liquid_cents": self._liquid_cents,
+            "investment_cents": 0,
+            "debt_cents": 0,
+            "net_worth_cents": self._liquid_cents,
+        }
 
 
 class _FakeRecurring:
@@ -133,6 +142,49 @@ async def test_build_insights_feed_propagates_viewer_user_id(monkeypatch):
 
     # Every call should record viewer_user_id=42.
     assert fake_reports.last_viewer_user_id == 42
+
+
+@pytest.mark.asyncio
+async def test_liquidity_buffer_card_fires_when_forecast_exceeds_threshold(monkeypatch):
+    """When 30-day forecast outflow eats > 40% of liquid cash, surface a warn card."""
+    # _FakeRecurring's weekly $50 stream yields roughly 4 occurrences over 30
+    # days (~$200 outflow). A $3 liquid balance makes the ratio obviously
+    # exceed 40%, so the card must fire.
+    reports = _FakeReports(liquid_cents=300)
+    _install_stub_repos(monkeypatch, reports=reports)
+
+    out = await build_insights_feed()
+
+    types = {c["type"] for c in out["cards"]}
+    assert "liquidity_buffer" in types
+    card = next(c for c in out["cards"] if c["type"] == "liquidity_buffer")
+    assert card["severity"] == "warn"
+    assert card["action_url"] == "/recurring"
+    assert card["dedupe_key"].startswith("liquidity_buffer:")
+
+
+@pytest.mark.asyncio
+async def test_liquidity_buffer_card_absent_with_ample_cash(monkeypatch):
+    """Plenty of cash relative to forecast outflow → no heads-up card."""
+    reports = _FakeReports(liquid_cents=10_000_000)  # $100k
+    _install_stub_repos(monkeypatch, reports=reports)
+
+    out = await build_insights_feed()
+
+    types = {c["type"] for c in out["cards"]}
+    assert "liquidity_buffer" not in types
+
+
+@pytest.mark.asyncio
+async def test_liquidity_buffer_card_absent_with_zero_liquid(monkeypatch):
+    """If liquid is 0 we cannot meaningfully compute a ratio — stay silent."""
+    reports = _FakeReports(liquid_cents=0)
+    _install_stub_repos(monkeypatch, reports=reports)
+
+    out = await build_insights_feed()
+
+    types = {c["type"] for c in out["cards"]}
+    assert "liquidity_buffer" not in types
 
 
 @pytest.mark.asyncio

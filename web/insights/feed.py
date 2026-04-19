@@ -18,6 +18,15 @@ from web.insights.cards import make_card
 logger = logging.getLogger(__name__)
 
 
+# ``liquidity_buffer`` thresholds. Warn when upcoming outflows in the next
+# ``LIQUIDITY_BUFFER_DAYS`` days exceed ``LIQUIDITY_BUFFER_RATIO`` of the
+# current liquid (depository) balances. Kept as module-level constants so
+# the rule matches ``cards.BUDGET_RISK_RATIO`` and is easy to tune without
+# hunting through the function body.
+LIQUIDITY_BUFFER_RATIO = 0.40
+LIQUIDITY_BUFFER_DAYS = 30
+
+
 async def build_insights_feed(viewer_user_id: Optional[int] = None) -> Dict[str, Any]:
     from web.accounts.repo import AccountsRepository
     from web.budgets.repo import BudgetsRepository
@@ -168,6 +177,42 @@ async def build_insights_feed(viewer_user_id: Optional[int] = None) -> Dict[str,
             )
     except Exception as exc:
         logger.warning("insights forecast: %s", exc)
+
+    # ---- Liquidity buffer -----------------------------------------------
+    # Warn when the next ``LIQUIDITY_BUFFER_DAYS`` days of outflows eat a
+    # large share of current depository (cash + bank) balances. This used
+    # to be a bespoke card rendered directly by the Dashboard; folding it
+    # into the feed keeps alerts in one place and lets users dismiss /
+    # snooze it like any other insight.
+    try:
+        nw = await reports.get_net_worth()
+        liquid = int(nw.get("liquid_cents") or 0)
+        if liquid > 0:
+            longer_entries = build_forecast(streams, days=LIQUIDITY_BUFFER_DAYS)
+            outflow_cents = sum(abs(int(e.get("amount_cents") or 0)) for e in longer_entries)
+            if outflow_cents > liquid * LIQUIDITY_BUFFER_RATIO:
+                pct = (outflow_cents / liquid) * 100 if liquid else 0
+                cards.append(
+                    make_card(
+                        type="liquidity_buffer",
+                        severity="warn",
+                        title="Cash flow heads-up",
+                        summary=(
+                            f"Upcoming bills in the next {LIQUIDITY_BUFFER_DAYS} days "
+                            f"are ~{pct:.0f}% of your cash & bank balances"
+                        ),
+                        detail=(
+                            f"${outflow_cents / 100:,.0f} forecast outflow vs "
+                            f"${liquid / 100:,.0f} liquid. Review the forecast "
+                            "and recurring payments."
+                        ),
+                        dedupe_key=f"liquidity_buffer:{today.isoformat()}",
+                        action_url="/recurring",
+                        action_label="Review recurring",
+                    )
+                )
+    except Exception as exc:
+        logger.warning("insights liquidity_buffer: %s", exc)
 
     # ---- Missed recurring (Phase 3) -------------------------------------
     try:

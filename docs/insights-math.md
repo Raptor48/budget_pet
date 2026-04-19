@@ -93,6 +93,31 @@ down), `info` for favorable ones. Uses `RecurringRepository.get_price_changes`
 which surfaces streams whose latest charge differs from the long-term
 average by more than `PRICE_CHANGE_THRESHOLD` (10%).
 
+### `liquidity_buffer`
+
+Severity: `warn` only. Fires when the sum of absolute outflow amounts in
+the next `LIQUIDITY_BUFFER_DAYS` days (default **30**) exceeds
+`LIQUIDITY_BUFFER_RATIO` (default **40%**) of current depository
+balances (`accounts.type = 'depository' AND is_active`).
+
+Inputs:
+
+- Forecast entries from `build_forecast(streams, days=30)` — same pure
+  helper that powers `GET /api/reports/forecast`, so the dashboard and
+  the feed agree by construction.
+- `ReportsRepository.get_net_worth().liquid_cents`.
+
+Edge cases:
+
+- `liquid_cents <= 0` → card is suppressed (a negative / zero liquid
+  balance is surfaced more accurately by `financial_health`).
+- Any exception in forecast / net-worth aggregation is swallowed by the
+  per-card `try / except` in `feed.py` and logged.
+
+This card replaced the legacy standalone "Cash flow heads-up" block that
+lived in the Dashboard page; keeping it in the feed means users can
+dismiss / snooze it like any other insight.
+
 ## 3. Privacy model
 
 - Every repository call used by the feed accepts `viewer_user_id`.
