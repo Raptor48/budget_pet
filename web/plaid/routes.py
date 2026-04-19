@@ -276,7 +276,7 @@ async def reset_cursor(item_id: str, request: Request):
 async def sync_now(request: Request):
     """Manually trigger synchronization for all connected items."""
     from .scheduler import sync_all_items
-    results = await sync_all_items()
+    results = await sync_all_items(audit_source="manual")
 
     txn_total = sum(int(r.get("transactions_added") or 0) for r in results)
     balances_total = sum(int(r.get("balances_updated") or 0) for r in results)
