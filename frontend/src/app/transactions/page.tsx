@@ -37,7 +37,10 @@ import { MonthYearPicker } from "@/components/ui/month-year-picker";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -347,6 +350,53 @@ function pfcConfidenceTooltipBody(level: string | null | undefined): { title: st
   };
 }
 
+/**
+ * Render `<Select>` items for categories grouped so user-created ("custom")
+ * categories appear first, followed by Plaid-derived ones. The dropdown for
+ * reassigning a transaction in Transaction details, in split rows, etc.
+ * uses this so the knobs the family actually cares about sit at the top.
+ */
+function CategorySelectItems({ categories }: { categories: Category[] }) {
+  const { custom, plaid } = useMemo(() => {
+    const customList: Category[] = [];
+    const plaidList: Category[] = [];
+    for (const c of categories) {
+      if (c.source === "custom") customList.push(c);
+      else plaidList.push(c);
+    }
+    return { custom: customList, plaid: plaidList };
+  }, [categories]);
+
+  const hasCustom = custom.length > 0;
+  const hasPlaid = plaid.length > 0;
+
+  return (
+    <>
+      {hasCustom ? (
+        <SelectGroup>
+          <SelectLabel>Custom</SelectLabel>
+          {custom.map((c) => (
+            <SelectItem key={c.id} value={String(c.id)}>
+              {c.name}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+      ) : null}
+      {hasCustom && hasPlaid ? <SelectSeparator /> : null}
+      {hasPlaid ? (
+        <SelectGroup>
+          {hasCustom ? <SelectLabel>Plaid categories</SelectLabel> : null}
+          {plaid.map((c) => (
+            <SelectItem key={c.id} value={String(c.id)}>
+              {c.name}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+      ) : null}
+    </>
+  );
+}
+
 function DetailRow({ label, children }: { label: ReactNode; children: ReactNode }) {
   return (
     <div className="grid gap-0.5 sm:grid-cols-[7.5rem_1fr] sm:gap-x-3">
@@ -634,11 +684,7 @@ function TransactionDetailsDialog({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={ALL}>Uncategorized</SelectItem>
-                    {categories.map((c) => (
-                      <SelectItem key={c.id} value={String(c.id)}>
-                        {c.name}
-                      </SelectItem>
-                    ))}
+                    <CategorySelectItems categories={categories} />
                   </SelectContent>
                 </Select>
                 {transaction.source === "plaid" || transaction.source === "plaid_sandbox" ? (
@@ -1049,11 +1095,7 @@ function SplitTransactionDialog({
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value={ALL}>Uncategorized</SelectItem>
-                            {categories.map((c) => (
-                              <SelectItem key={c.id} value={String(c.id)}>
-                                {c.name}
-                              </SelectItem>
-                            ))}
+                            <CategorySelectItems categories={categories} />
                           </SelectContent>
                         </Select>
                       </div>
