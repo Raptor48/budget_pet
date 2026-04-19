@@ -28,6 +28,7 @@ class TransactionsRepository:
         source: Optional[str] = None,
         user_id: Optional[int] = None,
         viewer_user_id: Optional[int] = None,
+        transaction_class: Optional[str] = None,
         limit: int = 200,
         offset: int = 0,
         omit_heavy_fields: bool = True,
@@ -91,6 +92,11 @@ class TransactionsRepository:
             params.append(source)
             idx += 1
 
+        if transaction_class is not None:
+            conditions.append(f"t.transaction_class = ${idx}")
+            params.append(transaction_class)
+            idx += 1
+
         if user_id is not None:
             conditions.append(f"a.user_id = ${idx}")
             params.append(user_id)
@@ -143,6 +149,8 @@ class TransactionsRepository:
                        t.is_private,
                        t.is_internal_transfer,
                        t.is_internal_transfer_manual,
+                       t.transaction_class,
+                       t.manual_class_override,
                        t.source,
                        t.user_note,
                        t.display_title,
@@ -436,6 +444,25 @@ class TransactionsRepository:
                 )
                 if not bal:
                     raise ValueError("Cash wallet balance could not be updated")
+                # Compute the four-class classification in-line so the new
+                # row enters aggregates with the correct ``transaction_class``
+                # from tick one. Cash transactions never pair with another
+                # account, so ``classify_one_on_insert`` almost always
+                # returns ``expense`` (or ``income`` for user-categorized
+                # refunds) — the helper is kept generic so future manual
+                # overrides from the cash UI flow through the same code.
+                try:
+                    from web.classification.classifier import classify_one_on_insert
+
+                    await classify_one_on_insert(conn, row["id"])
+                    row = await conn.fetchrow(
+                        "SELECT * FROM transactions WHERE id = $1", row["id"]
+                    )
+                except Exception:
+                    logger.exception(
+                        "Cash POST: classification failed for id=%s; leaving default",
+                        row["id"],
+                    )
         return dict(row)
 
     async def update_transaction(
@@ -447,17 +474,60 @@ class TransactionsRepository:
             "merchant_name",
             "is_private",
             "is_internal_transfer",
+            "transaction_class",
         }
         fields = {k: v for k, v in data.items() if k in allowed}
         if not fields:
             return await self.get_transaction(transaction_id)
-        # When the user explicitly sets is_internal_transfer, also flip the
-        # `_manual` sentinel so the auto re-classifier (triggered on names
-        # list edits / explicit /rescan) never overwrites their choice.
-        # Keeping this inside the repo means every PATCH path — web and any
-        # future bot/CLI — gets the same protection for free.
-        if "is_internal_transfer" in fields:
+
+        # Normalize the two ways a client can express "force this row to
+        # internal_transfer" into a single ``manual_class_override`` write.
+        # ``transaction_class`` (new, four-class API) always wins; the
+        # legacy ``is_internal_transfer`` boolean is kept for backwards
+        # compatibility — existing mobile builds and the old transactions
+        # menu still ship with a simple toggle.
+        class_override: Optional[str] = None
+        if "transaction_class" in fields:
+            value = fields.pop("transaction_class")
+            from web.classification.classifier import ALL_CLASSES
+
+            if value is None:
+                class_override = None
+            elif value not in ALL_CLASSES:
+                raise ValueError(f"Unknown transaction_class: {value}")
+            else:
+                class_override = value
+            # ``manual_class_override`` is the source of truth; the
+            # legacy binary bit is kept in sync so older readers still
+            # work (and so our own aggregates can predicate on either
+            # column during the transition).
+            fields["manual_class_override"] = class_override
+            fields["transaction_class"] = class_override or "uncategorized"
+            if class_override == "internal_transfer":
+                fields["is_internal_transfer"] = True
+                fields["is_internal_transfer_manual"] = True
+            elif class_override is None:
+                fields["is_internal_transfer_manual"] = False
+            else:
+                fields["is_internal_transfer"] = False
+                fields["is_internal_transfer_manual"] = False
+        elif "is_internal_transfer" in fields:
+            # Legacy path: toggling the boolean also sets the override +
+            # manual sentinel so the auto re-classifier never overwrites
+            # the user's choice on subsequent rescans.
             fields["is_internal_transfer_manual"] = True
+            fields["manual_class_override"] = (
+                "internal_transfer" if fields["is_internal_transfer"] else None
+            )
+            if fields["is_internal_transfer"]:
+                fields["transaction_class"] = "internal_transfer"
+
+        reclassify_after = (
+            "category_id" in fields
+            and "transaction_class" not in fields
+            and "manual_class_override" not in fields
+        )
+
         set_clause = ", ".join(f"{col} = ${i + 2}" for i, col in enumerate(fields.keys()))
         pool = await self._pool()
         async with pool.acquire() as conn:
@@ -479,6 +549,23 @@ class TransactionsRepository:
                     )
                     if row2:
                         row = row2
+            # A category change can flip the class (e.g. user re-assigns a
+            # paycheck from Uncategorized to Wages). Re-run the classifier
+            # for just this row so the Income / Expenses tabs reflect the
+            # new taxonomy without waiting for the next sync.
+            if row and reclassify_after:
+                try:
+                    from web.classification.classifier import classify_one_on_insert
+
+                    await classify_one_on_insert(conn, transaction_id)
+                    row = await conn.fetchrow(
+                        "SELECT * FROM transactions WHERE id = $1", transaction_id
+                    )
+                except Exception:
+                    logger.exception(
+                        "PATCH reclassify failed for id=%s; keeping previous class",
+                        transaction_id,
+                    )
         return dict(row) if row else None
 
     async def delete_transaction(self, transaction_id: int) -> bool:

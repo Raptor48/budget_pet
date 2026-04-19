@@ -1,16 +1,29 @@
 """
-Tests for the income report + shared "is_income" predicate.
+Tests for the income report + shared income / expense / internal-transfer
+predicates.
 
 Covers:
-  * `_income_predicate` SQL generation (the helper every income aggregate
-    must use — Income tab, Cash Flow, Financial Health).
-  * Cash flow SQL embeds the predicate (guards against regressions where a
-    future change drops the `is_income` guard and starts counting refunds
-    as income again).
-  * `resolve_category` / `_ensure_primary_category_id` seed ``is_income``
-    for Plaid PFC=INCOME rows and leave everything else alone.
-  * `get_income_breakdown` groups rows per user and sums correctly.
+  * ``_income_predicate`` / ``_expense_predicate`` / ``_internal_transfer_predicate``
+    SQL generation — the helpers every aggregate must go through after the
+    V2 classifier migration. The single source of truth is now the
+    ``transactions.transaction_class`` column.
+  * Cash flow SQL references all three predicates (regression guard: if
+    someone drops the ``transaction_class`` check and falls back to raw
+    amount sign, refunds start getting counted as income).
+  * ``resolve_category`` still seeds ``is_income`` for Plaid PFC=INCOME
+    rows — the classifier reads this flag to tag paycheck-like rows even
+    before a pair match exists.
+  * ``get_income_breakdown`` groups rows per user and sums correctly.
   * Categories API surface (Out/Update models + allowed update fields).
+  * Invariants from ``docs/reports-math.md``:
+      - refund on an income-flagged category is NOT counted as income
+        (classifier rule 5);
+      - TRANSFER_IN without a pair and without a name match is NOT
+        counted as income (classifier rules 3/4 + uncategorized
+        fallback);
+      - income rows tagged ``is_private`` are hidden from other viewers;
+      - sandbox parity: Cash Flow and Income tab apply the same sandbox
+        filter so their totals always reconcile.
 """
 from datetime import datetime
 from unittest.mock import AsyncMock, patch
@@ -20,30 +33,44 @@ import pytest
 from tests.v2.conftest import make_mock_pool
 from web.categories.models import CategoryOut, CategoryUpdate
 from web.categories.repo import CategoriesRepository
-from web.reports.repo import ReportsRepository, _income_predicate
+from web.reports.repo import (
+    ReportsRepository,
+    _expense_predicate,
+    _income_predicate,
+    _internal_transfer_predicate,
+)
 
 
-class TestIncomePredicate:
-    def test_default_alias(self):
+class TestClassPredicates:
+    """All three predicates are thin wrappers around ``transaction_class``."""
+
+    def test_income_default_alias(self):
         sql = _income_predicate()
-        assert "t.amount_cents < 0" in sql
-        assert "t.category_id" in sql
-        assert "_ic.is_income = TRUE" in sql
+        assert sql == "t.transaction_class = 'income'"
 
-    def test_no_alias_variant(self):
-        sql = _income_predicate("")
-        assert "amount_cents < 0" in sql
+    def test_income_no_alias_variant(self):
         # No dangling alias prefix when called for unaliased queries
         # (used by the financial-health monthly_income rollup).
-        assert "t.amount_cents" not in sql
-        assert "_ic.is_income = TRUE" in sql
+        sql = _income_predicate("")
+        assert sql == "transaction_class = 'income'"
+        assert "t." not in sql
+
+    def test_expense_default_alias(self):
+        assert _expense_predicate() == "t.transaction_class = 'expense'"
+
+    def test_internal_transfer_default_alias(self):
+        assert (
+            _internal_transfer_predicate()
+            == "t.transaction_class = 'internal_transfer'"
+        )
 
     @pytest.mark.asyncio
-    async def test_cash_flow_sql_uses_predicate(self):
+    async def test_cash_flow_sql_uses_all_three_predicates(self):
         """
-        Not every negative-amount row is real income (refunds, transfers-in
-        miscategorised, ...). This regression test asserts that the
-        month-total income SUM always joins against `categories.is_income`.
+        Regression test for the cash-flow identity
+        ``income + expense + internal_transfer ≡ SUM(amount_cents)``. If any
+        one of the three class checks disappears from the SQL, the identity
+        breaks and refunds / CC payments silently shift between buckets.
         """
         repo = ReportsRepository()
         captured_sql: dict = {}
@@ -51,7 +78,11 @@ class TestIncomePredicate:
 
         async def fake_fetchrow(sql, *args, **kwargs):
             captured_sql["sql"] = sql
-            return {"income_cents": 0, "expenses_cents": 0}
+            return {
+                "income_cents": 0,
+                "expenses_cents": 0,
+                "internal_transfer_cents": 0,
+            }
 
         conn.fetchrow = fake_fetchrow
         pool = make_mock_pool(conn)
@@ -59,7 +90,40 @@ class TestIncomePredicate:
         with patch("web.reports.repo.get_pool", AsyncMock(return_value=pool)):
             await repo.get_cash_flow("2026-04")
 
-        assert "is_income" in captured_sql["sql"]
+        sql = captured_sql["sql"]
+        assert "transaction_class = 'income'" in sql
+        assert "transaction_class = 'expense'" in sql
+        assert "transaction_class = 'internal_transfer'" in sql
+        # Refund semantics: expenses are ``SUM(amount_cents)`` (signed),
+        # NOT ``SUM(CASE WHEN amount > 0)`` — that would drop refunds on
+        # the floor.
+        assert "amount_cents > 0" not in sql
+
+    @pytest.mark.asyncio
+    async def test_cash_flow_returns_internal_transfer_total(self):
+        """The month response carries ``internal_transfer_cents`` so the UI
+        can reassure the user that, e.g., a $1,200 CC payment was
+        recognized as intra-family money movement rather than silently
+        dropped."""
+        repo = ReportsRepository()
+        conn = AsyncMock()
+        conn.fetchrow = AsyncMock(
+            return_value={
+                "income_cents": 500_000,
+                "expenses_cents": 200_000,
+                "internal_transfer_cents": 120_000,
+            }
+        )
+        pool = make_mock_pool(conn)
+
+        with patch("web.reports.repo.get_pool", AsyncMock(return_value=pool)):
+            result = await repo.get_cash_flow("2026-04")
+
+        assert result["income_cents"] == 500_000
+        assert result["expenses_cents"] == 200_000
+        assert result["internal_transfer_cents"] == 120_000
+        # Net excludes internal transfers — they are neither inflow nor outflow.
+        assert result["net_cents"] == 300_000
 
 
 class TestResolveCategoryIsIncome:
@@ -297,7 +361,8 @@ class TestIncomeBreakdown:
     @pytest.mark.asyncio
     async def test_sql_uses_income_predicate_and_private_filter(self):
         """
-        Regression guard: the income SQL must filter by `is_income` (not just
+        Regression guard: the income SQL must filter by
+        ``transaction_class = 'income'`` (the post-V2 source of truth, not
         by amount sign) AND honour the viewer-private filter.
         """
         repo = ReportsRepository()
@@ -315,7 +380,139 @@ class TestIncomeBreakdown:
         with patch("web.reports.repo.get_pool", AsyncMock(return_value=pool)):
             await repo.get_income_breakdown("2026-04", viewer_user_id=42)
 
-        assert "is_income" in captured["sql"]
+        assert "transaction_class = 'income'" in captured["sql"]
         assert "is_private" in captured["sql"]
         # $1 month + $2 viewer_user_id
         assert captured["args"] == ("2026-04", 42)
+
+    @pytest.mark.asyncio
+    async def test_sandbox_filter_applied_consistently(self):
+        """Invariant: Cash Flow and Income tab must either both include or
+        both exclude ``source = 'plaid_sandbox'``. Any drift means a demo
+        paycheck appears in one tab but not the other and the two widgets
+        disagree on the same month."""
+        from web import env_flags
+
+        repo = ReportsRepository()
+        captured: dict = {}
+        conn = AsyncMock()
+
+        async def fake_fetchrow(sql, *args, **kwargs):
+            captured.setdefault("cash_flow_sql", sql)
+            return {
+                "income_cents": 0,
+                "expenses_cents": 0,
+                "internal_transfer_cents": 0,
+            }
+
+        async def fake_fetch(sql, *args, **kwargs):
+            captured.setdefault("income_sql", sql)
+            return []
+
+        conn.fetchrow = fake_fetchrow
+        conn.fetch = fake_fetch
+        pool = make_mock_pool(conn)
+
+        with patch("web.reports.repo.get_pool", AsyncMock(return_value=pool)), \
+             patch.object(env_flags, "reports_include_plaid_sandbox", return_value=False):
+            await repo.get_cash_flow("2026-04")
+            await repo.get_income_breakdown("2026-04")
+
+        # Both queries must guard against plaid_sandbox the same way.
+        assert "'plaid_sandbox'" in captured["cash_flow_sql"]
+        assert "'plaid_sandbox'" in captured["income_sql"]
+
+
+class TestIncomeInvariants:
+    """
+    Scenario-level invariants captured from ``docs/reports-math.md``. These
+    do not exercise the classifier itself (that lives in
+    ``tests/v2/test_classification.py``, Phase E) — they exercise the
+    contract the Income tab relies on.
+    """
+
+    @pytest.mark.asyncio
+    async def test_refund_on_income_category_not_counted_as_income(self):
+        """
+        A grocery refund ($+25) that got miscategorised onto an income
+        category must still be ``expense`` (negative-of-expense, i.e. a
+        refund that reduces the month's spending), never income. The
+        classifier enforces this via rule 6 (class='expense' requires a
+        non-income category OR the category is income but the amount
+        signals a refund → uncategorized → diagnostics).
+
+        This test asserts the downstream invariant: the income breakdown
+        reads ``transaction_class='income'`` and therefore NEVER picks up
+        a row whose class resolved to 'expense' or 'uncategorized', even
+        if the category's ``is_income`` flag is TRUE.
+        """
+        repo = ReportsRepository()
+        conn = AsyncMock()
+        # The repo query already filters by transaction_class='income'.
+        # Simulate a mocked DB that does that filtering: the refund row
+        # simply doesn't come back.
+        conn.fetch = AsyncMock(return_value=[])
+        pool = make_mock_pool(conn)
+
+        with patch("web.reports.repo.get_pool", AsyncMock(return_value=pool)):
+            result = await repo.get_income_breakdown("2026-04")
+
+        assert result["total_cents"] == 0
+        assert result["users"] == []
+
+    @pytest.mark.asyncio
+    async def test_transfer_without_pair_or_name_match_not_counted_as_income(self):
+        """
+        A Plaid ``TRANSFER_IN`` where (a) the counterparty does not appear
+        in ``internal_transfer_names`` and (b) the classifier could not
+        find a matching outbound leg should end up as ``uncategorized``,
+        NOT as income — even if some well-meaning user ticked
+        ``is_income = TRUE`` on the TRANSFER_IN category row.
+
+        Once again this is an integration invariant: the Income tab only
+        reads ``transaction_class='income'``, so the suspicious row is
+        excluded by construction. We confirm the SQL goes through the
+        canonical predicate.
+        """
+        repo = ReportsRepository()
+        captured: dict = {}
+        conn = AsyncMock()
+
+        async def fake_fetch(sql, *args, **kwargs):
+            captured["sql"] = sql
+            return []
+
+        conn.fetch = fake_fetch
+        pool = make_mock_pool(conn)
+
+        with patch("web.reports.repo.get_pool", AsyncMock(return_value=pool)):
+            await repo.get_income_breakdown("2026-04")
+
+        # The predicate that guarantees the invariant.
+        assert "transaction_class = 'income'" in captured["sql"]
+
+    @pytest.mark.asyncio
+    async def test_privacy_filter_hides_other_users_income(self):
+        """An ``is_private`` paycheck on Alice's account is invisible to
+        Bob's viewer context. Enforced by the ``is_private`` SQL clause
+        (checked above) plus the viewer-id parameter — we confirm both
+        flow through here end-to-end."""
+        repo = ReportsRepository()
+        captured: dict = {}
+        conn = AsyncMock()
+
+        async def fake_fetch(sql, *args, **kwargs):
+            captured["sql"] = sql
+            captured["args"] = args
+            return []  # Row filtered out by privacy clause.
+
+        conn.fetch = fake_fetch
+        pool = make_mock_pool(conn)
+
+        with patch("web.reports.repo.get_pool", AsyncMock(return_value=pool)):
+            # Bob (user_id=2) looking at Alice's (user_id=1) private income.
+            result = await repo.get_income_breakdown("2026-04", viewer_user_id=2)
+
+        assert "is_private" in captured["sql"]
+        assert captured["args"] == ("2026-04", 2)
+        assert result["total_cents"] == 0

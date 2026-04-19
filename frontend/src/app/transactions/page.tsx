@@ -76,6 +76,7 @@ import type {
   PaymentMeta,
   Tag,
   Transaction,
+  TransactionClass,
   TransactionFilters,
   TransactionSplit,
 } from "@/types/v2";
@@ -364,8 +365,8 @@ function TransactionDetailsDialog({
   isDeletingCash,
   onTogglePrivate,
   isTogglingPrivate,
-  onToggleInternalTransfer,
-  isTogglingInternalTransfer,
+  onSetClassOverride,
+  isSettingClassOverride,
 }: {
   transactionId: number | null;
   open: boolean;
@@ -377,8 +378,14 @@ function TransactionDetailsDialog({
   isDeletingCash?: boolean;
   onTogglePrivate?: (id: number, isPrivate: boolean) => void;
   isTogglingPrivate?: boolean;
-  onToggleInternalTransfer?: (id: number, isInternalTransfer: boolean) => void;
-  isTogglingInternalTransfer?: boolean;
+  /**
+   * Replaces the pre-V2 "Mark internal transfer" toggle. Passing `null`
+   * clears the pin and returns the row to the auto-classifier's control;
+   * passing any of the four classes persists a `manual_class_override`
+   * on the server (see docs/reports-math.md §3 rule 1).
+   */
+  onSetClassOverride?: (id: number, override: TransactionClass | null) => void;
+  isSettingClassOverride?: boolean;
 }) {
   const [editNote, setEditNote] = useState("");
   const [editCategoryId, setEditCategoryId] = useState(ALL);
@@ -687,37 +694,46 @@ function TransactionDetailsDialog({
                 </p>
               </div>
             ) : null}
-            {transaction && !isLoading && !isError && onToggleInternalTransfer ? (
+            {transaction && !isLoading && !isError && onSetClassOverride ? (
               <div className="flex flex-col gap-1">
-                <Button
-                  type="button"
-                  variant={transaction.is_internal_transfer ? "secondary" : "outline"}
-                  className="gap-1.5"
-                  disabled={isTogglingInternalTransfer || isSaving}
-                  onClick={() =>
-                    onToggleInternalTransfer(transaction.id, !transaction.is_internal_transfer)
+                <Label htmlFor="txn-class-override" className="text-xs">
+                  Classify as
+                </Label>
+                <Select
+                  value={
+                    transaction.manual_class_override ?? "auto"
                   }
-                  title={
-                    transaction.is_internal_transfer
-                      ? "Treat as regular income/expense"
-                      : "Exclude from income/expense totals"
-                  }
+                  onValueChange={(value) => {
+                    const next: TransactionClass | null =
+                      value === "auto" ? null : (value as TransactionClass);
+                    onSetClassOverride(transaction.id, next);
+                  }}
+                  disabled={isSettingClassOverride || isSaving}
                 >
-                  {isTogglingInternalTransfer ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <ArrowLeftRight className="size-4" />
-                  )}
-                  {transaction.is_internal_transfer
-                    ? "Internal transfer"
-                    : "Mark internal transfer"}
-                </Button>
+                  <SelectTrigger id="txn-class-override" className="gap-1.5">
+                    {isSettingClassOverride ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <ArrowLeftRight className="size-4" />
+                    )}
+                    <SelectValue placeholder="Auto" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">
+                      Auto ({transaction.transaction_class.replace("_", " ")})
+                    </SelectItem>
+                    <SelectItem value="income">Income</SelectItem>
+                    <SelectItem value="expense">Expense</SelectItem>
+                    <SelectItem value="internal_transfer">
+                      Internal transfer
+                    </SelectItem>
+                    <SelectItem value="uncategorized">Uncategorized</SelectItem>
+                  </SelectContent>
+                </Select>
                 <p className="text-[11px] text-muted-foreground">
-                  {transaction.is_internal_transfer
-                    ? transaction.is_internal_transfer_manual
-                      ? "Manually flagged — excluded from reports."
-                      : "Auto-flagged — excluded from reports."
-                    : "Mark family transfers (e.g. spouse Zelle) to avoid double-counting."}
+                  {transaction.manual_class_override != null
+                    ? `Pinned as ${transaction.manual_class_override.replace("_", " ")} — the auto-classifier will leave this row alone.`
+                    : "Auto-classified. Pick a class to override the classifier (e.g. mark a family Zelle as Internal transfer)."}
                 </p>
               </div>
             ) : null}
@@ -1240,18 +1256,39 @@ export default function TransactionsPage() {
     onError: onMutationError("Could not update privacy."),
   });
 
-  const toggleInternalTransferMutation = useMutation({
-    mutationFn: ({ id, is_internal_transfer }: { id: number; is_internal_transfer: boolean }) =>
-      transactionsApi.update(id, { is_internal_transfer }),
+  /**
+   * Pin / un-pin a row to a specific `transaction_class`. Supersedes the
+   * pre-V2 `is_internal_transfer` boolean toggle — now the user can mark a
+   * row as any of the four canonical classes (or "auto" = clear override).
+   * The backend writes `manual_class_override` so the classifier never
+   * overwrites the user's pick on the next sync.
+   */
+  const setClassOverrideMutation = useMutation({
+    mutationFn: ({
+      id,
+      override,
+    }: {
+      id: number;
+      override: TransactionClass | null;
+    }) =>
+      transactionsApi.update(id, {
+        transaction_class: override ?? undefined,
+        // When clearing the override we drop the legacy
+        // `is_internal_transfer` mirror back to false so both knobs stay
+        // in sync. The backend's patch handler does the same on its own,
+        // but the round-trip is immediate and keeps the UI honest if the
+        // fetch races with the next list invalidation.
+        ...(override == null ? { is_internal_transfer: false } : {}),
+      }),
     onSuccess: async (_, variables) => {
       await queryClient.invalidateQueries({ queryKey: ["transactions"] });
       await queryClient.invalidateQueries({ queryKey: ["transaction", variables.id] });
-      // Internal-transfer state feeds every income/expense aggregate — refresh
+      // Class changes feed every income/expense aggregate — refresh
       // reports and budgets so the change is visible immediately.
       await queryClient.invalidateQueries({ queryKey: ["reports"] });
       await queryClient.invalidateQueries({ queryKey: ["budgets"] });
     },
-    onError: onMutationError("Could not update internal-transfer flag."),
+    onError: onMutationError("Could not update transaction class."),
   });
 
   const addTagMutation = useMutation({
@@ -1645,16 +1682,13 @@ export default function TransactionsPage() {
             detailTxId != null &&
             togglePrivateMutation.variables?.id === detailTxId
           }
-          onToggleInternalTransfer={(id, isInternalTransfer) =>
-            toggleInternalTransferMutation.mutate({
-              id,
-              is_internal_transfer: isInternalTransfer,
-            })
+          onSetClassOverride={(id, override) =>
+            setClassOverrideMutation.mutate({ id, override })
           }
-          isTogglingInternalTransfer={
-            toggleInternalTransferMutation.isPending &&
+          isSettingClassOverride={
+            setClassOverrideMutation.isPending &&
             detailTxId != null &&
-            toggleInternalTransferMutation.variables?.id === detailTxId
+            setClassOverrideMutation.variables?.id === detailTxId
           }
         />
 

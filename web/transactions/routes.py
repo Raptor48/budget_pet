@@ -70,6 +70,15 @@ async def list_transactions(
     pending_only: Optional[bool] = Query(None),
     source: Optional[str] = Query(None),
     user_id: Optional[int] = Query(None),
+    transaction_class: Optional[str] = Query(
+        None,
+        regex=r"^(income|expense|internal_transfer|uncategorized)$",
+        description=(
+            "Filter by canonical four-class classification. Used by the "
+            "Expenses and Income tabs to drill from the category chart "
+            "into the underlying transactions."
+        ),
+    ),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
@@ -92,6 +101,7 @@ async def list_transactions(
         source=source,
         user_id=user_id,
         viewer_user_id=current_id,
+        transaction_class=transaction_class,
         limit=limit,
         offset=offset,
         omit_heavy_fields=True,

@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
 import {
@@ -14,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MonthYearPicker } from "@/components/ui/month-year-picker";
 import { ArrowLeft, PieChart } from "lucide-react";
 import { IncomeTab } from "@/components/reports/income-tab";
+import { ExpensesTab } from "@/components/reports/expenses-tab";
 import { reportsApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type {
@@ -224,10 +226,60 @@ function MerchantLogo({ url, name }: { url: string | null; name: string }) {
 // Page
 // ---------------------------------------------------------------------------
 
+const REPORT_TABS = [
+  "cashflow",
+  "income",
+  "expenses",
+  "category",
+  "networth",
+  "merchants",
+  "health",
+] as const;
+type ReportTab = (typeof REPORT_TABS)[number];
+
+function isReportTab(value: string | null): value is ReportTab {
+  return value != null && (REPORT_TABS as readonly string[]).includes(value);
+}
+
 export default function Reports() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialTab: ReportTab = isReportTab(searchParams.get("tab"))
+    ? (searchParams.get("tab") as ReportTab)
+    : "cashflow";
+
+  const [tab, setTab] = useState<ReportTab>(initialTab);
   const [month, setMonth] = useState(getCurrentMonth);
   const [catHoveredIdx, setCatHoveredIdx] = useState<number | null>(null);
   const [catLockedIdx, setCatLockedIdx] = useState<number | null>(null);
+
+  // Keep `?tab=...` in the URL so deep-links work and the Cash Flow summary
+  // cards can navigate cross-tab via plain `next/link` or router.replace.
+  useEffect(() => {
+    const current = searchParams.get("tab");
+    if (current === tab) return;
+    const params = new URLSearchParams(searchParams.toString());
+    if (tab === "cashflow") {
+      params.delete("tab");
+    } else {
+      params.set("tab", tab);
+    }
+    const qs = params.toString();
+    router.replace(qs ? `?${qs}` : "?", { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  // Respond to back/forward that changes `?tab=` out from under us.
+  useEffect(() => {
+    const fromUrl = searchParams.get("tab");
+    const next: ReportTab = isReportTab(fromUrl) ? fromUrl : "cashflow";
+    if (next !== tab) setTab(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  const handleTabChange = useCallback((value: string) => {
+    if (isReportTab(value)) setTab(value);
+  }, []);
   /**
    * Focus-mode: when the user drills into a primary category, we pin it here
    * and switch the query to rollup=detailed with parent_category_id.
@@ -319,10 +371,11 @@ export default function Reports() {
           </p>
         </header>
 
-        <Tabs defaultValue="cashflow" className="gap-6">
-          <TabsList className="grid h-auto w-full max-w-4xl grid-cols-2 gap-1 p-1 sm:grid-cols-3 lg:grid-cols-6">
+        <Tabs value={tab} onValueChange={handleTabChange} className="gap-6">
+          <TabsList className="grid h-auto w-full max-w-4xl grid-cols-2 gap-1 p-1 sm:grid-cols-4 lg:grid-cols-7">
             <TabsTrigger value="cashflow">Cash Flow</TabsTrigger>
             <TabsTrigger value="income">Income</TabsTrigger>
+            <TabsTrigger value="expenses">Expenses</TabsTrigger>
             <TabsTrigger value="category">By Category</TabsTrigger>
             <TabsTrigger value="networth">Net Worth</TabsTrigger>
             <TabsTrigger value="merchants">Top Merchants</TabsTrigger>
@@ -354,22 +407,38 @@ export default function Reports() {
                 )}
                 {cf && (
                   <div className="grid gap-4 sm:grid-cols-3">
-                    <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-5 py-4">
+                    <button
+                      type="button"
+                      onClick={() => setTab("income")}
+                      className="group rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-5 py-4 text-left transition-colors hover:border-emerald-500/40 hover:bg-emerald-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/60"
+                      aria-label="Open Income tab"
+                    >
                       <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
                         Income
                       </p>
                       <p className="text-2xl font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
                         {formatMoney(cf.income_cents)}
                       </p>
-                    </div>
-                    <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 px-5 py-4">
+                      <p className="mt-1 text-[11px] text-muted-foreground group-hover:text-emerald-700/80">
+                        View breakdown →
+                      </p>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTab("expenses")}
+                      className="group rounded-xl border border-rose-500/20 bg-rose-500/5 px-5 py-4 text-left transition-colors hover:border-rose-500/40 hover:bg-rose-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500/60"
+                      aria-label="Open Expenses tab"
+                    >
                       <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
                         Expenses
                       </p>
                       <p className="text-2xl font-semibold tabular-nums text-rose-600 dark:text-rose-400">
                         {formatMoney(cf.expenses_cents)}
                       </p>
-                    </div>
+                      <p className="mt-1 text-[11px] text-muted-foreground group-hover:text-rose-700/80">
+                        View breakdown →
+                      </p>
+                    </button>
                     <div
                       className={`rounded-xl border px-5 py-4 ${
                         cf.net_cents >= 0
@@ -389,6 +458,15 @@ export default function Reports() {
                       >
                         {formatMoney(cf.net_cents)}
                       </p>
+                      {cf.internal_transfer_cents > 0 && (
+                        <p
+                          className="mt-1 text-[11px] text-muted-foreground"
+                          title="Intra-family transfers (credit card payments, Zelle between spouses, savings sweeps). Excluded from income and expenses."
+                        >
+                          + {formatMoney(cf.internal_transfer_cents)} in
+                          internal transfers
+                        </p>
+                      )}
                     </div>
                   </div>
                 )}
@@ -411,6 +489,10 @@ export default function Reports() {
 
           <TabsContent value="income" className="space-y-6">
             <IncomeTab month={month} onMonthChange={setMonth} />
+          </TabsContent>
+
+          <TabsContent value="expenses" className="space-y-6">
+            <ExpensesTab month={month} onMonthChange={setMonth} />
           </TabsContent>
 
           <TabsContent value="category" className="space-y-6">

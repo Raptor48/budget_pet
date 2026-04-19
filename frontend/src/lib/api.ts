@@ -14,6 +14,8 @@ import type {
   CashFlowMonth,
   Category,
   CategorySpend,
+  Diagnostics,
+  ExpenseBreakdown,
   FinancialHealthScore,
   ForecastEntry,
   IncomeBreakdown,
@@ -191,6 +193,7 @@ function buildTransactionQuery(filters: TransactionFilters): string {
   if (filters.channel) params.set('channel', filters.channel);
   if (filters.pending_only != null) params.set('pending_only', String(filters.pending_only));
   if (filters.user_id != null) params.set('user_id', String(filters.user_id));
+  if (filters.transaction_class) params.set('transaction_class', filters.transaction_class);
   if (filters.limit != null) params.set('limit', String(filters.limit));
   if (filters.offset != null) params.set('offset', String(filters.offset));
   const qs = params.toString();
@@ -207,6 +210,17 @@ export const transactionsApi = {
   create: (data: ManualCashTransactionCreate): Promise<Transaction> =>
     apiRequest('/api/transactions', { method: 'POST', body: JSON.stringify(data) }),
 
+  /**
+   * PATCH /api/transactions/{id}
+   *
+   * `transaction_class` is the preferred knob — it writes
+   * `manual_class_override` on the server so the auto-classifier never
+   * overwrites the user's choice on the next sync. The legacy
+   * `is_internal_transfer` boolean still works for backward compat (it
+   * maps to override='internal_transfer' when true, back to 'auto' when
+   * false). Changing `category_id` re-runs the classifier on just that
+   * row.
+   */
   update: (
     id: number,
     data: {
@@ -215,6 +229,7 @@ export const transactionsApi = {
       merchant_name?: string;
       is_private?: boolean;
       is_internal_transfer?: boolean;
+      transaction_class?: import('@/types/v2').TransactionClass;
     },
   ): Promise<Transaction> =>
     apiRequest(`/api/transactions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
@@ -385,6 +400,26 @@ export const reportsApi = {
   getIncome: (month?: string): Promise<IncomeBreakdown> => {
     const qs = month ? `?month=${month}` : '';
     return apiRequest(`/api/reports/income${qs}`);
+  },
+
+  /**
+   * GET /api/reports/expenses — family expenses for a month broken down by
+   * user + category. Mirror of `getIncome`; refunds naturally reduce
+   * category totals.
+   */
+  getExpenses: (month?: string): Promise<ExpenseBreakdown> => {
+    const qs = month ? `?month=${month}` : '';
+    return apiRequest(`/api/reports/expenses${qs}`);
+  },
+
+  /**
+   * GET /api/reports/diagnostics — owner-only. Surfaces suspicious rows
+   * the classifier is unsure about (positive income, unmatched transfers,
+   * large uncategorized amounts). Returns 403 for non-owners.
+   */
+  getDiagnostics: (month?: string): Promise<Diagnostics> => {
+    const qs = month ? `?month=${month}` : '';
+    return apiRequest(`/api/reports/diagnostics${qs}`);
   },
 };
 
