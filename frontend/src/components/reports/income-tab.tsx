@@ -35,6 +35,7 @@ import { cn } from "@/lib/utils";
 import type { IncomeByUser, IncomeSource, Transaction } from "@/types/v2";
 
 import { IncomeCategoriesDialog } from "./income-categories-dialog";
+import { IncomeMathHelp } from "./reports-math-help";
 
 interface Props {
   month: string;
@@ -88,6 +89,7 @@ export function IncomeTab({ month, onMonthChange }: Props) {
           <CardTitle className="flex items-center gap-2">
             <TrendingUp className="size-5 text-emerald-600" aria-hidden />
             Income by person
+            <IncomeMathHelp />
           </CardTitle>
           <CardDescription>
             Uses your family-wide income-category settings. Toggle which

@@ -42,6 +42,7 @@ import { cn } from "@/lib/utils";
 import type { ExpenseByUser, ExpenseSource, Transaction } from "@/types/v2";
 
 import { ExpenseCategoriesDialog } from "./expense-categories-dialog";
+import { ExpensesMathHelp } from "./reports-math-help";
 
 interface Props {
   month: string;
@@ -89,6 +90,7 @@ export function ExpensesTab({ month, onMonthChange }: Props) {
           <CardTitle className="flex items-center gap-2">
             <TrendingDown className="size-5 text-rose-600" aria-hidden />
             Expenses by person
+            <ExpensesMathHelp />
           </CardTitle>
           <CardDescription>
             Everything tagged as an expense by the classifier, excluding
