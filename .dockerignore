@@ -1,0 +1,66 @@
+# Keep the Docker build context small and, crucially, keep secrets out.
+# Every path listed here is excluded from `COPY . /app` in the Dockerfile.
+
+# --- Secrets (never bake into an image) --------------------------------------
+.env
+.env.*
+!.env.template
+
+# --- VCS / CI ----------------------------------------------------------------
+.git
+.gitignore
+.gitattributes
+.github
+
+# --- Frontend (separate Railway service, builds from `frontend/`) -----------
+frontend
+
+# --- Python caches / build artefacts -----------------------------------------
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.ruff_cache
+.mypy_cache
+htmlcov
+.coverage
+.coverage.*
+coverage.xml
+*.egg-info
+build
+dist
+
+# --- Tests (not needed at runtime) ------------------------------------------
+tests
+
+# --- Docs (not needed at runtime) -------------------------------------------
+docs
+
+# --- Logs / local databases --------------------------------------------------
+*.log
+app.log
+*.db
+*.sqlite*
+
+# --- Editor / OS junk --------------------------------------------------------
+.DS_Store
+Thumbs.db
+.vscode
+.idea
+.cursor
+
+# --- Dev-only scripts & configs ---------------------------------------------
+cleanup.sh
+run_tests.sh
+start_local.sh
+start_api.sh
+pyrightconfig.json
+pytest.ini
+requirements-dev.txt
+README.md
+
+# --- Node (stray installs, just in case) ------------------------------------
+node_modules
+npm-debug.log
+yarn-error.log
