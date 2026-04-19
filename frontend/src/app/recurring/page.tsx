@@ -354,6 +354,7 @@ export default function RecurringPage() {
                       mask={row.account_mask}
                       owner={row.owner_username}
                       variant="compact"
+                      abbreviateAccountName
                     />
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
@@ -440,7 +441,7 @@ export default function RecurringPage() {
         <TableHeader>
           <TableRow>
             <TableHead>Description</TableHead>
-            <TableHead>Charged to</TableHead>
+            <TableHead className="min-w-0 max-w-[10.5rem] w-[10.5rem]">Charged to</TableHead>
             <TableHead>Frequency</TableHead>
             <TableHead>Next payment</TableHead>
             <TableHead className="text-right">Avg</TableHead>
@@ -535,11 +536,12 @@ export default function RecurringPage() {
                       </div>
                     )}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="min-w-0 max-w-[10.5rem] w-[10.5rem] whitespace-normal">
                     <AccountChip
                       accountName={row.account_name}
                       mask={row.account_mask}
                       owner={row.owner_username}
+                      abbreviateAccountName
                     />
                   </TableCell>
                   <TableCell>{formatFrequency(row.frequency)}</TableCell>
