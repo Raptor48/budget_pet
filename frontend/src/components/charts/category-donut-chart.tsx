@@ -211,7 +211,7 @@ export function CategoryLegend({
                 onLock(lockedIdx === i ? null : i);
               }
             }}
-            title={canDrill ? `Drill into ${row.category_name} (${row.children_count} subcategories)` : undefined}
+            title={canDrill ? `Open ${row.category_name} (${row.children_count} subcategories)` : undefined}
           >
             <span
               className={cn(

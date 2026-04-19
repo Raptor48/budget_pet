@@ -131,9 +131,9 @@ async def build_insights_feed(viewer_user_id: Optional[int] = None) -> Dict[str,
         if positive:
             top = max(positive, key=lambda x: x["amount_cents"])
             cat_id = top.get("category_id")
-            action_url = "/reports?tab=expenses"
+            action_url = "/reports?tab=category"
             if cat_id:
-                action_url = f"/reports?tab=expenses&category={cat_id}"
+                action_url = f"/reports?tab=category&category={cat_id}"
             cards.append(
                 make_card(
                     type="top_category",
@@ -143,7 +143,7 @@ async def build_insights_feed(viewer_user_id: Optional[int] = None) -> Dict[str,
                     detail=f"{(top.get('amount_cents') or 0) / 100:.2f} USD this month",
                     dedupe_key=f"top_category:{month}:{cat_id or 'na'}",
                     action_url=action_url,
-                    action_label="Drill into category",
+                    action_label="Open category",
                 )
             )
     except Exception as exc:

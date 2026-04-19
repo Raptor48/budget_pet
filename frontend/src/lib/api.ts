@@ -188,6 +188,8 @@ function buildTransactionQuery(filters: TransactionFilters): string {
   if (filters.month) params.set('month', filters.month);
   if (filters.account_id != null) params.set('account_id', String(filters.account_id));
   if (filters.category_id != null) params.set('category_id', String(filters.category_id));
+  if (filters.parent_category_id != null)
+    params.set('parent_category_id', String(filters.parent_category_id));
   if (filters.tag_id != null) params.set('tag_id', String(filters.tag_id));
   if (filters.search) params.set('search', filters.search);
   if (filters.channel) params.set('channel', filters.channel);

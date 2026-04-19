@@ -268,6 +268,15 @@ export interface TransactionFilters {
   month?: string;
   account_id?: number;
   category_id?: number;
+  /**
+   * Roll a primary PFC bucket up: include the parent itself PLUS every
+   * detailed PFC child linked via `categories.parent_id`. Mirrors the
+   * COALESCE rule used in /api/reports/by-category so the Reports →
+   * By Category drill-down sums match the primary bucket total exactly.
+   * Use `category_id` for the exact row (no roll-up), `parent_category_id`
+   * for the primary bucket.
+   */
+  parent_category_id?: number;
   tag_id?: number;
   search?: string;
   channel?: string;
