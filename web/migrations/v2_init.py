@@ -31,7 +31,10 @@ CREATE TABLE IF NOT EXISTS accounts (
     current_balance_cents        BIGINT DEFAULT 0,
     available_balance_cents      BIGINT,
     credit_limit_cents           BIGINT,
+    credit_limit_cents_manual    BIGINT,
     apr_percent                  NUMERIC(6,3),
+    apr_percent_manual           NUMERIC(6,3),
+    plaid_missing_fields         JSONB,
     min_payment_cents            BIGINT,
     due_day                      SMALLINT,
     is_overdue                   BOOLEAN,
@@ -540,6 +543,33 @@ async def _migrate_v21_addons(conn) -> None:
     )
 
 
+async def _migrate_accounts_manual_and_missing(conn) -> None:
+    """
+    Additive V2.1 columns for accounts:
+
+    * ``credit_limit_cents_manual``, ``apr_percent_manual`` — user-entered
+      fallback values used only when Plaid does not expose them for the
+      institution (Capital One is the canonical case). Effective value in
+      the API is ``COALESCE(plaid, manual)`` — Plaid always wins if it
+      starts reporting.
+    * ``plaid_missing_fields`` — cached set of fields Plaid did not provide
+      on the last sync (``["apr", "credit_limit"]`` etc.). Used by the
+      change-detector so we only write an audit entry when the set
+      transitions, not on every sync.
+
+    All changes are idempotent and safe to run many times.
+    """
+    for stmt in (
+        "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS credit_limit_cents_manual BIGINT",
+        "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS apr_percent_manual NUMERIC(6,3)",
+        "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS plaid_missing_fields JSONB",
+    ):
+        try:
+            await _ddl(conn, stmt)
+        except Exception as exc:
+            logger.warning("Account addon column failed (continuing): %s", exc)
+
+
 async def _migrate_categories_parent_id(conn) -> None:
     """
     Add categories.parent_id (self-FK) + index, then idempotently backfill a
@@ -971,6 +1001,7 @@ async def run_v2_migrations(pool) -> None:
                 raise
         await _migrate_categories_source(conn)
         await _migrate_v21_addons(conn)
+        await _migrate_accounts_manual_and_missing(conn)
         await _migrate_merchant_rules_global_family(conn)
         await _migrate_categories_parent_id(conn)
         await _migrate_categories_is_income(conn)
