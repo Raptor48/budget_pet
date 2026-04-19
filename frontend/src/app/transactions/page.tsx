@@ -42,6 +42,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Table,
@@ -1159,7 +1160,33 @@ export default function TransactionsPage() {
   const [channel, setChannel] = useState<string>(ALL);
   const [personId, setPersonId] = useState<string>(ALL);
   const [searchInput, setSearchInput] = useState("");
+  /**
+   * "Show internal transactions" toggle — default OFF so intra-family
+   * transfers (classifier's `internal_transfer` class) are hidden from the
+   * list the same way they are excluded from income/expense reports. Users
+   * can flip it on to audit the pairs or override a mis-classification.
+   */
+  const [showInternalTransfers, setShowInternalTransfers] = useState(false);
   const deferredSearch = useDeferredValue(searchInput);
+
+  const filtersAreDefault =
+    accountId === ALL &&
+    categoryId === ALL &&
+    tagFilterId === ALL &&
+    channel === ALL &&
+    personId === ALL &&
+    searchInput.trim() === "" &&
+    showInternalTransfers === false;
+
+  const resetFilters = useCallback(() => {
+    setAccountId(ALL);
+    setCategoryId(ALL);
+    setTagFilterId(ALL);
+    setChannel(ALL);
+    setPersonId(ALL);
+    setSearchInput("");
+    setShowInternalTransfers(false);
+  }, []);
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailTxId, setDetailTxId] = useState<number | null>(null);
@@ -1180,8 +1207,11 @@ export default function TransactionsPage() {
       search: deferredSearch.trim() || undefined,
       channel: channel === ALL ? undefined : channel,
       user_id: personId === ALL ? undefined : Number(personId),
+      // Only send the flag when the user opted into hiding — keeps the
+      // backend contract minimal (`undefined` == default include).
+      exclude_internal_transfers: showInternalTransfers ? undefined : true,
     }),
-    [month, accountId, categoryId, tagFilterId, channel, deferredSearch, personId],
+    [month, accountId, categoryId, tagFilterId, channel, deferredSearch, personId, showInternalTransfers],
   );
 
   const { data: accounts = [] } = useQuery({
@@ -1362,6 +1392,7 @@ export default function TransactionsPage() {
       account_id: listFilters.account_id,
       category_id: listFilters.category_id,
       tag_id: listFilters.tag_id,
+      exclude_internal_transfers: listFilters.exclude_internal_transfers,
     };
     const url = transactionsApi.exportUrl(exportFilters);
     try {
@@ -1385,7 +1416,14 @@ export default function TransactionsPage() {
       const msg = e instanceof Error ? e.message : "Export failed";
       notify.error(msg);
     }
-  }, [listFilters.month, listFilters.account_id, listFilters.category_id, listFilters.tag_id, month]);
+  }, [
+    listFilters.month,
+    listFilters.account_id,
+    listFilters.category_id,
+    listFilters.tag_id,
+    listFilters.exclude_internal_transfers,
+    month,
+  ]);
 
   const loadingList = isLoading || isFetching;
 
@@ -1437,7 +1475,7 @@ export default function TransactionsPage() {
               <div className="grid min-w-0 gap-2 lg:min-w-[200px] lg:flex-1">
                 <Label>Account</Label>
                 <Select value={accountId} onValueChange={setAccountId}>
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger className="w-full [&_[data-slot=select-value]]:truncate">
                     <SelectValue placeholder="Account" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1455,7 +1493,7 @@ export default function TransactionsPage() {
               <div className="grid min-w-0 gap-2 lg:min-w-[200px] lg:flex-1">
                 <Label>Category</Label>
                 <Select value={categoryId} onValueChange={setCategoryId}>
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger className="w-full [&_[data-slot=select-value]]:truncate">
                     <SelectValue placeholder="Category" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1472,7 +1510,7 @@ export default function TransactionsPage() {
               <div className="grid min-w-0 gap-2 lg:min-w-[160px]">
                 <Label>Tag</Label>
                 <Select value={tagFilterId} onValueChange={setTagFilterId}>
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger className="w-full [&_[data-slot=select-value]]:truncate">
                     <SelectValue placeholder="Tag" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1490,7 +1528,7 @@ export default function TransactionsPage() {
                 <div className="grid min-w-0 gap-2 lg:min-w-[150px]">
                   <Label>Person</Label>
                   <Select value={personId} onValueChange={setPersonId}>
-                    <SelectTrigger className="w-full">
+                    <SelectTrigger className="w-full [&_[data-slot=select-value]]:truncate">
                       <SelectValue placeholder="Person" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1508,7 +1546,7 @@ export default function TransactionsPage() {
               <div className="grid min-w-0 gap-2 lg:min-w-[160px]">
                 <Label>Channel</Label>
                 <Select value={channel} onValueChange={setChannel}>
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger className="w-full [&_[data-slot=select-value]]:truncate">
                     <SelectValue placeholder="Channel" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1533,6 +1571,36 @@ export default function TransactionsPage() {
               <Button type="button" variant="secondary" className="col-span-2 gap-2 sm:col-span-1 lg:col-auto lg:shrink-0" onClick={handleExportCsv}>
                 <Download className="size-4" />
                 Export CSV
+              </Button>
+            </div>
+
+            <div className="flex flex-col gap-3 border-t border-border/70 pt-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-2.5">
+                <Switch
+                  id="show-internal-transfers"
+                  checked={showInternalTransfers}
+                  onCheckedChange={setShowInternalTransfers}
+                  className="mt-0.5"
+                />
+                <div className="flex flex-col gap-0.5">
+                  <Label htmlFor="show-internal-transfers" className="cursor-pointer text-sm">
+                    Show internal transactions
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Hidden by default. Toggle on to audit intra-family transfers excluded from income / expense totals.
+                  </p>
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="gap-1.5 self-end text-muted-foreground hover:text-foreground sm:self-auto"
+                onClick={resetFilters}
+                disabled={filtersAreDefault}
+                title="Clear account, category, tag, channel, person, search, and internal-transfer filters"
+              >
+                Reset filters
               </Button>
             </div>
           </CardContent>

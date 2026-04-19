@@ -29,6 +29,7 @@ class TransactionsRepository:
         user_id: Optional[int] = None,
         viewer_user_id: Optional[int] = None,
         transaction_class: Optional[str] = None,
+        exclude_internal_transfers: Optional[bool] = None,
         limit: int = 200,
         offset: int = 0,
         omit_heavy_fields: bool = True,
@@ -96,6 +97,14 @@ class TransactionsRepository:
             conditions.append(f"t.transaction_class = ${idx}")
             params.append(transaction_class)
             idx += 1
+
+        # Hide intra-family transfers from the Transactions list when the
+        # caller opted in. Driven by the "Show internal transactions" toggle
+        # on the frontend (default OFF) — the Reports endpoints already
+        # exclude this class via `transaction_class = 'expense' | 'income'`,
+        # but the raw list historically returned every row.
+        if exclude_internal_transfers:
+            conditions.append("t.transaction_class <> 'internal_transfer'")
 
         if user_id is not None:
             conditions.append(f"a.user_id = ${idx}")

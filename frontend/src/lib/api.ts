@@ -194,6 +194,8 @@ function buildTransactionQuery(filters: TransactionFilters): string {
   if (filters.pending_only != null) params.set('pending_only', String(filters.pending_only));
   if (filters.user_id != null) params.set('user_id', String(filters.user_id));
   if (filters.transaction_class) params.set('transaction_class', filters.transaction_class);
+  if (filters.exclude_internal_transfers != null)
+    params.set('exclude_internal_transfers', String(filters.exclude_internal_transfers));
   if (filters.limit != null) params.set('limit', String(filters.limit));
   if (filters.offset != null) params.set('offset', String(filters.offset));
   const qs = params.toString();
@@ -264,6 +266,8 @@ export const transactionsApi = {
     if (filters.account_id != null) params.set('account_id', String(filters.account_id));
     if (filters.category_id != null) params.set('category_id', String(filters.category_id));
     if (filters.tag_id != null) params.set('tag_id', String(filters.tag_id));
+    if (filters.exclude_internal_transfers != null)
+      params.set('exclude_internal_transfers', String(filters.exclude_internal_transfers));
     const qs = params.toString();
     return `${API_BASE}/api/transactions/export${qs ? '?' + qs : ''}`;
   },

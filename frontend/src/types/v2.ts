@@ -273,6 +273,12 @@ export interface TransactionFilters {
    * and the diagnostics page).
    */
   transaction_class?: TransactionClass;
+  /**
+   * When true, excludes rows with `transaction_class === 'internal_transfer'`
+   * from the response. Backs the "Show internal transactions" toggle on the
+   * Transactions page (default OFF — intra-family transfers stay hidden).
+   */
+  exclude_internal_transfers?: boolean;
   limit?: number;
   offset?: number;
 }
