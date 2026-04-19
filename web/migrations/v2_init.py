@@ -897,6 +897,68 @@ async def _migrate_transactions_transaction_class(conn) -> None:
             )
 
 
+async def _migrate_insights_persistence(conn) -> None:
+    """Create persistence tables for the Insights feed (V2.1 Phase 4).
+
+    ``insights_cards`` stores the latest snapshot of each distinct
+    ``dedupe_key`` produced by the feed builder. ``insights_card_user_state``
+    tracks per-user dismiss/snooze state so spouses have independent
+    visibility (wife can hide a card that the husband still sees).
+
+    Both tables are created idempotently. ``insights_card_user_state``
+    intentionally has **no FK** to ``insights_cards(dedupe_key)`` so a
+    recompute that purges a stale card does not delete the user's hide
+    state — if the card recurs, the user's hide decision still applies.
+    """
+    await _ddl(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS insights_cards (
+            id             BIGSERIAL PRIMARY KEY,
+            dedupe_key     TEXT NOT NULL UNIQUE,
+            type           TEXT NOT NULL,
+            severity       TEXT NOT NULL,
+            title          TEXT NOT NULL,
+            summary        TEXT NOT NULL,
+            detail         TEXT,
+            action_url     TEXT,
+            action_label   TEXT,
+            payload        JSONB NOT NULL DEFAULT '{}'::jsonb,
+            first_seen_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            last_seen_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+    )
+    await _ddl(
+        conn,
+        "CREATE INDEX IF NOT EXISTS idx_insights_cards_last_seen ON insights_cards(last_seen_at)",
+    )
+    await _ddl(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS insights_card_user_state (
+            user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            dedupe_key      TEXT NOT NULL,
+            dismissed_at    TIMESTAMPTZ,
+            snoozed_until   TIMESTAMPTZ,
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (user_id, dedupe_key)
+        )
+        """,
+    )
+    await _ddl(
+        conn,
+        "CREATE INDEX IF NOT EXISTS idx_insights_user_state_key ON insights_card_user_state(dedupe_key)",
+    )
+
+    # Thresholds in app_settings.insights_config (JSONB blob). Stored as a
+    # single JSON column to avoid schema churn every time we add a knob.
+    await _ddl(
+        conn,
+        "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS insights_config JSONB NOT NULL DEFAULT '{}'::jsonb",
+    )
+
+
 async def run_v2_migrations(pool) -> None:
     """Execute all V2 DDL statements against the provided asyncpg pool."""
     logger.info("Running V2 database migrations...")
@@ -915,4 +977,5 @@ async def run_v2_migrations(pool) -> None:
         await _migrate_recurring_price_change_signed(conn)
         await _migrate_transactions_display_title_backfill(conn)
         await _migrate_transactions_transaction_class(conn)
+        await _migrate_insights_persistence(conn)
     logger.info("V2 database migrations completed successfully.")

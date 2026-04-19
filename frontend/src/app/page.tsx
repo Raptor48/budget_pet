@@ -24,6 +24,8 @@ import { MonthYearPicker } from "@/components/ui/month-year-picker";
 import { PlaidTxnAmount } from "@/components/ui/plaid-txn-amount";
 import type { ForecastEntry, Transaction } from "@/types/v2";
 import { cn } from "@/lib/utils";
+import { composeInsightsBadge, pickTeaser } from "@/lib/insights-teaser";
+import { Button } from "@/components/ui/button";
 
 /** Plain currency (balances, aggregates — not Plaid signed transaction lines). */
 function formatUsd(cents: number): string {
@@ -180,6 +182,7 @@ function DashboardContent() {
   const transactions = transactionsQuery.data ?? [];
   const byCategory = byCategoryQuery.data ?? [];
   const insights = insightsQuery.data;
+  const insightsTeaser = pickTeaser(insights);
 
   const pieData = useMemo(
     () => byCategory.filter((c) => c.amount_cents > 0).slice(0, 12),
@@ -312,25 +315,46 @@ function DashboardContent() {
         </Card>
 
         <Link href="/insights" className="group block outline-none">
-          <Card className="h-full border-primary/20 transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-lg">
+          <Card
+            className={cn(
+              "h-full border-primary/20 transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-lg",
+              insightsTeaser?.severity === "warn" && "border-amber-500/60",
+            )}
+          >
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center justify-between gap-2 text-sm font-medium text-muted-foreground">
                 Insights
-                <Badge variant="secondary" className="font-normal">
-                  {insights ? `${insights.actionable_count} alerts` : "—"}
+                <Badge
+                  variant={insightsTeaser?.severity === "warn" ? "destructive" : "secondary"}
+                  className="font-normal"
+                >
+                  {composeInsightsBadge(insights)}
                 </Badge>
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
               <p className="text-sm leading-snug text-foreground">
-                {insights?.cards?.[0]?.summary ?? "Trends, health, and spending stories."}
+                {insightsTeaser?.summary ?? "Trends, health, and spending stories."}
               </p>
-              <p className="text-primary text-xs font-medium group-hover:underline">View insights →</p>
+              {insightsTeaser?.action_url && insightsTeaser.action_label && (
+                <Button
+                  asChild
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Link href={insightsTeaser.action_url}>{insightsTeaser.action_label}</Link>
+                </Button>
+              )}
+              <p className="text-primary text-xs font-medium group-hover:underline">View all insights →</p>
             </CardContent>
           </Card>
         </Link>
       </div>
 
+      {/* TODO(V2.1 Phase 4): if we introduce a `liquidity_buffer` insight card,
+         fold this standalone warn into the feed so we don't double-surface. */}
       {cashflowWarn && (
         <Card className="border-amber-500/40 bg-amber-500/5">
           <CardHeader className="pb-2">

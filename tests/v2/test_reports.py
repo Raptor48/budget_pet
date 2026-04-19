@@ -94,4 +94,38 @@ class TestFinancialHealthScore:
             has_overdue=True,
         )
         assert 0 <= result["score"] <= 100
-        assert result["color"]  # should have a color
+        assert result["color"]
+
+    def test_mortgage_excluded_from_dti_but_surfaced_in_advice(self):
+        """Mortgage/loan balance should not penalize DTI but must appear in advice."""
+        result = compute_health_score(
+            total_debt_cents=0,                  # $0 credit-card debt
+            mortgage_loan_cents=40_000_000,      # $400k mortgage
+            annual_income_cents=12_000_000,      # $120k/year
+            monthly_income_cents=1_000_000,
+            monthly_expenses_cents=500_000,
+            total_credit_limit_cents=500_000,
+            total_credit_balance_cents=50_000,
+            liquid_balance_cents=4_000_000,
+            avg_monthly_expenses_cents=500_000,
+            has_overdue=False,
+        )
+        assert result["debt_to_income"] == 0.0
+        assert result["score"] >= 80, "mortgage alone should not hurt the score"
+        assert "mortgage" in result["advice"].lower()
+        assert result["mortgage_loan_cents"] == 40_000_000
+
+    def test_no_mortgage_no_mortgage_line(self):
+        result = compute_health_score(
+            total_debt_cents=0,
+            annual_income_cents=600000,
+            monthly_income_cents=50000,
+            monthly_expenses_cents=30000,
+            total_credit_limit_cents=100000,
+            total_credit_balance_cents=5000,
+            liquid_balance_cents=200000,
+            avg_monthly_expenses_cents=30000,
+            has_overdue=False,
+            mortgage_loan_cents=0,
+        )
+        assert "mortgage" not in result["advice"].lower()

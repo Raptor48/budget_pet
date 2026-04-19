@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Tooltip,
   TooltipContent,
@@ -24,6 +26,7 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
+import { insightsApi } from "@/lib/api";
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard, ownerOnly: false },
@@ -47,6 +50,16 @@ export function Sidebar({
 }: SidebarProps) {
   const pathname = usePathname();
   const { user, logout } = useAuth();
+
+  // Badge for the Insights entry — only fetched when logged in, cached for
+  // 60s to avoid spamming the feed endpoint on every navigation.
+  const insightsQuery = useQuery({
+    queryKey: ["insights", "feed"],
+    queryFn: () => insightsApi.getFeed(),
+    enabled: Boolean(user),
+    staleTime: 60_000,
+  });
+  const newCount = insightsQuery.data?.new_count ?? 0;
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -130,12 +143,24 @@ export function Sidebar({
                     {!collapsed && (
                       <span className="truncate">{item.name}</span>
                     )}
+                    {item.href === "/insights" && newCount > 0 && (
+                      <Badge
+                        variant="destructive"
+                        className={cn(
+                          "ml-auto h-5 min-w-5 rounded-full px-1.5 text-[10px] font-semibold",
+                          collapsed &&
+                            "absolute -top-1 -right-1 ml-0 h-4 min-w-4 border border-background px-1 text-[9px]",
+                        )}
+                      >
+                        {newCount}
+                      </Badge>
+                    )}
                   </Button>
                 </Link>
               );
 
               return (
-                <li key={item.name}>
+                <li key={item.name} className="relative">
                   {collapsed ? (
                     <Tooltip>
                       <TooltipTrigger asChild>{btnContent}</TooltipTrigger>

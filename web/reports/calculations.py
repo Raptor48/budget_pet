@@ -57,6 +57,10 @@ def build_forecast(
     for stream in streams:
         if not stream.get("is_active"):
             continue
+        if (stream.get("status") or "").upper() == "TOMBSTONED":
+            # Plaid keeps returning streams for a while after they stop; do not
+            # extrapolate future bills for streams explicitly marked stopped.
+            continue
         if stream.get("direction") != "outflow":
             continue
         last_date = stream.get("last_date")
@@ -95,11 +99,27 @@ def compute_health_score(
     liquid_balance_cents: int,
     avg_monthly_expenses_cents: int,
     has_overdue: bool,
+    mortgage_loan_cents: int = 0,
 ) -> Dict[str, Any]:
+    """Produce the health score and advice string from pre-aggregated inputs.
+
+    Contract (see ``docs/reports-math.md``):
+
+    - ``total_debt_cents`` is **credit-card debt only**. Mortgages and
+      installment loans are passed in via ``mortgage_loan_cents`` and
+      surfaced in the advice without contributing to the DTI penalty.
+      This matches the user expectation that a home mortgage shouldn't
+      tank their score.
+    - ``monthly_income_cents`` / ``monthly_expenses_cents`` must be
+      computed over **equal windows** (3-month averages over completed
+      months). ``annual_income_cents`` is the real 12-month sum so DTI is
+      stable.
+    """
     score = 100
     advice_parts = []
 
-    # Debt-to-income ratio (lower is better)
+    # Debt-to-income ratio (lower is better). Uses credit-card principal vs.
+    # real 12-month income.
     dti = None
     if annual_income_cents and annual_income_cents > 0:
         dti = total_debt_cents / annual_income_cents
@@ -148,6 +168,13 @@ def compute_health_score(
         score -= 15
         advice_parts.append("You have overdue accounts. Make minimum payments immediately.")
 
+    # Mortgage / installment loans are tracked but excluded from DTI. Surface
+    # the balance so the user knows the score isn't ignoring it.
+    if mortgage_loan_cents and mortgage_loan_cents > 0:
+        advice_parts.append(
+            f"Mortgage/loan balance of ${mortgage_loan_cents / 100:,.0f} is tracked but excluded from DTI."
+        )
+
     score = max(0, min(100, score))
 
     if score >= 80:
@@ -170,5 +197,6 @@ def compute_health_score(
         "savings_rate": round(savings_rate, 3) if savings_rate is not None else None,
         "emergency_fund_months": round(emergency_months, 1) if emergency_months is not None else None,
         "has_overdue": has_overdue,
+        "mortgage_loan_cents": mortgage_loan_cents,
         "advice": advice,
     }

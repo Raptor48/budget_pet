@@ -22,7 +22,10 @@ class RecurringRepository:
         return await get_pool()
 
     async def list_streams(
-        self, direction: Optional[str] = None, active_only: bool = True
+        self,
+        direction: Optional[str] = None,
+        active_only: bool = True,
+        viewer_user_id: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """List recurring streams, enriched with account + owner + primary
         category metadata so the UI can render "Charged to <card · @owner>"
@@ -31,6 +34,11 @@ class RecurringRepository:
         The returned dict follows `RecurringStreamOut`'s enrichment contract:
         `account_name`, `account_mask`, `owner_username`,
         `primary_category_{id,name,color}`, and `display_title`.
+
+        When ``viewer_user_id`` is set, streams whose underlying account is
+        owned by a *different* user are filtered out so private spend
+        metadata does not leak cross-user. Streams on shared accounts
+        (``accounts.user_id IS NULL``) remain visible to everyone.
         """
         pool = await self._pool()
         conditions: List[str] = []
@@ -42,6 +50,10 @@ class RecurringRepository:
             idx += 1
         if active_only:
             conditions.append("rs.is_active = TRUE")
+        if viewer_user_id is not None:
+            conditions.append(f"(a.user_id = ${idx} OR a.user_id IS NULL)")
+            params.append(viewer_user_id)
+            idx += 1
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         async with pool.acquire() as conn:
             rows = await conn.fetch(
@@ -86,7 +98,9 @@ class RecurringRepository:
             row = await conn.fetchrow("SELECT * FROM recurring_streams WHERE id = $1", stream_id)
         return dict(row) if row else None
 
-    async def get_price_changes(self) -> List[Dict[str, Any]]:
+    async def get_price_changes(
+        self, viewer_user_id: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         """Return streams where |last / avg - 1| > PRICE_CHANGE_THRESHOLD.
 
         `price_change_pct` is stored as a *signed* percentage where a positive
@@ -95,20 +109,31 @@ class RecurringRepository:
         a change is favourable (e.g. price drop on an outflow subscription).
         Filtering still uses the absolute magnitude so drops and increases both
         surface as notable.
+
+        When ``viewer_user_id`` is set, streams whose underlying account is
+        owned by another user are hidden (see ``list_streams``).
         """
         pool = await self._pool()
+        params: List[Any] = [PRICE_CHANGE_THRESHOLD]
+        viewer_clause = ""
+        if viewer_user_id is not None:
+            viewer_clause = " AND (a.user_id = $2 OR a.user_id IS NULL)"
+            params.append(viewer_user_id)
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                """
-                SELECT * FROM recurring_streams
-                WHERE is_active = TRUE
-                  AND last_amount_cents IS NOT NULL
-                  AND average_amount_cents IS NOT NULL
-                  AND average_amount_cents != 0
-                  AND ABS(last_amount_cents - average_amount_cents)::float / ABS(average_amount_cents) > $1
-                ORDER BY ABS(last_amount_cents - average_amount_cents) DESC
+                f"""
+                SELECT rs.*
+                FROM recurring_streams rs
+                LEFT JOIN accounts a ON a.id = rs.account_id
+                WHERE rs.is_active = TRUE
+                  AND rs.last_amount_cents IS NOT NULL
+                  AND rs.average_amount_cents IS NOT NULL
+                  AND rs.average_amount_cents != 0
+                  AND ABS(rs.last_amount_cents - rs.average_amount_cents)::float / ABS(rs.average_amount_cents) > $1
+                  {viewer_clause}
+                ORDER BY ABS(rs.last_amount_cents - rs.average_amount_cents) DESC
                 """,
-                PRICE_CHANGE_THRESHOLD,
+                *params,
             )
         return [dict(r) for r in rows]
 

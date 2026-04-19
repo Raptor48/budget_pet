@@ -488,21 +488,61 @@ export const plaidApi = {
 // Insights
 // ---------------------------------------------------------------------------
 
+export type InsightSeverity = 'info' | 'warn';
+
+export interface InsightUserState {
+  dismissed: boolean;
+  dismissed_at?: string | null;
+  snoozed_until?: string | null;
+}
+
+export interface InsightCard {
+  type: string;
+  severity: InsightSeverity;
+  title: string;
+  summary: string;
+  detail?: string | null;
+  dedupe_key: string;
+  action_url?: string | null;
+  action_label?: string | null;
+  /** Overlay from per-user dismiss/snooze. Missing on feeds served before Phase 4. */
+  user_state?: InsightUserState | null;
+  /** Server-computed flag: first_seen_at > user_preferences.insights_last_viewed_at. */
+  is_new?: boolean;
+}
+
+export interface InsightsFeed {
+  generated_at: string;
+  cards: InsightCard[];
+  actionable_count: number;
+  new_count: number;
+}
+
+/**
+ * The dismiss/snooze endpoints accept the `dedupe_key` in the URL path, which
+ * can include characters that require percent-encoding (e.g. ``:`` in
+ * ``budget_risk:10:2026-04``).
+ */
+const encodeDedupe = (k: string) => encodeURIComponent(k);
+
 export const insightsApi = {
-  getFeed: (): Promise<{
-    generated_at: string;
-    cards: Array<{
-      type: string;
-      severity: string;
-      title: string;
-      summary: string;
-      detail?: string | null;
-    }>;
-    actionable_count: number;
-  }> => apiRequest('/api/insights/feed'),
+  getFeed: (includeHidden = false): Promise<InsightsFeed> =>
+    apiRequest(`/api/insights/feed${includeHidden ? '?include_hidden=true' : ''}`),
 
   markViewed: (): Promise<{ ok: boolean }> =>
     apiRequest('/api/insights/mark-viewed', { method: 'POST' }),
+
+  dismiss: (dedupeKey: string): Promise<{ ok: boolean }> =>
+    apiRequest(`/api/insights/${encodeDedupe(dedupeKey)}/dismiss`, { method: 'POST' }),
+
+  snooze: (dedupeKey: string, until: Date): Promise<{ ok: boolean; snoozed_until: string }> =>
+    apiRequest(`/api/insights/${encodeDedupe(dedupeKey)}/snooze`, {
+      method: 'POST',
+      body: JSON.stringify({ until: until.toISOString() }),
+    }),
+
+  unhide: (dedupeKey: string): Promise<{ ok: boolean }> =>
+    apiRequest(`/api/insights/${encodeDedupe(dedupeKey)}/unhide`, { method: 'POST' }),
 };
 
 // ---------------------------------------------------------------------------

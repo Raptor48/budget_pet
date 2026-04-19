@@ -14,6 +14,7 @@ class _FakeReports:
         self.last_viewer_user_id = viewer_user_id
         return {
             "total_debt_cents": 0,
+            "mortgage_loan_cents": 0,
             "annual_income_cents": 120_000,
             "monthly_income_cents": 10_000,
             "monthly_expenses_cents": 5_000,
@@ -24,14 +25,23 @@ class _FakeReports:
             "has_overdue": False,
         }
 
-    async def get_cash_flow(self, _month: str, viewer_user_id=None):
+    async def get_cash_flow_window(self, _start_date, _end_date, viewer_user_id=None):
         self.last_viewer_user_id = viewer_user_id
-        return {"net_cents": 100}
+        return {
+            "income_cents": 100,
+            "expenses_cents": 0,
+            "internal_transfer_cents": 0,
+            "net_cents": 100,
+        }
 
     async def get_by_category(self, _month: str, viewer_user_id=None, rollup="primary", parent_category_id=None):
         self.last_viewer_user_id = viewer_user_id
         self.last_rollup = rollup
         return [{"category_name": "Groceries", "amount_cents": 12_345}]
+
+    async def get_category_rolling(self, _month: str, months=3, viewer_user_id=None):
+        self.last_viewer_user_id = viewer_user_id
+        return []
 
 
 class _FakeRecurring:
@@ -53,14 +63,45 @@ class _FakeRecurring:
             }
         ]
 
-    async def get_price_changes(self):
+    async def get_price_changes(self, viewer_user_id=None):
         return list(self._price_changes)
+
+
+class _FakeAccounts:
+    def __init__(self, rows=None):
+        self._rows = rows or []
+
+    async def list_accounts(self, active_only: bool = True):
+        return list(self._rows)
+
+
+class _FakeBudgets:
+    def __init__(self, rows=None):
+        self._rows = rows or []
+
+    async def get_progress(self, _month: str, viewer_user_id=None):
+        return list(self._rows)
+
+
+def _install_stub_repos(monkeypatch, *, reports=None, recurring=None, accounts=None, budgets=None):
+    """Wire monkeypatched stubs for every repo the feed imports lazily."""
+    monkeypatch.setattr(
+        "web.reports.repo.ReportsRepository", lambda: reports or _FakeReports()
+    )
+    monkeypatch.setattr(
+        "web.recurring.repo.RecurringRepository", lambda: recurring or _FakeRecurring()
+    )
+    monkeypatch.setattr(
+        "web.accounts.repo.AccountsRepository", lambda: accounts or _FakeAccounts()
+    )
+    monkeypatch.setattr(
+        "web.budgets.repo.BudgetsRepository", lambda: budgets or _FakeBudgets()
+    )
 
 
 @pytest.mark.asyncio
 async def test_build_insights_feed_cards_and_actionable(monkeypatch):
-    monkeypatch.setattr("web.reports.repo.ReportsRepository", lambda: _FakeReports())
-    monkeypatch.setattr("web.recurring.repo.RecurringRepository", lambda: _FakeRecurring())
+    _install_stub_repos(monkeypatch)
 
     out = await build_insights_feed()
 
@@ -70,19 +111,27 @@ async def test_build_insights_feed_cards_and_actionable(monkeypatch):
     assert "top_category" in types
     assert "forecast" in types
     assert isinstance(out["actionable_count"], int)
-    assert all("severity" in c and "title" in c for c in out["cards"])
+    assert "new_count" in out and isinstance(out["new_count"], int)
+    # Every card must ship the Phase 2 envelope additions.
+    for c in out["cards"]:
+        assert "severity" in c and "title" in c
+        assert "dedupe_key" in c and c["dedupe_key"], f"missing dedupe_key on {c['type']}"
+        assert "action_url" in c and "action_label" in c, (
+            f"missing action fields on {c['type']}"
+        )
+    # Phase 2 ships ``new_count == actionable_count``; Phase 4 decouples it.
+    assert out["new_count"] == out["actionable_count"]
 
 
 @pytest.mark.asyncio
 async def test_build_insights_feed_propagates_viewer_user_id(monkeypatch):
     """Viewer id must be forwarded to ReportsRepository so privacy filter applies."""
     fake_reports = _FakeReports()
-    monkeypatch.setattr("web.reports.repo.ReportsRepository", lambda: fake_reports)
-    monkeypatch.setattr("web.recurring.repo.RecurringRepository", lambda: _FakeRecurring())
+    _install_stub_repos(monkeypatch, reports=fake_reports)
 
     await build_insights_feed(viewer_user_id=42)
 
-    # Last call (get_by_category) should record viewer_user_id=42.
+    # Every call should record viewer_user_id=42.
     assert fake_reports.last_viewer_user_id == 42
 
 
@@ -90,7 +139,6 @@ async def test_build_insights_feed_propagates_viewer_user_id(monkeypatch):
 async def test_price_change_good_and_warn_cards(monkeypatch):
     """Signed price movements should surface as separate good/warn insight cards
     based on the stream direction."""
-    monkeypatch.setattr("web.reports.repo.ReportsRepository", lambda: _FakeReports())
     # Adobe dropped on an outflow (good), Netflix hiked on an outflow (warn)
     streams = [
         {
@@ -112,10 +160,7 @@ async def test_price_change_good_and_warn_cards(monkeypatch):
             "display_title": "Netflix",
         },
     ]
-    monkeypatch.setattr(
-        "web.recurring.repo.RecurringRepository",
-        lambda: _FakeRecurring(price_changes=streams),
-    )
+    _install_stub_repos(monkeypatch, recurring=_FakeRecurring(price_changes=streams))
 
     out = await build_insights_feed()
     types = {c["type"] for c in out["cards"]}

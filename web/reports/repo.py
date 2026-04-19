@@ -125,6 +125,54 @@ class ReportsRepository:
             "net_cents": income - expenses,
         }
 
+    async def get_cash_flow_window(
+        self,
+        start_date: date,
+        end_date: date,
+        viewer_user_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Cash-flow totals for an arbitrary ``[start_date, end_date]`` window.
+
+        Used by Insights to compare current month-to-date against the same
+        MTD window of the previous month, so the delta isn't distorted by
+        comparing a partial month to a full prior month.
+
+        End date is **inclusive** (``<= end_date``).
+        """
+        pool = await self._pool()
+        private_filter = (
+            _private_tx_filter_with_idx("t", 3) if viewer_user_id is not None else ""
+        )
+        params: list = [start_date, end_date]
+        if viewer_user_id is not None:
+            params.append(viewer_user_id)
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT
+                    COALESCE(SUM(CASE WHEN {_income_predicate("t")} THEN -t.amount_cents ELSE 0 END), 0) AS income_cents,
+                    COALESCE(SUM(CASE WHEN {_expense_predicate("t")} THEN t.amount_cents ELSE 0 END), 0) AS expenses_cents,
+                    COALESCE(SUM(CASE WHEN {_internal_transfer_predicate("t")} THEN t.amount_cents ELSE 0 END), 0) AS internal_transfer_cents
+                FROM transactions t
+                WHERE COALESCE(t.authorized_date, t.date) >= $1
+                  AND COALESCE(t.authorized_date, t.date) <= $2
+                  {_sandbox_tx_filter("t")}
+                  {private_filter}
+                """,
+                *params,
+            )
+        income = int(row["income_cents"] or 0)
+        expenses = int(row["expenses_cents"] or 0)
+        internal = int(row["internal_transfer_cents"] or 0)
+        return {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "income_cents": income,
+            "expenses_cents": expenses,
+            "internal_transfer_cents": internal,
+            "net_cents": income - expenses,
+        }
+
     async def get_cash_flow_history(self, months: int = 12, viewer_user_id: Optional[int] = None) -> List[Dict[str, Any]]:
         pool = await self._pool()
         private_filter = (
@@ -163,6 +211,96 @@ class ReportsRepository:
                 "net_cents": income - expenses,
             })
         return result
+
+    async def get_category_rolling(
+        self,
+        current_month: str,
+        months: int = 3,
+        viewer_user_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """Return per-primary-category current-month spend and prior-N-month average.
+
+        Rolled up to the primary category (``COALESCE(parent_id, id)``) so the
+        result lines up with ``get_by_category(rollup='primary')``.
+
+        Used by the ``category_trend`` insight card to detect MoM spikes.
+
+        Output rows: ``{category_id, category_name, current_cents, avg_cents}``.
+        ``avg_cents`` averages only **completed** months preceding
+        ``current_month`` (clamped by the ``months`` parameter). If fewer
+        months of history exist, the average is over whatever is present.
+        """
+        pool = await self._pool()
+        private_filter = (
+            _private_tx_filter_with_idx("t", 3) if viewer_user_id is not None else ""
+        )
+        params: list = [current_month, int(months)]
+        if viewer_user_id is not None:
+            params.append(viewer_user_id)
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                WITH per_cat AS (
+                    SELECT
+                        COALESCE(c.parent_id, t.category_id) AS bucket_id,
+                        TO_CHAR(COALESCE(t.authorized_date, t.date), 'YYYY-MM') AS m,
+                        SUM(t.amount_cents) AS total_cents
+                    FROM transactions t
+                    LEFT JOIN categories c ON c.id = t.category_id
+                    WHERE {_expense_predicate("t")}
+                      AND COALESCE(t.authorized_date, t.date) >= (($1 || '-01')::date - (INTERVAL '1 month' * $2))
+                      AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
+                      AND t.category_id IS NOT NULL
+                      AND NOT EXISTS (SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id)
+                      {_sandbox_tx_filter("t")}
+                      {private_filter}
+                    GROUP BY bucket_id, m
+
+                    UNION ALL
+
+                    SELECT
+                        COALESCE(c.parent_id, ts.category_id) AS bucket_id,
+                        TO_CHAR(COALESCE(t.authorized_date, t.date), 'YYYY-MM') AS m,
+                        SUM(ts.amount_cents) AS total_cents
+                    FROM transaction_splits ts
+                    JOIN transactions t ON t.id = ts.parent_transaction_id
+                    LEFT JOIN categories c ON c.id = ts.category_id
+                    WHERE {_expense_predicate("t")}
+                      AND COALESCE(t.authorized_date, t.date) >= (($1 || '-01')::date - (INTERVAL '1 month' * $2))
+                      AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
+                      AND ts.category_id IS NOT NULL
+                      {_sandbox_tx_filter("t")}
+                      {private_filter}
+                    GROUP BY bucket_id, m
+                ),
+                folded AS (
+                    SELECT bucket_id, m, SUM(total_cents) AS total_cents
+                    FROM per_cat
+                    GROUP BY bucket_id, m
+                )
+                SELECT
+                    f.bucket_id AS category_id,
+                    cb.name AS category_name,
+                    COALESCE(SUM(CASE WHEN f.m = $1 THEN f.total_cents ELSE 0 END), 0) AS current_cents,
+                    COALESCE(AVG(CASE WHEN f.m < $1 THEN f.total_cents END), 0) AS avg_cents,
+                    COUNT(DISTINCT CASE WHEN f.m < $1 THEN f.m END) AS prior_months
+                FROM folded f
+                LEFT JOIN categories cb ON cb.id = f.bucket_id
+                GROUP BY f.bucket_id, cb.name
+                ORDER BY current_cents DESC
+                """,
+                *params,
+            )
+        return [
+            {
+                "category_id": r["category_id"],
+                "category_name": r["category_name"],
+                "current_cents": int(r["current_cents"] or 0),
+                "avg_cents": int(r["avg_cents"] or 0),
+                "prior_months": int(r["prior_months"] or 0),
+            }
+            for r in rows
+        ]
 
     async def get_by_category(
         self,
@@ -647,13 +785,26 @@ class ReportsRepository:
     ) -> Dict[str, Any]:
         """Gather raw data needed for financial health score calculation.
 
-        When ``viewer_user_id`` is provided, private transactions owned by other
-        users are excluded from the income/expense aggregates so they do not
-        leak into the viewer's health score.
+        Window contract (see ``docs/reports-math.md``):
+
+        - ``monthly_income_cents``, ``monthly_expenses_cents`` are both
+          **3-month averages over completed months** so the savings-rate
+          metric in ``compute_health_score`` compares apples to apples.
+          Using partial month-to-date for expenses (as V2.1 did) made
+          early-month scores look artificially great.
+        - ``annual_income_cents`` is the **real 12-month income sum** (not
+          ``monthly_income * 12``) so DTI is not distorted by short-term
+          paycheck spikes.
+        - ``total_debt_cents`` reflects **credit balances only** — loans
+          and mortgages are tracked separately via ``mortgage_loan_cents``
+          so DTI does not punish users with a mortgage. The advice string
+          still surfaces the loan balance so it is not hidden.
+
+        When ``viewer_user_id`` is provided, private transactions owned by
+        other users are excluded from the income/expense aggregates so
+        they do not leak into the viewer's health score.
         """
         pool = await self._pool()
-        today = date.today()
-        current_month = today.strftime("%Y-%m")
         async with pool.acquire() as conn:
             # Monthly income: average over the last 3 completed months.
             income_filter = (
@@ -681,26 +832,54 @@ class ReportsRepository:
                 *income_params,
             )
             monthly_income = int(monthly_income or 0)
-            # Monthly expenses: use the current month for the on-screen snapshot
-            exp_filter = (
-                _private_tx_filter_with_idx("", 2) if viewer_user_id is not None else ""
+            # Real annual income: sum over last 12 completed months.
+            annual_filter = (
+                _private_tx_filter_with_idx("", 1) if viewer_user_id is not None else ""
             )
-            exp_params: list = [current_month]
+            annual_params: list = []
+            if viewer_user_id is not None:
+                annual_params.append(viewer_user_id)
+            annual_income = await conn.fetchval(
+                f"""
+                SELECT COALESCE(SUM(-amount_cents), 0)
+                FROM transactions
+                WHERE {_income_predicate("")}
+                  AND COALESCE(authorized_date, date) >= (DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '12 months')
+                  AND COALESCE(authorized_date, date) < DATE_TRUNC('month', CURRENT_DATE)
+                  {_sandbox_tx_filter_no_alias()}
+                  {annual_filter}
+                """,
+                *annual_params,
+            )
+            annual_income = int(annual_income or 0)
+            # Monthly expenses: 3-month average of completed months, symmetric
+            # with monthly_income so savings_rate is well-defined.
+            exp_filter = (
+                _private_tx_filter_with_idx("", 1) if viewer_user_id is not None else ""
+            )
+            exp_params: list = []
             if viewer_user_id is not None:
                 exp_params.append(viewer_user_id)
             monthly_expenses = await conn.fetchval(
                 f"""
-                SELECT COALESCE(SUM(amount_cents), 0)
-                FROM transactions
-                WHERE {_expense_predicate("")}
-                  AND COALESCE(authorized_date, date) >= ($1 || '-01')::date
-                  AND COALESCE(authorized_date, date) < (($1 || '-01')::date + INTERVAL '1 month')
-                  {_sandbox_tx_filter_no_alias()}
-                  {exp_filter}
+                SELECT COALESCE(AVG(monthly_total), 0)
+                FROM (
+                    SELECT
+                        TO_CHAR(COALESCE(authorized_date, date), 'YYYY-MM') AS m,
+                        SUM(amount_cents) AS monthly_total
+                    FROM transactions
+                    WHERE {_expense_predicate("")}
+                      AND COALESCE(authorized_date, date) >= (DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '3 months')
+                      AND COALESCE(authorized_date, date) < DATE_TRUNC('month', CURRENT_DATE)
+                      {_sandbox_tx_filter_no_alias()}
+                      {exp_filter}
+                    GROUP BY m
+                ) sub
                 """,
                 *exp_params,
             )
-            # Average monthly expenses (last 6 months)
+            # Average monthly expenses (last 6 months) — used by the emergency
+            # fund calculation; kept separate from the savings-rate input.
             avg_filter = (
                 _private_tx_filter_with_idx("", 1) if viewer_user_id is not None else ""
             )
@@ -724,15 +903,16 @@ class ReportsRepository:
                 """,
                 *avg_params,
             )
-            total_debt = await conn.fetchval(
-                "SELECT COALESCE(SUM(current_balance_cents), 0) FROM accounts WHERE type IN ('credit','loan') AND is_active"
+            # DTI uses credit-card debt only; mortgages/loans are surfaced
+            # separately so the score is not distorted by normal home debt.
+            credit_debt = await conn.fetchval(
+                "SELECT COALESCE(SUM(current_balance_cents), 0) FROM accounts WHERE type = 'credit' AND is_active"
             )
-            annual_income = monthly_income * 12
+            mortgage_loan = await conn.fetchval(
+                "SELECT COALESCE(SUM(current_balance_cents), 0) FROM accounts WHERE type = 'loan' AND is_active"
+            )
             credit_limit = await conn.fetchval(
                 "SELECT COALESCE(SUM(credit_limit_cents), 0) FROM accounts WHERE type = 'credit' AND is_active AND credit_limit_cents IS NOT NULL"
-            )
-            credit_balance = await conn.fetchval(
-                "SELECT COALESCE(SUM(current_balance_cents), 0) FROM accounts WHERE type = 'credit' AND is_active"
             )
             liquid = await conn.fetchval(
                 "SELECT COALESCE(SUM(current_balance_cents), 0) FROM accounts WHERE type = 'depository' AND is_active"
@@ -741,12 +921,13 @@ class ReportsRepository:
                 "SELECT EXISTS(SELECT 1 FROM accounts WHERE is_overdue = TRUE AND is_active)"
             )
         return {
-            "total_debt_cents": total_debt or 0,
+            "total_debt_cents": int(credit_debt or 0),
+            "mortgage_loan_cents": int(mortgage_loan or 0),
             "annual_income_cents": annual_income,
             "monthly_income_cents": monthly_income,
             "monthly_expenses_cents": int(monthly_expenses or 0),
             "total_credit_limit_cents": credit_limit or 0,
-            "total_credit_balance_cents": credit_balance or 0,
+            "total_credit_balance_cents": int(credit_debt or 0),
             "liquid_balance_cents": liquid or 0,
             "avg_monthly_expenses_cents": int(avg_expenses or 0),
             "has_overdue": bool(has_overdue),
