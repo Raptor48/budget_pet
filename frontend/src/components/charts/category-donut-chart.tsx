@@ -186,7 +186,7 @@ export function CategoryLegend({
 }) {
   const activeIdx = hoveredIdx ?? lockedIdx;
   return (
-    <div className="flex flex-col justify-center gap-0.5 overflow-auto pr-1" style={{ maxHeight }}>
+    <div className="flex flex-col justify-start gap-0.5 overflow-auto pr-1" style={{ maxHeight }}>
       {data.map((row, i) => {
         const isActive = activeIdx === i;
         const isDimmed = activeIdx != null && !isActive;
