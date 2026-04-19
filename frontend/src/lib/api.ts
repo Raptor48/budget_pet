@@ -537,6 +537,8 @@ export type InternalTransferRescanHorizon = 'last_90_days' | 'all_time';
 
 export interface InternalTransferRescanResult {
   rows_updated: number;
+  name_rows_updated?: number;
+  pair_rows_updated?: number;
   horizon: InternalTransferRescanHorizon;
   configured_names_count: number;
 }

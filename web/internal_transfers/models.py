@@ -41,7 +41,21 @@ class InternalTransferRescanRequest(BaseModel):
 
 
 class InternalTransferRescanResult(BaseModel):
+    """Outcome of a rescan pass.
+
+    ``rows_updated`` is the total number of transactions whose
+    ``is_internal_transfer`` flag flipped to TRUE in this pass, across both
+    the name-matcher and the family-account pair-matcher. ``name_rows_updated``
+    and ``pair_rows_updated`` break that total down by source so the UI
+    can surface what actually changed. Some rows may be counted once in each
+    stage if both classifiers agree (rare but possible); for the UI we
+    treat them as independent, which keeps the message honest about how
+    each stage contributed.
+    """
+
     rows_updated: int
+    name_rows_updated: int = 0
+    pair_rows_updated: int = 0
     horizon: RescanHorizon
     configured_names_count: int
 

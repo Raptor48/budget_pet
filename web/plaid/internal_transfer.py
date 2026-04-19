@@ -167,6 +167,107 @@ async def get_configured_names(conn: asyncpg.Connection) -> List[str]:
     return normalize_names(raw)
 
 
+async def match_family_account_transfers(
+    conn: asyncpg.Connection,
+    *,
+    horizon_days: Optional[int] = 90,
+) -> int:
+    """
+    Auto-flag same-amount ``TRANSFER_OUT``/``TRANSFER_IN`` pairs that live on
+    two different family accounts as ``is_internal_transfer = TRUE``.
+
+    Complements the name-based classifier: when both sides of a transfer are
+    synced through Plaid (e.g. Denis' PayPal paying Denis' Chase, or Denis'
+    PayPal paying Anastasiia's Chase), the exact cent amount appears once as
+    positive ``TRANSFER_OUT`` on the source account and once as negative
+    ``TRANSFER_IN`` on the destination account, within a couple of business
+    days of each other. No extra signal (counterparty name, institution) is
+    required — the combination of matching PFC, matching cents, and a family
+    account on both ends is enough.
+
+    Rules:
+      * Source: ``pfc_primary = 'TRANSFER_OUT'`` and ``amount_cents > 0``.
+      * Sink:   ``pfc_primary = 'TRANSFER_IN'``  and ``amount_cents = -source.amount_cents``.
+      * Different ``account_id``.
+      * Date diff ≤ 3 days (covers ACH T+2/T+3 and weekend lag).
+      * Both accounts must have an identifiable owner (``COALESCE(accounts.user_id, plaid_items.user_id) IS NOT NULL``).
+        Cross-user pairs count too — anything that moves between two
+        family accounts is internal by definition.
+      * Skip rows with ``is_internal_transfer_manual = TRUE`` (user choices
+        are sacred).
+      * Only Plaid-sourced rows (``source IN ('plaid','plaid_sandbox')``);
+        cash transactions never participate in transfer pairs.
+
+    Pair deduplication uses ``ROW_NUMBER()`` on both sides so each candidate
+    participates in at most one pair. Ties are broken by absolute date
+    difference, then ``id`` for determinism — e.g. if an account records two
+    $100 outflows on the same day and another records two $100 inflows on
+    the next, they pair 1:1, not 2:2.
+
+    ``horizon_days=None`` scans the entire history. Returns the number of
+    rows whose ``is_internal_transfer`` flag flipped to ``TRUE``.
+    """
+    if horizon_days is not None and horizon_days <= 0:
+        return 0
+
+    rows = await conn.fetch(
+        """
+        WITH scoped AS (
+          SELECT t.id, t.account_id, t.amount_cents, t.date,
+                 t.pfc_primary, t.is_internal_transfer,
+                 t.is_internal_transfer_manual,
+                 COALESCE(a.user_id, p.user_id) AS owner_uid
+          FROM transactions t
+          JOIN accounts a ON a.id = t.account_id
+          LEFT JOIN plaid_items p ON p.item_id = a.plaid_item_id
+          WHERE t.pfc_primary IN ('TRANSFER_IN','TRANSFER_OUT')
+            AND t.is_internal_transfer_manual = FALSE
+            AND t.source IN ('plaid','plaid_sandbox')
+            AND ($1::int IS NULL OR t.date >= CURRENT_DATE - $1::int * INTERVAL '1 day')
+        ),
+        pairs AS (
+          SELECT o.id AS out_id, i.id AS in_id,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY o.id ORDER BY ABS(o.date - i.date), i.id
+                 ) AS rn_out,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY i.id ORDER BY ABS(o.date - i.date), o.id
+                 ) AS rn_in
+          FROM scoped o
+          JOIN scoped i
+            ON o.pfc_primary = 'TRANSFER_OUT'
+           AND i.pfc_primary = 'TRANSFER_IN'
+           AND i.account_id <> o.account_id
+           AND i.owner_uid IS NOT NULL
+           AND o.owner_uid IS NOT NULL
+           AND i.amount_cents = -o.amount_cents
+           AND o.amount_cents > 0
+           AND ABS(o.date - i.date) <= 3
+        )
+        UPDATE transactions SET
+          is_internal_transfer = TRUE,
+          updated_at = NOW()
+        WHERE id IN (
+          SELECT out_id FROM pairs WHERE rn_out = 1 AND rn_in = 1
+          UNION
+          SELECT in_id  FROM pairs WHERE rn_out = 1 AND rn_in = 1
+        )
+          AND is_internal_transfer = FALSE
+          AND is_internal_transfer_manual = FALSE
+        RETURNING id
+        """,
+        horizon_days,
+    )
+    count = len(rows)
+    if count:
+        logger.info(
+            "Family account pair-matcher flagged %d transfer rows (horizon_days=%s)",
+            count,
+            horizon_days,
+        )
+    return count
+
+
 async def rescan_internal_transfers(
     conn: asyncpg.Connection,
     *,

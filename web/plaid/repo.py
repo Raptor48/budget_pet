@@ -440,6 +440,7 @@ class PlaidRepository:
             from web.plaid.internal_transfer import (
                 classify_internal_transfer,
                 get_configured_names,
+                match_family_account_transfers,
             )
             internal_names = await get_configured_names(conn)
 
@@ -621,6 +622,27 @@ class PlaidRepository:
                     carry_internal_manual,
                 )
                 imported += 1
+
+            # Pair-match TRANSFER_IN/OUT rows across family accounts on a
+            # small horizon so freshly-synced same-amount transfers between
+            # the user's own banks (Chase → PayPal) or between spouses
+            # (Denis' PayPal → Anastasiia's Chase) are flagged internal
+            # immediately — no manual rescan needed. 7 days covers ACH
+            # settlement lag plus the weekend window; full history is
+            # handled by the rescan endpoint.
+            try:
+                paired = await match_family_account_transfers(
+                    conn, horizon_days=7
+                )
+                if paired:
+                    logger.info(
+                        "Plaid import: pair-matched %d family-account transfer rows",
+                        paired,
+                    )
+            except Exception:
+                logger.exception(
+                    "Plaid import: family-account pair-matcher failed; continuing"
+                )
 
         return imported
 

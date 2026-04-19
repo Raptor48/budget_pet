@@ -206,6 +206,47 @@ aggregate in `web/reports/repo.py` and `web/budgets/repo.py` filters
 `is_internal_transfer = FALSE` via the shared `_not_internal_transfer`
 SQL fragment.
 
+### Family-account pair matching
+
+The name list only catches transfers that expose a counterparty name
+(Zelle, some wires). Own-account moves (Chase → PayPal) and cross-user
+moves between two connected family banks (Denis' PayPal →
+Anastasiia's Chase) typically don't carry a matching name, but they do
+always produce a `TRANSFER_OUT` on one side and a `TRANSFER_IN` on the
+other for the exact same cent amount. `match_family_account_transfers`
+(`web/plaid/internal_transfer.py`) flags both sides automatically when:
+
+* one row is `pfc_primary = 'TRANSFER_OUT'` with `amount_cents > 0` and the
+  other is `'TRANSFER_IN'` with `amount_cents = -source.amount_cents`;
+* they live on **different** accounts and **both** accounts have a
+  resolvable owner (`COALESCE(accounts.user_id, plaid_items.user_id)`);
+* the date difference is ≤ 3 days;
+* neither row has `is_internal_transfer_manual = TRUE`;
+* both rows are Plaid-sourced (`source IN ('plaid','plaid_sandbox')`).
+
+Scope is **family-wide** on purpose — we don't require the two owners to
+be the same user. Any transfer between two connected family accounts is
+internal by definition; the PFC gate keeps regular purchases out of the
+candidate pool so cross-user false positives are rare (two independent
+same-cent p2p transactions in a ±3-day window). When one does slip
+through, the user flips the flag in the transaction details and
+`is_internal_transfer_manual = TRUE` protects that decision on every
+future rescan.
+
+Deduplication uses `ROW_NUMBER() OVER (PARTITION BY ...)` on each side so
+each candidate participates in at most one pair, breaking ties on
+absolute date difference then row id. The matcher runs:
+
+* Automatically at the end of every `import_transactions` batch with a
+  7-day horizon so fresh pairs flip on the next sync without any user
+  action (same-day when both accounts sync together, next cycle when one
+  side lags).
+* On the rescan endpoints (`PUT /api/settings/internal-transfers` — 90
+  days, and `POST /api/settings/internal-transfers/rescan` with either
+  `last_90_days` or `all_time`) after the name-matcher. The response
+  returns `name_rows_updated` and `pair_rows_updated` separately so the
+  UI can report what each stage contributed.
+
 ## PFC Category Auto-Mapping
 
 There is **no** separate Plaid endpoint for the full PFC catalog; taxonomy reference is Plaid’s [CSV](https://plaid.com/documents/pfc-taxonomy-all.csv). Do **not** use deprecated **`/categories/get`** for PFC (that endpoint is for legacy `category` / `category_id` only).
