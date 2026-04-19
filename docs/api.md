@@ -68,11 +68,11 @@ Matching SQL coalesces `NULLIF(merchant_name, '')` onto `transactions.display_ti
 
 | Method | Path | Description |
 |---|---|---|
-| GET | /api/transactions | List transactions (filters: month, account_id, category_id, tag_id, search, channel, pending_only, optional `user_id` for one member’s accounts, limit, offset). Family-wide by default; `is_private` rows owned by others are omitted. |
+| GET | /api/transactions | List transactions (filters: month, account_id, category_id, tag_id, search, channel, pending_only, `transaction_class` (`'income' \| 'expense' \| 'internal_transfer' \| 'uncategorized'`, used by the Income/Expenses drill-down), optional `user_id` for one member's accounts, limit, offset). Family-wide by default; `is_private` rows owned by others are omitted. |
 | GET | /api/transactions/date-range | Earliest and latest transaction dates visible to the caller (`{ min_month, max_month, earliest, latest }`). Used by the shared month/year picker to bound year and month options. Same auth + privacy + sandbox filters as `GET /api/transactions`. |
 | POST | /api/transactions | Create **cash** transaction on the user's Cash wallet (`source=cash`); body: `amount_cents`, `date`, `name`, optional `category_id`, `authorized_date`, `merchant_name`, `user_note`. Server sets `payment_channel=other`, `currency=USD`, `is_pending=false`. |
 | GET | /api/transactions/{id} | Get transaction with tags and splits (returns 404 when the row is `is_private` and the caller is not the owner) |
-| PATCH | /api/transactions/{id} | Update `category_id`, `user_note`, `merchant_name`, `is_private`, `is_internal_transfer`. Patching `is_internal_transfer` also flips the internal `is_internal_transfer_manual` sentinel — a subsequent auto-rescan will never overwrite that explicit choice. |
+| PATCH | /api/transactions/{id} | Update `category_id`, `user_note`, `merchant_name`, `is_private`, `transaction_class`, or `is_internal_transfer`. `transaction_class` (`'income' \| 'expense' \| 'internal_transfer' \| 'uncategorized'`) is the preferred knob — it writes `manual_class_override` so the auto-classifier never overwrites the user's choice. The legacy `is_internal_transfer` boolean still works for older clients and maps to an override of `'internal_transfer'` when `true`. Changing `category_id` auto-reruns the classifier on just that row so the Income / Expenses tabs reflect the new taxonomy without waiting for the next sync. |
 | DELETE | /api/transactions/{id} | Delete non-Plaid rows (`cash`, `manual`, etc.); reverses Cash wallet balance for `source=cash` |
 | POST | /api/transactions/{id}/tags/{tag_id} | Add tag |
 | DELETE | /api/transactions/{id}/tags/{tag_id} | Remove tag |
@@ -119,25 +119,29 @@ All report endpoints that aggregate transactions respect the `is_private`
 filter: private rows owned by someone else are dropped before aggregation,
 so the monthly totals never reveal a gift someone else is planning.
 
-Every income/expense aggregate additionally excludes transactions flagged
-`is_internal_transfer = TRUE` (Zelle-style intra-family transfers). The
-`ReportsRepository._not_internal_transfer(...)` helper is the single SQL
-fragment that gates this across Cash flow, By category, By tag, Merchants,
-Income breakdown and Financial health. See `Settings → Internal transfers`
-below for how rows get flagged.
+Every income / expense / internal-transfer aggregate reads the canonical
+`transactions.transaction_class` column. The classifier that materializes
+this column lives in `web.classification.classifier`; the full
+specification — four classes, rule priority, cash-flow / net-worth
+invariants, refund semantics, sandbox parity — is documented in
+`docs/reports-math.md`. Internal transfers are excluded from income and
+expense totals by the class predicate itself (no separate
+`is_internal_transfer` filter is needed).
 
 | Method | Path | Description |
 |---|---|---|
-| GET | /api/reports/cash-flow | Income vs expenses for a month (privacy-aware). Income uses the shared `is_income` predicate (category flag, not just amount sign). |
-| GET | /api/reports/cash-flow/history | Last N months (default 12) |
-| GET | /api/reports/by-category | Spending by category for month, split-aware (privacy-aware). Query params: `rollup=primary\|detailed` (default `primary` → rolls detailed PFC children into their parent bucket, returns ~10-15 slices, `bucket_key='p:<id>'`, plus `children_count`) and `parent_category_id` (used with `rollup=detailed` to scope the response to children of that primary bucket — powers the Reports "Focus mode" drilldown). |
-| GET | /api/reports/by-tag | Spending by tag (optional month + tag_id filter) |
-| GET | /api/reports/merchants | Top N merchants by spend |
+| GET | /api/reports/cash-flow | Income vs expenses vs internal transfers for a month (privacy-aware). Response: `{ month, income_cents, expenses_cents, internal_transfer_cents, net_cents }`. Expenses use `SUM(amount_cents)` on `transaction_class = 'expense'` so refunds naturally reduce the month's total. |
+| GET | /api/reports/cash-flow/history | Last N months (default 12). Same shape per month as `/cash-flow`, newest first. |
+| GET | /api/reports/by-category | Spending by category for month, split-aware (privacy-aware). Expenses only (`transaction_class = 'expense'`); refunds reduce the category they came from. Query params: `rollup=primary\|detailed` (default `primary` → rolls detailed PFC children into their parent bucket, returns ~10-15 slices, `bucket_key='p:<id>'`, plus `children_count`) and `parent_category_id` (used with `rollup=detailed` to scope the response to children of that primary bucket — powers the Reports "Focus mode" drilldown). |
+| GET | /api/reports/by-tag | Spending by tag (optional month + tag_id filter). Expenses only. |
+| GET | /api/reports/merchants | Top N merchants by spend. Expenses only. |
 | GET | /api/reports/net-worth | Current net worth snapshot |
 | GET | /api/reports/net-worth/history | Historical snapshots (default 12 months) |
 | GET | /api/reports/forecast | Cash flow forecast for next N days (30/60/90) |
-| GET | /api/reports/financial-health | Health score 0–100 with metrics (privacy-aware). Monthly income uses the shared `is_income` predicate. |
-| GET | /api/reports/income | Family income for a month split per person, with per-category sources. Query param: `month=YYYY-MM` (default current). "Income" = transactions mapped to a category where `is_income = TRUE`. Privacy-aware. |
+| GET | /api/reports/financial-health | Health score 0–100 with metrics (privacy-aware). Monthly income / expenses use the `transaction_class` predicate. |
+| GET | /api/reports/income | Family income for a month split per person, with per-category sources. Query param: `month=YYYY-MM` (default current). Income = `transaction_class = 'income'`. Privacy-aware. |
+| GET | /api/reports/expenses | Family expenses for a month split per person, with per-category sources. Mirror of `/api/reports/income`. Query param: `month=YYYY-MM` (default current). Expenses = `transaction_class = 'expense'`; refunds reduce categories. Privacy-aware. |
+| GET | /api/reports/diagnostics | **Owner-only.** Classifier edge cases for the month: income-flagged categories with positive amounts, transfer-like PFCs that did not match a pair or name, and sizeable `uncategorized` rows. Intended for spot-checking data quality. Query param: `month=YYYY-MM` (default current). |
 
 ## Insights
 

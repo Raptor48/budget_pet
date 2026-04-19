@@ -1,12 +1,14 @@
 from datetime import date
 from typing import List, Optional
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from .calculations import build_forecast, compute_health_score
 from .models import (
     CashFlowMonth,
     CategorySpend,
+    Diagnostics,
+    ExpenseBreakdown,
     FinancialHealthScore,
     ForecastEntry,
     IncomeBreakdown,
@@ -121,3 +123,52 @@ async def get_income_breakdown(
 async def get_financial_health(request: Request):
     data = await _repo().get_financial_health_data(viewer_user_id=_viewer_id(request))
     return compute_health_score(**data)
+
+
+@router.get("/expenses", response_model=ExpenseBreakdown)
+async def get_expense_breakdown(
+    request: Request,
+    month: str = Query(
+        default_factory=lambda: date.today().strftime("%Y-%m"),
+        regex=r"^\d{4}-\d{2}$",
+    ),
+):
+    """Per-person expenses for the month, broken down by category.
+
+    Mirror of ``GET /api/reports/income``. Expenses are defined by
+    ``transaction_class = 'expense'`` (see ``docs/reports-math.md``) so
+    internal transfers are excluded and refunds reduce the category they
+    came from. Private transactions belonging to other family members are
+    filtered out for the viewer.
+    """
+    return await _repo().get_expense_breakdown(
+        month, viewer_user_id=_viewer_id(request)
+    )
+
+
+@router.get("/diagnostics", response_model=Diagnostics)
+async def get_diagnostics(
+    request: Request,
+    month: str = Query(
+        default_factory=lambda: date.today().strftime("%Y-%m"),
+        regex=r"^\d{4}-\d{2}$",
+    ),
+):
+    """
+    Owner-only visibility into classifier edge cases for ``month``.
+
+    Surfaces three buckets of suspect rows:
+    - Income-flagged categories with a positive (debit) amount (likely
+      miscategorised refunds or transfers).
+    - Transfer-like PFCs (``TRANSFER_IN/OUT``, ``LOAN_PAYMENTS``) that the
+      classifier could not confirm as internal transfers (no pair found,
+      no name match) — candidates to add to
+      ``app_settings.internal_transfer_names`` or to pair manually.
+    - Uncategorized rows with non-trivial ``|amount_cents|`` — rows the
+      classifier declined to bucket because their context (account type,
+      pair, name) was ambiguous.
+    """
+    user = getattr(request.state, "user", None) or {}
+    if not user.get("is_owner"):
+        raise HTTPException(status_code=403, detail="Owner-only endpoint")
+    return await _repo().get_diagnostics(month)

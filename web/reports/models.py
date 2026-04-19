@@ -5,9 +5,19 @@ from pydantic import BaseModel
 
 
 class CashFlowMonth(BaseModel):
+    """Monthly cash-flow summary.
+
+    ``internal_transfer_cents`` is the absolute (outflow-side) total of
+    moves between family accounts this month — surfaced for transparency
+    so the UI can explain why the net differs from a naive income minus
+    expense computation; it is never added into ``net_cents`` because
+    transfers do not change family net worth.
+    """
+
     month: str
     income_cents: int
     expenses_cents: int
+    internal_transfer_cents: int = 0
     net_cents: int
 
 
@@ -80,6 +90,78 @@ class IncomeBreakdown(BaseModel):
     month: str
     total_cents: int
     users: List[IncomeByUser]
+
+
+class ExpenseSource(BaseModel):
+    """A single category contributing to a user's monthly expenses.
+
+    ``amount_cents`` is the signed sum (refunds reduce the bucket) so the
+    UI can keep totals and category breakdown in sync. Refund-only
+    categories whose net happens to be exactly zero are filtered out of
+    the list in the repo to keep the chart clean.
+    """
+
+    category_id: Optional[int] = None
+    category_name: str
+    color: Optional[str] = None
+    amount_cents: int
+    transaction_count: int
+
+
+class ExpenseByUser(BaseModel):
+    user_id: Optional[int] = None
+    username: str
+    amount_cents: int
+    sources: List[ExpenseSource]
+
+
+class ExpenseBreakdown(BaseModel):
+    """Mirror of ``IncomeBreakdown`` for expenses. Same grouping semantics
+    so the Income and Expenses tabs share a single drill-down pattern."""
+
+    month: str
+    total_cents: int
+    users: List[ExpenseByUser]
+
+
+class ClassCounts(BaseModel):
+    """Transaction-class histogram for a month."""
+
+    income: int
+    expense: int
+    internal_transfer: int
+    uncategorized: int
+    total: int
+
+
+class DiagnosticsRow(BaseModel):
+    """Generic row returned by ``/api/reports/diagnostics``.
+
+    The shape is intentionally permissive — this endpoint is for the owner
+    to spot-check data and the exact field set per section can evolve.
+    """
+
+    id: int
+    date: Optional[str] = None
+    amount_cents: int
+    merchant_name: Optional[str] = None
+    name: Optional[str] = None
+    pfc_primary: Optional[str] = None
+    pfc_detailed: Optional[str] = None
+    category_name: Optional[str] = None
+    account_type: Optional[str] = None
+    transaction_class: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class Diagnostics(BaseModel):
+    month: str
+    counts: ClassCounts
+    suspicious_income_category_with_positive_amount: List[DiagnosticsRow]
+    transfer_pfc_not_classified_as_internal: List[DiagnosticsRow]
+    large_uncategorized: List[DiagnosticsRow]
 
 
 class FinancialHealthScore(BaseModel):

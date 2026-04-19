@@ -623,25 +623,28 @@ class PlaidRepository:
                 )
                 imported += 1
 
-            # Pair-match TRANSFER_IN/OUT rows across family accounts on a
-            # small horizon so freshly-synced same-amount transfers between
-            # the user's own banks (Chase → PayPal) or between spouses
-            # (Denis' PayPal → Anastasiia's Chase) are flagged internal
-            # immediately — no manual rescan needed. 7 days covers ACH
-            # settlement lag plus the weekend window; full history is
-            # handled by the rescan endpoint.
+            # Run the unified classifier over the last 7 days so freshly
+            # synced rows get the correct ``transaction_class`` immediately
+            # — no manual rescan needed. This covers both the classic
+            # TRANSFER_OUT/IN pair (savings ↔ checking, same amount across
+            # spouses) and the cash ↔ debt case (checking pays off a
+            # credit card; the depository side tagged LOAN_PAYMENTS never
+            # made it into the old pair matcher). 7 days is long enough for
+            # ACH settlement + weekends; the full-history rescan remains an
+            # explicit endpoint for cleanup passes.
             try:
-                paired = await match_family_account_transfers(
-                    conn, horizon_days=7
-                )
-                if paired:
+                from web.classification.classifier import rescan_all
+
+                stats = await rescan_all(conn, horizon_days=7)
+                if stats.changed:
                     logger.info(
-                        "Plaid import: pair-matched %d family-account transfer rows",
-                        paired,
+                        "Plaid import: reclassified %d rows (paired=%d)",
+                        stats.changed,
+                        stats.paired,
                     )
             except Exception:
                 logger.exception(
-                    "Plaid import: family-account pair-matcher failed; continuing"
+                    "Plaid import: classification rescan failed; continuing"
                 )
 
         return imported

@@ -1,5 +1,21 @@
 """
 ReportsRepository — DB queries for all report endpoints + net worth snapshots.
+
+All income/expense/internal-transfer aggregates read from the canonical
+``transactions.transaction_class`` column. See ``docs/reports-math.md`` for
+the classification rules and invariants; if this file and that doc ever
+disagree, the doc is the source of truth and this file is buggy.
+
+Key conventions used throughout:
+
+- Expense totals use ``SUM(t.amount_cents)``, never ``SUM(CASE WHEN amount>0)``.
+  This lets refunds (``amount_cents < 0`` on class='expense') naturally
+  reduce the monthly total — the accountant-correct behavior.
+- Income totals use ``SUM(-t.amount_cents)`` so the number surfaces as a
+  positive user-facing amount (income arrives with negative cents per
+  Plaid convention).
+- Internal transfers are excluded from both income and expense by the class
+  predicate itself. No ``NOT is_internal_transfer`` clause is needed.
 """
 import logging
 from datetime import date
@@ -34,37 +50,34 @@ def _private_tx_filter_with_idx(alias: str, idx: int) -> str:
 
 def _income_predicate(alias: str = "t") -> str:
     """
-    Canonical SQL predicate for "transaction is income" across the app.
+    Canonical SQL predicate for "transaction is income".
 
-    A row is counted as income iff (a) its amount is a credit
-    (``amount_cents < 0`` per the Plaid convention) AND (b) it is mapped to a
-    category flagged ``is_income = TRUE``. The flag is family-wide and seeded
-    from Plaid PFC=INCOME on sync; users can amend it from the Income tab.
-
-    Using a single predicate here guarantees the Income tab, Cash Flow,
-    Financial Health and any future income consumer all agree on the same
-    definition.
+    Thin wrapper around ``transaction_class = 'income'`` kept for callsite
+    clarity. Every income aggregate (Cash Flow, Income tab, Financial
+    Health) goes through this helper so changes to the definition
+    happen in one place.
     """
     prefix = f"{alias}." if alias else ""
-    return (
-        f"{prefix}amount_cents < 0 AND EXISTS ("
-        f"SELECT 1 FROM categories _ic WHERE _ic.id = {prefix}category_id AND _ic.is_income = TRUE)"
-    )
+    return f"{prefix}transaction_class = 'income'"
 
 
+def _expense_predicate(alias: str = "t") -> str:
+    """Canonical predicate for "transaction is an expense". Symmetric to ``_income_predicate``."""
+    prefix = f"{alias}." if alias else ""
+    return f"{prefix}transaction_class = 'expense'"
+
+
+def _internal_transfer_predicate(alias: str = "t") -> str:
+    """Canonical predicate for "transaction is an internal transfer"."""
+    prefix = f"{alias}." if alias else ""
+    return f"{prefix}transaction_class = 'internal_transfer'"
+
+
+# Retained for backwards compatibility with imports/tests that still reference
+# the old helper. The new code paths use ``_expense_predicate`` instead.
 def _not_internal_transfer(alias: str = "t") -> str:
-    """
-    Canonical SQL fragment "transaction is NOT an internal transfer".
-
-    Keeps every income/expense aggregate aligned on a single definition,
-    so when the user configures a counterparty (e.g. a spouse) as an
-    internal-transfer source via ``/api/settings/internal-transfers`` the
-    exclusion is applied uniformly to Cash Flow, Financial Health, Income
-    tab, By Category, Top Merchants and Budgets. Returns a standalone
-    boolean predicate — callers prepend the ``AND`` they need.
-    """
     prefix = f"{alias}." if alias else ""
-    return f"NOT {prefix}is_internal_transfer"
+    return f"{prefix}transaction_class <> 'internal_transfer'"
 
 
 class ReportsRepository:
@@ -72,6 +85,13 @@ class ReportsRepository:
         return await get_pool()
 
     async def get_cash_flow(self, month: str, viewer_user_id: Optional[int] = None) -> Dict[str, Any]:
+        """Monthly income + expenses + internal transfer totals.
+
+        Returns ``internal_transfer_cents`` alongside income and expenses so
+        the UI can reassure the user that, e.g., a $1,200 CC payment is
+        recognized as a movement between their own accounts rather than
+        silently dropped.
+        """
         pool = await self._pool()
         private_filter = (
             _private_tx_filter_with_idx("t", 2) if viewer_user_id is not None else ""
@@ -83,23 +103,25 @@ class ReportsRepository:
             row = await conn.fetchrow(
                 f"""
                 SELECT
-                    COALESCE(SUM(CASE WHEN {_income_predicate("t")} THEN ABS(t.amount_cents) ELSE 0 END), 0) AS income_cents,
-                    COALESCE(SUM(CASE WHEN t.amount_cents > 0 THEN t.amount_cents ELSE 0 END), 0) AS expenses_cents
+                    COALESCE(SUM(CASE WHEN {_income_predicate("t")} THEN -t.amount_cents ELSE 0 END), 0) AS income_cents,
+                    COALESCE(SUM(CASE WHEN {_expense_predicate("t")} THEN t.amount_cents ELSE 0 END), 0) AS expenses_cents,
+                    COALESCE(SUM(CASE WHEN {_internal_transfer_predicate("t")} THEN t.amount_cents ELSE 0 END), 0) AS internal_transfer_cents
                 FROM transactions t
                 WHERE COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
                   AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
-                  AND {_not_internal_transfer("t")}
                   {_sandbox_tx_filter("t")}
                   {private_filter}
                 """,
                 *params,
             )
-        income = row["income_cents"] or 0
-        expenses = row["expenses_cents"] or 0
+        income = int(row["income_cents"] or 0)
+        expenses = int(row["expenses_cents"] or 0)
+        internal = int(row["internal_transfer_cents"] or 0)
         return {
             "month": month,
             "income_cents": income,
             "expenses_cents": expenses,
+            "internal_transfer_cents": internal,
             "net_cents": income - expenses,
         }
 
@@ -116,11 +138,11 @@ class ReportsRepository:
                 f"""
                 SELECT
                     TO_CHAR(COALESCE(t.authorized_date, t.date), 'YYYY-MM') AS month,
-                    COALESCE(SUM(CASE WHEN {_income_predicate("t")} THEN ABS(t.amount_cents) ELSE 0 END), 0) AS income_cents,
-                    COALESCE(SUM(CASE WHEN t.amount_cents > 0 THEN t.amount_cents ELSE 0 END), 0) AS expenses_cents
+                    COALESCE(SUM(CASE WHEN {_income_predicate("t")} THEN -t.amount_cents ELSE 0 END), 0) AS income_cents,
+                    COALESCE(SUM(CASE WHEN {_expense_predicate("t")} THEN t.amount_cents ELSE 0 END), 0) AS expenses_cents,
+                    COALESCE(SUM(CASE WHEN {_internal_transfer_predicate("t")} THEN t.amount_cents ELSE 0 END), 0) AS internal_transfer_cents
                 FROM transactions t
                 WHERE COALESCE(t.authorized_date, t.date) >= (CURRENT_DATE - INTERVAL '1 month' * $1)::date
-                  AND {_not_internal_transfer("t")}
                   {_sandbox_tx_filter("t")}
                   {private_filter}
                 GROUP BY month
@@ -130,12 +152,14 @@ class ReportsRepository:
             )
         result = []
         for r in rows:
-            income = r["income_cents"] or 0
-            expenses = r["expenses_cents"] or 0
+            income = int(r["income_cents"] or 0)
+            expenses = int(r["expenses_cents"] or 0)
+            internal = int(r["internal_transfer_cents"] or 0)
             result.append({
                 "month": r["month"],
                 "income_cents": income,
                 "expenses_cents": expenses,
+                "internal_transfer_cents": internal,
                 "net_cents": income - expenses,
             })
         return result
@@ -148,7 +172,12 @@ class ReportsRepository:
         parent_category_id: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Aggregate spending by category for a month.
+        Aggregate expense spending by category for a month.
+
+        Uses ``transaction_class = 'expense'`` + ``SUM(amount_cents)`` so
+        refunds reduce the category they came from — the accountant-correct
+        behavior. Internal transfers are excluded by the class predicate;
+        no explicit ``is_internal_transfer`` filter is needed.
 
         rollup='primary' (default): group detailed children into their parent
             buckets so charts show ~10–15 meaningful slices instead of 40+.
@@ -188,8 +217,7 @@ class ReportsRepository:
                 WITH actual AS (
                     SELECT t.category_id, SUM(t.amount_cents) AS amount_cents
                     FROM transactions t
-                    WHERE t.amount_cents > 0
-                      AND {_not_internal_transfer("t")}
+                    WHERE {_expense_predicate("t")}
                       AND COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
                       AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
                       AND NOT EXISTS (SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id)
@@ -203,8 +231,7 @@ class ReportsRepository:
                     SELECT ts.category_id, SUM(ts.amount_cents)
                     FROM transaction_splits ts
                     JOIN transactions t ON t.id = ts.parent_transaction_id
-                    WHERE t.amount_cents > 0
-                      AND {_not_internal_transfer("t")}
+                    WHERE {_expense_predicate("t")}
                       AND COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
                       AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
                       {_sandbox_tx_filter("t")}
@@ -279,7 +306,7 @@ class ReportsRepository:
         self, month: Optional[str] = None, tag_id: Optional[int] = None, viewer_user_id: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         pool = await self._pool()
-        conditions = ["t.amount_cents > 0", _not_internal_transfer("t")]
+        conditions = [_expense_predicate("t")]
         params: List[Any] = []
         idx = 1
         if month:
@@ -331,8 +358,7 @@ class ReportsRepository:
     ) -> List[Dict[str, Any]]:
         pool = await self._pool()
         conditions = [
-            "t.amount_cents > 0",
-            _not_internal_transfer("t"),
+            _expense_predicate("t"),
             "t.merchant_name IS NOT NULL",
         ]
         params: List[Any] = []
@@ -384,39 +410,16 @@ class ReportsRepository:
         Per-person income for a calendar month, broken down by the category the
         transaction was mapped to.
 
-        A transaction is counted as income only when ``_income_predicate``
-        holds (credit side of the ledger AND belongs to a category flagged
-        ``is_income = TRUE``). Ownership is resolved via the account
-        (``accounts.user_id``); unassigned accounts show up as a ``null`` user
-        so the frontend can still surface them.
+        A transaction is counted as income only when
+        ``transaction_class = 'income'`` — the four-class classifier is the
+        single source of truth. Ownership is resolved via the account
+        (``accounts.user_id``); unassigned accounts show up as a ``null``
+        user so the frontend can still surface them.
 
         Private transactions owned by other family members are filtered out
         for the requesting viewer, mirroring the rest of the reports module.
 
-        Returns a dict shaped for the UI::
-
-            {
-                "month": "YYYY-MM",
-                "total_cents": int,
-                "users": [
-                    {
-                        "user_id": int | None,
-                        "username": str,
-                        "amount_cents": int,
-                        "sources": [
-                            {
-                                "category_id": int | None,
-                                "category_name": str,
-                                "color": str | None,
-                                "amount_cents": int,
-                                "transaction_count": int,
-                            },
-                            ...
-                        ],
-                    },
-                    ...
-                ],
-            }
+        Returns a dict shaped for the UI (see ``IncomeBreakdown``).
         """
         pool = await self._pool()
         private_filter = (
@@ -434,7 +437,7 @@ class ReportsRepository:
                     t.category_id                 AS category_id,
                     COALESCE(c.name, 'Uncategorized') AS category_name,
                     c.color                       AS category_color,
-                    SUM(ABS(t.amount_cents))      AS amount_cents,
+                    SUM(-t.amount_cents)          AS amount_cents,
                     COUNT(*)                      AS transaction_count
                 FROM transactions t
                 JOIN accounts a ON a.id = t.account_id
@@ -443,7 +446,6 @@ class ReportsRepository:
                 WHERE COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
                   AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
                   AND {_income_predicate("t")}
-                  AND {_not_internal_transfer("t")}
                   {_sandbox_tx_filter("t")}
                   {private_filter}
                 GROUP BY a.user_id, u.username, t.category_id, c.name, c.color
@@ -452,8 +454,6 @@ class ReportsRepository:
                 *params,
             )
 
-        # Group source rows under their owner so the UI can render per-person
-        # cards without reshaping on the client.
         users_by_id: Dict[Any, Dict[str, Any]] = {}
         total = 0
         for r in rows:
@@ -462,9 +462,90 @@ class ReportsRepository:
             if bucket is None:
                 bucket = {
                     "user_id": user_key,
-                    # Unassigned accounts (no linked owner) still contribute to
-                    # family income; surface them with a clear label rather
-                    # than hiding them.
+                    "username": r["username"] or "Unassigned",
+                    "amount_cents": 0,
+                    "sources": [],
+                }
+                users_by_id[user_key] = bucket
+            amount = int(r["amount_cents"] or 0)
+            bucket["amount_cents"] += amount
+            total += amount
+            bucket["sources"].append({
+                "category_id": r["category_id"],
+                "category_name": r["category_name"],
+                "color": r["category_color"],
+                "amount_cents": amount,
+                "transaction_count": int(r["transaction_count"] or 0),
+            })
+
+        users = sorted(
+            users_by_id.values(),
+            key=lambda row: row["amount_cents"],
+            reverse=True,
+        )
+        return {
+            "month": month,
+            "total_cents": total,
+            "users": users,
+        }
+
+    async def get_expense_breakdown(
+        self, month: str, viewer_user_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Per-person expenses for a calendar month, broken down by the category
+        the transaction was mapped to. Mirror of ``get_income_breakdown`` so
+        the Expenses tab can render the same structure with the opposite
+        semantics.
+
+        Uses ``SUM(amount_cents)`` (not ``SUM(CASE WHEN amount>0)``) so
+        refunds reduce the category they came from — the accountant-correct
+        behavior. Categories whose net spend for the month is zero (a
+        refund exactly cancelling a purchase) are omitted to keep the UI
+        clean. Internal transfers are excluded by the class predicate.
+        """
+        pool = await self._pool()
+        private_filter = (
+            _private_tx_filter_with_idx("t", 2) if viewer_user_id is not None else ""
+        )
+        params: list = [month]
+        if viewer_user_id is not None:
+            params.append(viewer_user_id)
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT
+                    a.user_id                     AS user_id,
+                    u.username                    AS username,
+                    t.category_id                 AS category_id,
+                    COALESCE(c.name, 'Uncategorized') AS category_name,
+                    c.color                       AS category_color,
+                    SUM(t.amount_cents)           AS amount_cents,
+                    COUNT(*)                      AS transaction_count
+                FROM transactions t
+                JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN users u ON u.id = a.user_id
+                LEFT JOIN categories c ON c.id = t.category_id
+                WHERE COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
+                  AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
+                  AND {_expense_predicate("t")}
+                  {_sandbox_tx_filter("t")}
+                  {private_filter}
+                GROUP BY a.user_id, u.username, t.category_id, c.name, c.color
+                HAVING SUM(t.amount_cents) <> 0
+                ORDER BY a.user_id NULLS LAST, amount_cents DESC
+                """,
+                *params,
+            )
+
+        users_by_id: Dict[Any, Dict[str, Any]] = {}
+        total = 0
+        for r in rows:
+            user_key = r["user_id"]
+            bucket = users_by_id.get(user_key)
+            if bucket is None:
+                bucket = {
+                    "user_id": user_key,
                     "username": r["username"] or "Unassigned",
                     "amount_cents": 0,
                     "sources": [],
@@ -575,7 +656,6 @@ class ReportsRepository:
         current_month = today.strftime("%Y-%m")
         async with pool.acquire() as conn:
             # Monthly income: average over the last 3 completed months.
-            # Using only the current month produces an unreliable estimate early in the month.
             income_filter = (
                 _private_tx_filter_with_idx("", 1) if viewer_user_id is not None else ""
             )
@@ -588,10 +668,9 @@ class ReportsRepository:
                 FROM (
                     SELECT
                         TO_CHAR(COALESCE(authorized_date, date), 'YYYY-MM') AS m,
-                        SUM(ABS(amount_cents)) AS monthly_total
+                        SUM(-amount_cents) AS monthly_total
                     FROM transactions
                     WHERE {_income_predicate("")}
-                      AND {_not_internal_transfer("")}
                       AND COALESCE(authorized_date, date) >= (DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '3 months')
                       AND COALESCE(authorized_date, date) < DATE_TRUNC('month', CURRENT_DATE)
                       {_sandbox_tx_filter_no_alias()}
@@ -613,8 +692,7 @@ class ReportsRepository:
                 f"""
                 SELECT COALESCE(SUM(amount_cents), 0)
                 FROM transactions
-                WHERE amount_cents > 0
-                  AND {_not_internal_transfer("")}
+                WHERE {_expense_predicate("")}
                   AND COALESCE(authorized_date, date) >= ($1 || '-01')::date
                   AND COALESCE(authorized_date, date) < (($1 || '-01')::date + INTERVAL '1 month')
                   {_sandbox_tx_filter_no_alias()}
@@ -637,8 +715,7 @@ class ReportsRepository:
                         TO_CHAR(COALESCE(authorized_date, date), 'YYYY-MM') AS m,
                         SUM(amount_cents) AS monthly_total
                     FROM transactions
-                    WHERE amount_cents > 0
-                      AND {_not_internal_transfer("")}
+                    WHERE {_expense_predicate("")}
                       AND COALESCE(authorized_date, date) >= (CURRENT_DATE - INTERVAL '6 months')
                       {_sandbox_tx_filter_no_alias()}
                       {avg_filter}
@@ -647,24 +724,19 @@ class ReportsRepository:
                 """,
                 *avg_params,
             )
-            # Total debt (credit + loan)
             total_debt = await conn.fetchval(
                 "SELECT COALESCE(SUM(current_balance_cents), 0) FROM accounts WHERE type IN ('credit','loan') AND is_active"
             )
-            # Annual income estimate based on 3-month average (monthly * 12)
             annual_income = monthly_income * 12
-            # Credit cards
             credit_limit = await conn.fetchval(
                 "SELECT COALESCE(SUM(credit_limit_cents), 0) FROM accounts WHERE type = 'credit' AND is_active AND credit_limit_cents IS NOT NULL"
             )
             credit_balance = await conn.fetchval(
                 "SELECT COALESCE(SUM(current_balance_cents), 0) FROM accounts WHERE type = 'credit' AND is_active"
             )
-            # Liquid balance
             liquid = await conn.fetchval(
                 "SELECT COALESCE(SUM(current_balance_cents), 0) FROM accounts WHERE type = 'depository' AND is_active"
             )
-            # Overdue
             has_overdue = await conn.fetchval(
                 "SELECT EXISTS(SELECT 1 FROM accounts WHERE is_overdue = TRUE AND is_active)"
             )
@@ -672,10 +744,104 @@ class ReportsRepository:
             "total_debt_cents": total_debt or 0,
             "annual_income_cents": annual_income,
             "monthly_income_cents": monthly_income,
-            "monthly_expenses_cents": monthly_expenses or 0,
+            "monthly_expenses_cents": int(monthly_expenses or 0),
             "total_credit_limit_cents": credit_limit or 0,
             "total_credit_balance_cents": credit_balance or 0,
             "liquid_balance_cents": liquid or 0,
             "avg_monthly_expenses_cents": int(avg_expenses or 0),
             "has_overdue": bool(has_overdue),
+        }
+
+    async def get_diagnostics(self, month: str) -> Dict[str, Any]:
+        """
+        Owner-only diagnostic snapshot for ``month`` — surfaces rows that the
+        classifier found suspicious or could not confidently bucket. Used by
+        the owner (and automated tests) to spot data-quality issues without
+        running ad-hoc SQL.
+
+        Returned sections mirror ``docs/reports-math.md § 3`` so each
+        surfaced row maps back to the rule that could not fire. The endpoint
+        ignores the viewer filter — the owner is meant to see everything,
+        including private transactions belonging to other family members.
+        """
+        pool = await self._pool()
+        async with pool.acquire() as conn:
+            suspicious_income = await conn.fetch(
+                """
+                SELECT t.id, t.date, t.amount_cents, t.merchant_name, t.name,
+                       t.pfc_primary, t.pfc_detailed,
+                       COALESCE(c.name, 'Uncategorized') AS category_name,
+                       t.transaction_class
+                FROM transactions t
+                LEFT JOIN categories c ON c.id = t.category_id
+                WHERE COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
+                  AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
+                  AND EXISTS (SELECT 1 FROM categories _c WHERE _c.id = t.category_id AND _c.is_income = TRUE)
+                  AND t.amount_cents > 0
+                ORDER BY t.amount_cents DESC
+                LIMIT 50
+                """,
+                month,
+            )
+            unmatched_transfers = await conn.fetch(
+                """
+                SELECT t.id, t.date, t.amount_cents, t.merchant_name, t.name,
+                       t.pfc_primary, t.transaction_class
+                FROM transactions t
+                WHERE COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
+                  AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
+                  AND t.pfc_primary IN ('TRANSFER_IN', 'TRANSFER_OUT', 'LOAN_PAYMENTS')
+                  AND t.transaction_class <> 'internal_transfer'
+                ORDER BY ABS(t.amount_cents) DESC
+                LIMIT 50
+                """,
+                month,
+            )
+            uncategorized = await conn.fetch(
+                """
+                SELECT t.id, t.date, t.amount_cents, t.merchant_name, t.name,
+                       t.pfc_primary, a.type AS account_type,
+                       COALESCE(c.name, 'Uncategorized') AS category_name
+                FROM transactions t
+                JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN categories c ON c.id = t.category_id
+                WHERE COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
+                  AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
+                  AND t.transaction_class = 'uncategorized'
+                  AND ABS(t.amount_cents) > 1000
+                ORDER BY ABS(t.amount_cents) DESC
+                LIMIT 50
+                """,
+                month,
+            )
+            counts = await conn.fetchrow(
+                """
+                SELECT
+                    SUM(CASE WHEN transaction_class = 'income' THEN 1 ELSE 0 END) AS income,
+                    SUM(CASE WHEN transaction_class = 'expense' THEN 1 ELSE 0 END) AS expense,
+                    SUM(CASE WHEN transaction_class = 'internal_transfer' THEN 1 ELSE 0 END) AS internal_transfer,
+                    SUM(CASE WHEN transaction_class = 'uncategorized' THEN 1 ELSE 0 END) AS uncategorized,
+                    COUNT(*) AS total
+                FROM transactions
+                WHERE COALESCE(authorized_date, date) >= ($1 || '-01')::date
+                  AND COALESCE(authorized_date, date) < (($1 || '-01')::date + INTERVAL '1 month')
+                """,
+                month,
+            )
+        return {
+            "month": month,
+            "counts": {
+                "income": int(counts["income"] or 0),
+                "expense": int(counts["expense"] or 0),
+                "internal_transfer": int(counts["internal_transfer"] or 0),
+                "uncategorized": int(counts["uncategorized"] or 0),
+                "total": int(counts["total"] or 0),
+            },
+            "suspicious_income_category_with_positive_amount": [
+                dict(r) for r in suspicious_income
+            ],
+            "transfer_pfc_not_classified_as_internal": [
+                dict(r) for r in unmatched_transfers
+            ],
+            "large_uncategorized": [dict(r) for r in uncategorized],
         }

@@ -138,11 +138,12 @@ class BudgetsRepository:
           only transactions directly on that child.
 
         Actual spending uses splits if they exist, otherwise uses transaction.category_id.
-        Only counts expenses (amount_cents > 0). Excludes ``plaid_sandbox`` when
-        ``reports_include_plaid_sandbox()`` is false. Excludes private transactions
-        from other users when viewer_user_id is provided. Excludes rows flagged as
-        internal transfers (``is_internal_transfer = TRUE``) so spouse-to-spouse
-        Zelle doesn't inflate the "spent" total.
+        Only counts expenses (``transaction_class = 'expense'`` — see
+        ``docs/reports-math.md``), which naturally excludes internal
+        transfers and includes refunds as negative amounts that reduce the
+        month's spend. Excludes ``plaid_sandbox`` when
+        ``reports_include_plaid_sandbox()`` is false and private
+        transactions from other users when ``viewer_user_id`` is provided.
         """
         pool = await self._pool()
         sandbox_ex = "" if reports_include_plaid_sandbox() else "AND t.source != 'plaid_sandbox'"
@@ -166,8 +167,7 @@ class BudgetsRepository:
                     FROM transactions t
                     LEFT JOIN categories c ON c.id = t.category_id
                     WHERE
-                        t.amount_cents > 0
-                        AND NOT t.is_internal_transfer
+                        t.transaction_class = 'expense'
                         {sandbox_ex}
                         {private_ex}
                         AND COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
@@ -188,8 +188,7 @@ class BudgetsRepository:
                     JOIN transactions t ON t.id = ts.parent_transaction_id
                     LEFT JOIN categories sc ON sc.id = ts.category_id
                     WHERE
-                        t.amount_cents > 0
-                        AND NOT t.is_internal_transfer
+                        t.transaction_class = 'expense'
                         {sandbox_ex}
                         {private_ex}
                         AND COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date

@@ -47,23 +47,28 @@ def _actor_uid(request: Request) -> Optional[int]:
 
 
 async def _rescan(horizon_days: Optional[int]) -> tuple[int, int]:
-    """Run both internal-transfer classification stages over the same horizon.
+    """Re-run the full four-class classifier over the requested horizon.
 
-    Stage 1 is the name-matcher (Zelle between spouses etc.), stage 2 is the
-    family-account pair-matcher (same cent amount on TRANSFER_OUT/IN across
-    two accounts with known owners). Both write to ``is_internal_transfer``
-    and both respect ``is_internal_transfer_manual``. Returning the two
-    counts separately lets the UI tell the user which rule actually fired.
+    The endpoint still returns two counters (``name_updated``,
+    ``pair_updated``) for backwards compatibility with the UI's
+    "N rows matched by name / by pair" messaging, but under the hood we
+    now call the unified :func:`web.classification.classifier.rescan_all`
+    which handles name match + both pair-matcher rules (cash ↔ debt and
+    depository ↔ depository) in one pass.
+
+    ``pair_updated`` is reported as the number of pairs found (rows
+    divided by two), and ``name_updated`` is ``total_changed − 2 *
+    pairs`` so the UI message remains meaningful even though both rules
+    live in the same function now.
     """
+    from web.classification.classifier import rescan_all
+
     pool = await get_pool()
     async with pool.acquire() as conn:
-        name_updated = await rescan_internal_transfers(
-            conn, horizon_days=horizon_days
-        )
-        pair_updated = await match_family_account_transfers(
-            conn, horizon_days=horizon_days
-        )
-    return name_updated, pair_updated
+        stats = await rescan_all(conn, horizon_days=horizon_days)
+    pair_rows = 2 * stats.paired
+    name_updated = max(0, stats.changed - pair_rows)
+    return name_updated, pair_rows
 
 
 @router.get("", response_model=InternalTransferSettingsOut)

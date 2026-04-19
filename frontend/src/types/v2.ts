@@ -161,6 +161,27 @@ export interface TransactionSplit {
   created_at: string;
 }
 
+/**
+ * Canonical classification of a transaction for reports / budgets / health
+ * math. Materialized on the server in ``transactions.transaction_class``;
+ * see ``docs/reports-math.md`` for the four-class definition and the rule
+ * priority the classifier uses.
+ *
+ *  - "income"             — money flowing in from outside the family
+ *  - "expense"            — money flowing out to an external party
+ *  - "internal_transfer"  — money moving between the family's own tracked
+ *                           accounts (CC payment, Zelle between spouses,
+ *                           savings-to-checking sweep, …). Excluded from
+ *                           both income and expense totals.
+ *  - "uncategorized"      — classifier declined to pick a class (rare —
+ *                           surfaces in the owner-only diagnostics page).
+ */
+export type TransactionClass =
+  | "income"
+  | "expense"
+  | "internal_transfer"
+  | "uncategorized";
+
 export interface Transaction {
   id: number;
   plaid_transaction_id: string | null;
@@ -193,14 +214,32 @@ export interface Transaction {
    * True when the transaction is a transfer between family members (e.g.
    * Zelle between spouses). Excluded from every income/expense aggregate
    * across the app, so the same dollar isn't counted twice.
+   *
+   * Legacy mirror of `transaction_class === "internal_transfer"`. Prefer
+   * reading `transaction_class` directly; this boolean is kept for older
+   * UI code paths that only care whether a row counts as a transfer.
    */
   is_internal_transfer: boolean;
   /**
    * True when a user explicitly toggled `is_internal_transfer`. The auto
    * re-classifier (run after editing the names list or via explicit rescan)
    * skips rows with this flag so manual decisions are preserved.
+   *
+   * Legacy sentinel — succeeded by `manual_class_override` (which can pin a
+   * row to any of the four classes, not just internal_transfer).
    */
   is_internal_transfer_manual: boolean;
+  /**
+   * Canonical class of the transaction. Read this instead of
+   * `is_internal_transfer` whenever possible.
+   */
+  transaction_class: TransactionClass;
+  /**
+   * When non-null, the user pinned this row to a specific class and the
+   * auto-classifier never touches it again. `null` means "auto" — the
+   * classifier is in charge and re-evaluates on every sync.
+   */
+  manual_class_override: TransactionClass | null;
   /** plaid | plaid_sandbox | manual | cash */
   source: string;
   user_note: string | null;
@@ -229,6 +268,11 @@ export interface TransactionFilters {
   pending_only?: boolean;
   /** Filter by account owner user_id */
   user_id?: number;
+  /**
+   * Filter by canonical class (powers the Income / Expenses tab drill-downs
+   * and the diagnostics page).
+   */
+  transaction_class?: TransactionClass;
   limit?: number;
   offset?: number;
 }
@@ -370,6 +414,12 @@ export interface CashFlowMonth {
   month: string;
   income_cents: number;
   expenses_cents: number;
+  /**
+   * Total volume of intra-family transfers in the month (credit card
+   * payments, Zelle between spouses, savings sweeps, …). Reported for
+   * transparency — never part of `net_cents`.
+   */
+  internal_transfer_cents: number;
   net_cents: number;
 }
 
@@ -439,6 +489,77 @@ export interface IncomeBreakdown {
   month: string;
   total_cents: number;
   users: IncomeByUser[];
+}
+
+// ---------------------------------------------------------------------------
+// Expenses (mirror of Income breakdown — GET /api/reports/expenses)
+// ---------------------------------------------------------------------------
+
+/** Per-category expense slice for one user within a month. */
+export interface ExpenseSource {
+  category_id: number | null;
+  category_name: string;
+  color: string | null;
+  /**
+   * Net expense in cents. Positive = net spending. A negative value is a
+   * legitimate outcome when refunds for a category exceeded the period's
+   * spending (e.g. a return processed after the original purchase) — the
+   * UI should surface it as a credit against that category.
+   */
+  amount_cents: number;
+  transaction_count: number;
+}
+
+export interface ExpenseByUser {
+  /** null when the owning account has no linked user (rare). */
+  user_id: number | null;
+  username: string;
+  amount_cents: number;
+  sources: ExpenseSource[];
+}
+
+export interface ExpenseBreakdown {
+  month: string;
+  total_cents: number;
+  users: ExpenseByUser[];
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostics (owner-only — GET /api/reports/diagnostics)
+// ---------------------------------------------------------------------------
+
+/** Per-class counts of transactions in the month (sanity check). */
+export interface DiagnosticsClassCounts {
+  income: number;
+  expense: number;
+  internal_transfer: number;
+  uncategorized: number;
+}
+
+/** A single suspicious row flagged by the classifier diagnostics. */
+export interface DiagnosticsRow {
+  transaction_id: number;
+  account_id: number;
+  account_name: string | null;
+  date: string;
+  name: string;
+  amount_cents: number;
+  transaction_class: TransactionClass;
+  category_id: number | null;
+  category_name: string | null;
+  /** Why the classifier flagged the row (free-form, human-readable). */
+  reason: string;
+}
+
+export interface Diagnostics {
+  month: string;
+  class_counts: DiagnosticsClassCounts;
+  /** Income-flagged category paired with a positive amount (sign mismatch). */
+  positive_income_rows: DiagnosticsRow[];
+  /** `TRANSFER_IN` / `TRANSFER_OUT` without pair match and without a name hit. */
+  unmatched_transfers: DiagnosticsRow[];
+  /** Uncategorized rows whose magnitude is large enough to warrant review. */
+  large_uncategorized: DiagnosticsRow[];
 }
 
 export interface FinancialHealthScore {

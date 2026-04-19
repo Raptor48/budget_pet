@@ -216,19 +216,26 @@ class TestManualInternalTransferOverride:
 
 
 class TestReportsExcludeInternalTransfers:
-    """Every income / expense aggregate must filter out flagged transfers.
+    """Every income / expense aggregate must filter out internal transfers.
 
-    The ``_not_internal_transfer`` helper in ``web/reports/repo.py`` is the
-    single source of truth; these tests assert the resulting SQL carries
-    the predicate for the endpoints users hit most often.
+    Post-V2 the single source of truth is the ``transaction_class`` column
+    materialized by ``web.classification.classifier``. Income aggregates
+    select ``transaction_class = 'income'``, expense aggregates select
+    ``transaction_class = 'expense'`` — so internal transfers are excluded
+    by construction, not by a separate ``NOT is_internal_transfer`` clause.
+    These tests pin that contract at the SQL boundary.
     """
 
     @pytest.mark.asyncio
-    async def test_cash_flow_excludes_internal_transfers(self):
+    async def test_cash_flow_uses_class_buckets(self):
         repo = ReportsRepository()
         conn = AsyncMock()
         conn.fetchrow = AsyncMock(
-            return_value={"income_cents": 0, "expenses_cents": 0}
+            return_value={
+                "income_cents": 0,
+                "expenses_cents": 0,
+                "internal_transfer_cents": 0,
+            }
         )
         pool = make_mock_pool(conn)
         with patch("web.reports.repo.get_pool", AsyncMock(return_value=pool)):
@@ -237,10 +244,15 @@ class TestReportsExcludeInternalTransfers:
         sqls = [call.args[0] for call in conn.fetchrow.call_args_list]
         assert sqls, "cash-flow must hit the DB"
         for sql in sqls:
-            assert "is_internal_transfer" in sql
+            # All three buckets must be computed in the same query so the
+            # cash-flow identity (income + expense + internal ≡ SUM(amount))
+            # is a single DB round-trip.
+            assert "transaction_class = 'income'" in sql
+            assert "transaction_class = 'expense'" in sql
+            assert "transaction_class = 'internal_transfer'" in sql
 
     @pytest.mark.asyncio
-    async def test_by_category_excludes_internal_transfers(self):
+    async def test_by_category_uses_expense_class(self):
         repo = ReportsRepository()
         conn = AsyncMock()
         conn.fetch = AsyncMock(return_value=[])
@@ -251,10 +263,12 @@ class TestReportsExcludeInternalTransfers:
         sqls = [call.args[0] for call in conn.fetch.call_args_list]
         assert sqls, "by-category must hit the DB"
         for sql in sqls:
-            assert "is_internal_transfer" in sql
+            assert "transaction_class = 'expense'" in sql
+            # Refund-correct: no amount-sign filter that would drop negatives.
+            assert "amount_cents > 0" not in sql
 
     @pytest.mark.asyncio
-    async def test_income_breakdown_excludes_internal_transfers(self):
+    async def test_income_breakdown_uses_income_class(self):
         repo = ReportsRepository()
         conn = AsyncMock()
         conn.fetch = AsyncMock(return_value=[])
@@ -265,7 +279,7 @@ class TestReportsExcludeInternalTransfers:
         sqls = [call.args[0] for call in conn.fetch.call_args_list]
         assert sqls, "income-breakdown must hit the DB"
         for sql in sqls:
-            assert "is_internal_transfer" in sql
+            assert "transaction_class = 'income'" in sql
 
 
 # ---------------------------------------------------------------------------

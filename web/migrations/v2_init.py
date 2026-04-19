@@ -784,6 +784,119 @@ async def _migrate_categories_is_income(conn) -> None:
         )
 
 
+async def _migrate_transactions_transaction_class(conn) -> None:
+    """
+    Add ``transactions.transaction_class`` + ``manual_class_override`` and
+    run the classifier once over the full history.
+
+    The new column is materialized so every hot aggregate (cash-flow, by
+    category, budgets, health) can predicate on a single indexed value
+    instead of re-computing ``amount_cents > 0 AND NOT is_internal_transfer
+    AND EXISTS (categories.is_income = TRUE)`` on every row.
+
+    Schema changes are idempotent; the initial backfill is guarded by a
+    "never classified yet" check so re-running the migration is cheap
+    once the column exists. User-set ``is_internal_transfer`` flags (the
+    legacy binary UI toggle) are migrated into ``manual_class_override``
+    so they survive the switch to the four-class model.
+    """
+    async with conn.transaction():
+        has_class_col = await conn.fetchval(
+            """
+            SELECT EXISTS(
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'transactions'
+                  AND column_name = 'transaction_class'
+            )
+            """
+        )
+        has_override_col = await conn.fetchval(
+            """
+            SELECT EXISTS(
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'transactions'
+                  AND column_name = 'manual_class_override'
+            )
+            """
+        )
+
+        if not has_override_col:
+            await _ddl(
+                conn,
+                """
+                ALTER TABLE transactions
+                ADD COLUMN manual_class_override TEXT NULL
+                CHECK (
+                    manual_class_override IS NULL OR manual_class_override IN (
+                        'income', 'expense', 'internal_transfer', 'uncategorized'
+                    )
+                )
+                """,
+            )
+
+        if not has_class_col:
+            # NOT NULL default so existing rows get a value immediately; the
+            # backfill below recomputes the real class straight after.
+            await _ddl(
+                conn,
+                """
+                ALTER TABLE transactions
+                ADD COLUMN transaction_class TEXT NOT NULL DEFAULT 'uncategorized'
+                CHECK (transaction_class IN (
+                    'income', 'expense', 'internal_transfer', 'uncategorized'
+                ))
+                """,
+            )
+
+        await _ddl(
+            conn,
+            """
+            CREATE INDEX IF NOT EXISTS idx_transactions_transaction_class
+            ON transactions(transaction_class)
+            """,
+        )
+
+        # Carry user-set manual internal-transfer choices into the new
+        # override column. Only copy when the manual flag AND the internal
+        # bit are both TRUE — a user who *explicitly* said "this is not an
+        # internal transfer" (manual = TRUE, is_internal_transfer = FALSE)
+        # would be locked out of the rest of the classifier if we wrote
+        # ``expense`` here, so we leave that case alone and let the normal
+        # rules decide. Idempotent: only writes where override is NULL.
+        await conn.execute(
+            """
+            UPDATE transactions SET manual_class_override = 'internal_transfer'
+            WHERE manual_class_override IS NULL
+              AND is_internal_transfer_manual = TRUE
+              AND is_internal_transfer = TRUE
+            """
+        )
+
+        # First-run backfill: if *no* row has been classified yet (default
+        # 'uncategorized' only and no overrides applied), run the full
+        # classifier. This is deliberately not gated behind ``not has_class_col``
+        # alone so a partial previous run can be re-completed simply by
+        # restarting the app.
+        needs_backfill = await conn.fetchval(
+            """
+            SELECT NOT EXISTS(
+                SELECT 1 FROM transactions
+                WHERE transaction_class <> 'uncategorized'
+                   OR manual_class_override IS NOT NULL
+            )
+            """
+        )
+        if needs_backfill:
+            from web.classification.classifier import rescan_all
+
+            stats = await rescan_all(conn, horizon_days=None)
+            logger.info(
+                "transactions.transaction_class backfill done: %s", stats
+            )
+
+
 async def run_v2_migrations(pool) -> None:
     """Execute all V2 DDL statements against the provided asyncpg pool."""
     logger.info("Running V2 database migrations...")
@@ -801,4 +914,5 @@ async def run_v2_migrations(pool) -> None:
         await _migrate_categories_is_income(conn)
         await _migrate_recurring_price_change_signed(conn)
         await _migrate_transactions_display_title_backfill(conn)
+        await _migrate_transactions_transaction_class(conn)
     logger.info("V2 database migrations completed successfully.")
