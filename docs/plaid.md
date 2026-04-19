@@ -136,6 +136,59 @@ If you ever see `LAST_UPDATED_DATETIME_OUT_OF_RANGE`, Plaid’s docs suggest
 falling back to cached balances from `/accounts/get`; open an issue if that
 happens in production.
 
+## Missing liability fields & manual overrides
+
+Some issuers (Capital One is the canonical example — `ins_128026`) return a
+liability payload without `aprs[]` and/or `credit_limit` on `/liabilities/get`,
+so `accounts.apr_percent` / `accounts.credit_limit_cents` stay NULL after a
+sync even though Plaid's own dashboard does not flag an error. Users want to
+(a) know the bank is the reason, not a Budget Pet bug, and (b) fill in the
+numbers by hand so utilization / APR UI still works.
+
+### Detection (`web/accounts/missing_fields.py`)
+
+After each successful `/liabilities/get` call, the scheduler runs
+`detect_and_record_missing(item_id, source, actor_user_id)`:
+
+1. Loads every `accounts` row for the item with `type IN ('credit','loan')`.
+2. Computes the current **missing set** — subset of
+   `["apr", "credit_limit"]` that is still NULL in the row after liabilities
+   sync.
+3. Compares against the cached set in `accounts.plaid_missing_fields`
+   (JSONB, canonicalized via `_normalize_prev`).
+4. When the set **differs**, updates the column **and** writes one
+   `plaid.liabilities.missing_field` entry to `audit_log` with metadata
+   `{ account_id, account_name, missing: [...], previous: [...] }`. Repeated
+   syncs that find the same fields missing never write another audit row —
+   this is how we avoid dozens of log entries per day per card.
+
+The detector is called after `sync_liabilities_to_accounts` in
+`web/plaid/scheduler.py::_sync_item_payload`. Failures are swallowed and
+logged: detection never breaks the sync flow.
+
+### Manual overrides (`PATCH /api/accounts/{id}`)
+
+`accounts.credit_limit_cents_manual` and `accounts.apr_percent_manual`
+(see `docs/data-model.md`) are user-editable fallbacks. The API guard in
+`web/accounts/routes.py` enforces:
+
+* **Authorization.** Only the account owner or a platform `is_owner` user
+  can PATCH manual fields; anyone else gets `403`.
+* **Plaid wins.** Setting `*_manual` is allowed **only if** the matching
+  Plaid-sourced column (`credit_limit_cents` / `apr_percent`) is NULL.
+  Otherwise the server returns `409 Conflict` with
+  `detail = "Plaid already reports <field>; clear override only."`.
+* **Clearing is always allowed.** Sending `{ "credit_limit_cents_manual": null }`
+  or `{ "apr_percent_manual": null }` removes the override regardless of
+  what Plaid currently reports — used by the UI "Clear" button and by ops
+  when a reconnect repopulates the Plaid value later.
+
+The frontend renders these through
+`frontend/src/components/accounts/manual-override-field.tsx`, which reads
+`plaid_missing_fields` + the Plaid value + the manual value and picks one
+of three states (Plaid value, manual value with edit/clear popover, or
+"Not reported by bank" + "Enter manually" button).
+
 ## Transaction Fields
 
 All fields mapped directly from Plaid API:

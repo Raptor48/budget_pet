@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   ChevronDown,
@@ -9,6 +9,7 @@ import {
   CircleDot,
   Cloud,
   CreditCard,
+  Eraser,
   Link2,
   LogIn,
   LogOut,
@@ -25,9 +26,18 @@ import type { AuditEntry } from "@/types/v2";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/contexts/auth-context";
 
 const CATEGORY_CHOICES: { id: string; label: string; category: string | null }[] = [
   { id: "all", label: "All", category: null },
@@ -209,11 +219,34 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
 }
 
 function EventsFeed() {
+  const { user } = useAuth();
+  const isOwner = Boolean(user?.is_owner);
+  const queryClient = useQueryClient();
   const [categoryId, setCategoryId] = useState<string>("all");
   const [pages, setPages] = useState<AuditEntry[][]>([]);
   const [beforeId, setBeforeId] = useState<number | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [clearError, setClearError] = useState<string | null>(null);
 
   const current = CATEGORY_CHOICES.find((c) => c.id === categoryId) ?? CATEGORY_CHOICES[0];
+
+  const clearMutation = useMutation({
+    mutationFn: () => auditApi.clear({ category: current.category ?? null }),
+    onSuccess: async () => {
+      setPages([]);
+      setBeforeId(null);
+      setConfirmOpen(false);
+      setClearError(null);
+      await queryClient.invalidateQueries({ queryKey: ["audit-log"] });
+    },
+    onError: (err: unknown) => {
+      const message =
+        err && typeof err === "object" && "message" in err
+          ? String((err as { message?: unknown }).message ?? "Failed to clear log")
+          : "Failed to clear log";
+      setClearError(message);
+    },
+  });
 
   const { data, isLoading, isFetching, isError, refetch } = useQuery({
     queryKey: ["audit-log", current.category, beforeId],
@@ -250,12 +283,30 @@ function EventsFeed() {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Activity</CardTitle>
-        <CardDescription>
-          Every login, manual sync, bank connect/remove, scheduled run and
-          danger-zone action is recorded here.
-        </CardDescription>
+      <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
+        <div>
+          <CardTitle>Activity</CardTitle>
+          <CardDescription>
+            Every login, manual sync, bank connect/remove, scheduled run and
+            danger-zone action is recorded here.
+          </CardDescription>
+        </div>
+        {isOwner && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setClearError(null);
+              setConfirmOpen(true);
+            }}
+            disabled={clearMutation.isPending}
+            className="text-destructive hover:text-destructive"
+          >
+            <Eraser className="size-4" />
+            {current.category ? `Clear ${current.label}` : "Clear log"}
+          </Button>
+        )}
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap gap-2">
@@ -321,27 +372,135 @@ function EventsFeed() {
           </div>
         ) : null}
       </CardContent>
+
+      <ClearLogDialog
+        open={confirmOpen}
+        onOpenChange={(v) => {
+          setConfirmOpen(v);
+          if (!v) setClearError(null);
+        }}
+        title={current.category ? `Clear ${current.label} activity?` : "Clear activity log?"}
+        description={
+          current.category
+            ? `This removes every "${current.label}" entry across all family members. An "audit.log_cleared" breadcrumb is kept so other family members can still see that you cleared it.`
+            : "This removes every entry across all family members. An \"audit.log_cleared\" breadcrumb is kept so other family members can still see that you cleared it."
+        }
+        error={clearError}
+        isPending={clearMutation.isPending}
+        onConfirm={() => clearMutation.mutate()}
+      />
     </Card>
   );
 }
 
+function ClearLogDialog({
+  open,
+  onOpenChange,
+  title,
+  description,
+  error,
+  isPending,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  title: string;
+  description: string;
+  error: string | null;
+  isPending: boolean;
+  onConfirm: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        {error && (
+          <p className="rounded-md border border-destructive/30 bg-destructive/5 p-2 text-xs text-destructive">
+            {error}
+          </p>
+        )}
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={isPending}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={onConfirm}
+            disabled={isPending}
+          >
+            {isPending ? "Clearing…" : "Clear"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function PlaidSyncFeed() {
+  const { user } = useAuth();
+  const isOwner = Boolean(user?.is_owner);
+  const queryClient = useQueryClient();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [clearError, setClearError] = useState<string | null>(null);
+
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["plaid-sync-log-full"],
     queryFn: () => plaidApi.getSyncLog(),
     staleTime: 10_000,
   });
 
+  const clearMutation = useMutation({
+    mutationFn: () => plaidApi.clearSyncLog(),
+    onSuccess: async () => {
+      setConfirmOpen(false);
+      setClearError(null);
+      await queryClient.invalidateQueries({ queryKey: ["plaid-sync-log-full"] });
+      await queryClient.invalidateQueries({ queryKey: ["plaid-sync-log"] });
+    },
+    onError: (err: unknown) => {
+      const message =
+        err && typeof err === "object" && "message" in err
+          ? String((err as { message?: unknown }).message ?? "Failed to clear sync log")
+          : "Failed to clear sync log";
+      setClearError(message);
+    },
+  });
+
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <CreditCard className="size-5" /> Plaid sync detail
-        </CardTitle>
-        <CardDescription>
-          The last 50 per-item sync runs with transaction/balance counts and
-          the Plaid error (if any).
-        </CardDescription>
+      <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
+        <div>
+          <CardTitle className="flex items-center gap-2">
+            <CreditCard className="size-5" /> Plaid sync detail
+          </CardTitle>
+          <CardDescription>
+            The last 50 per-item sync runs with transaction/balance counts and
+            the Plaid error (if any).
+          </CardDescription>
+        </div>
+        {isOwner && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setClearError(null);
+              setConfirmOpen(true);
+            }}
+            disabled={clearMutation.isPending || !data || data.length === 0}
+            className="text-destructive hover:text-destructive"
+          >
+            <Eraser className="size-4" />
+            Clear sync log
+          </Button>
+        )}
       </CardHeader>
       <CardContent>
         {isLoading ? (
@@ -401,6 +560,23 @@ function PlaidSyncFeed() {
           </div>
         )}
       </CardContent>
+
+      <ClearLogDialog
+        open={confirmOpen}
+        onOpenChange={(v) => {
+          setConfirmOpen(v);
+          if (!v) setClearError(null);
+        }}
+        title="Clear Plaid sync log?"
+        description={
+          "This removes every per-item sync-run row, including any old "
+          + "errors. The audit log keeps a \"plaid.sync_log_cleared\" entry "
+          + "so it's still traceable who wiped it."
+        }
+        error={clearError}
+        isPending={clearMutation.isPending}
+        onConfirm={() => clearMutation.mutate()}
+      />
     </Card>
   );
 }

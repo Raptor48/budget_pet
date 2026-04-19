@@ -28,6 +28,7 @@ import {
 import { accountsApi, membersApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { Account, Member } from "@/types/v2";
+import { ManualOverrideField } from "@/components/accounts/manual-override-field";
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -310,7 +311,10 @@ function CardFront({ account, color }: FaceProps) {
 }
 
 function UtilizationBar({ account }: { account: Account }) {
-  const limit = account.credit_limit_cents;
+  // Utilization needs a denominator; fall back to the user's manual limit
+  // when Plaid doesn't report one so the bar stays meaningful for banks
+  // that hide credit_limit from /accounts/balance.
+  const limit = account.credit_limit_cents ?? account.credit_limit_cents_manual;
   if (limit == null || limit <= 0) return <p className="text-white/50 text-xs">No credit limit on file</p>;
   const pct = (account.current_balance_cents / limit) * 100;
   const capped = Math.min(pct, 100);
@@ -376,18 +380,18 @@ function CardBack({
           <>
             <UtilizationBar account={account} />
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
-              <div>
-                <p className="text-white/50">Limit</p>
-                <p className="font-semibold text-white tabular-nums">
-                  {account.credit_limit_cents != null ? formatMoney(account.credit_limit_cents, account.currency) : "—"}
-                </p>
-              </div>
-              <div>
-                <p className="text-white/50">APR</p>
-                <p className="font-semibold text-white tabular-nums">
-                  {account.apr_percent != null ? `${account.apr_percent}%` : "—"}
-                </p>
-              </div>
+              <ManualOverrideField
+                account={account}
+                kind="credit_limit"
+                label="Limit"
+                format={(v) => formatMoney(Number(v), account.currency)}
+              />
+              <ManualOverrideField
+                account={account}
+                kind="apr"
+                label="APR"
+                format={(v) => `${v}%`}
+              />
               <div>
                 <p className="text-white/50">Min payment</p>
                 <p className="font-semibold text-white tabular-nums">
@@ -615,10 +619,18 @@ const SECTION_TITLES: Record<string, string> = {
 
 function AccountTileSecondaryInfo({ account }: { account: Account }) {
   if (account.type === "loan") {
+    const apr = account.apr_percent ?? account.apr_percent_manual;
     return (
       <div className="flex flex-wrap items-center gap-x-3 gap-y-0">
-        {account.apr_percent != null && (
-          <span className="text-xs text-muted-foreground">APR {account.apr_percent}%</span>
+        {apr != null && (
+          <span className="text-xs text-muted-foreground">
+            APR {apr}%
+            {account.apr_percent == null && account.apr_percent_manual != null && (
+              <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase text-muted-foreground">
+                Manual
+              </span>
+            )}
+          </span>
         )}
         {account.min_payment_cents != null && (
           <span className="text-xs text-muted-foreground">

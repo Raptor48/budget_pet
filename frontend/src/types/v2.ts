@@ -30,6 +30,12 @@ export interface Account {
   available_balance_cents: number | null;
   credit_limit_cents: number | null;
   apr_percent: string | null;
+  /** User-entered fallback for credit_limit. Shown only when credit_limit_cents is null. */
+  credit_limit_cents_manual: number | null;
+  /** User-entered fallback for APR. Shown only when apr_percent is null. */
+  apr_percent_manual: string | null;
+  /** Liability fields Plaid did not return on the last sync, e.g. ["apr","credit_limit"]. */
+  plaid_missing_fields: string[];
   min_payment_cents: number | null;
   due_day: number | null;
   is_overdue: boolean | null;
