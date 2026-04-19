@@ -150,7 +150,7 @@ export function InternalTransferSettingsDialog({ open, onOpenChange }: Props) {
               ANASTASIIA STOLPOVSKAIA
             </code>
             . Matching is case-insensitive and tolerates bank boilerplate
-            ("Zelle payment from ...").
+            (&ldquo;Zelle payment from ...&rdquo;).
           </p>
 
           <div className="flex gap-2">
