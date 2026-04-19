@@ -1,32 +1,44 @@
 #!/bin/bash
-# Скрипт для запуска тестов
+# Test runner for Budget Pet.
 
 set -e
 
-echo "🧪 Запуск тестов для Budget Pet"
+echo "Running Budget Pet tests"
 echo ""
 
-# Проверка переменной окружения
 if [ -z "$TEST_DATABASE_URL" ]; then
     export TEST_DATABASE_URL="postgresql://postgres:postgres@localhost:5432/budget_pet_test"
-    echo "⚠️  TEST_DATABASE_URL не установлена, используется: $TEST_DATABASE_URL"
+    echo "TEST_DATABASE_URL not set, using default: $TEST_DATABASE_URL"
 fi
 
-# Проверка подключения к БД
-echo "📊 Проверка подключения к тестовой БД..."
-python3 -c "
-import psycopg2
+# Sanity-check DB reachability via asyncpg (same driver as production).
+# We intentionally do not depend on psycopg2 just for this probe.
+echo "Pinging test database..."
+python3 - <<'PY' || exit 1
+import asyncio
 import os
-try:
-    conn = psycopg2.connect(os.getenv('TEST_DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/budget_pet_test'))
-    conn.close()
-    print('✅ Подключение к БД успешно')
-except Exception as e:
-    print(f'❌ Ошибка подключения к БД: {e}')
-    print('💡 Убедитесь, что PostgreSQL запущен и база данных создана:')
-    print('   createdb budget_pet_test')
-    exit(1)
-" || exit 1
+import sys
+
+import asyncpg
+
+
+async def _ping() -> None:
+    url = os.getenv(
+        "TEST_DATABASE_URL",
+        "postgresql://postgres:postgres@localhost:5432/budget_pet_test",
+    )
+    try:
+        conn = await asyncpg.connect(url)
+    except Exception as exc:  # noqa: BLE001 — top-level script, want the message
+        print(f"ERROR: cannot connect to test DB: {exc}", file=sys.stderr)
+        print("Hint: start PostgreSQL and run: createdb budget_pet_test", file=sys.stderr)
+        sys.exit(1)
+    await conn.close()
+    print("DB connection OK")
+
+
+asyncio.run(_ping())
+PY
 
 echo ""
 

@@ -17,14 +17,21 @@ Legacy V1 docs: [`docs/archive/v1/`](docs/archive/v1/README.md) (reference only)
 
 | Layer | Technology |
 |--------|------------|
-| API | Python 3.11, FastAPI, Uvicorn |
+| API | Python 3.12, FastAPI, Uvicorn |
 | Web UI | Next.js 15, React 19, TypeScript, Tailwind CSS 4, TanStack Query |
 | DB | PostgreSQL, asyncpg |
 | Hosting | Railway (FastAPI + Next.js + optional Telegram bot) |
 
 ## Local development
 
-1. Python: create a venv, `pip install -r requirements.txt`, configure `.env` from [`.env.template`](.env.template) (database URL, `ADMIN_LOGIN` / `ADMIN_PASSWORD`, optional Plaid keys).
+1. Python: create a venv, install deps, configure `.env` from [`.env.template`](.env.template) (database URL, `ADMIN_LOGIN` / `ADMIN_PASSWORD`, optional Plaid keys).
+
+    ```bash
+    # Runtime only (what ships in the Docker image):
+    pip install -r requirements.txt
+    # Runtime + test / CI tooling (pytest, httpx, coverage):
+    pip install -r requirements-dev.txt
+    ```
 
 2. Run API (watch only `web/` so edits under `tests/` do not restart the server and re-run migrations):
 

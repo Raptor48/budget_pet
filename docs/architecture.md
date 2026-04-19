@@ -8,7 +8,7 @@ V2 is centered on Plaid API for linked institutions (transactions, accounts, cat
 
 | Layer | Technology |
 |---|---|
-| Backend | Python 3.11, FastAPI, Uvicorn, asyncpg |
+| Backend | Python 3.12, FastAPI, Uvicorn, asyncpg |
 | Frontend | Next.js 15, React 19, TypeScript 5, Tailwind CSS 4, TanStack Query |
 | Database | PostgreSQL (Railway) |
 | Plaid | plaid-python 39+, products: transactions, liabilities, investments, recurring_transactions |
