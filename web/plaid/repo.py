@@ -406,6 +406,10 @@ class PlaidRepository:
             "location": location,
             "payment_meta": payment_meta,
             "is_pending": raw.get("pending", False),
+            # Set on a posted transaction that replaces a pending twin. We use
+            # it to forward user-set fields (is_private, user_note) before the
+            # pending row is removed by /transactions/sync.
+            "pending_transaction_id": raw.get("pending_transaction_id"),
             "source": source,
         }
 
@@ -464,6 +468,38 @@ class PlaidRepository:
                     category_id = rule_cat
                 data["category_id"] = category_id
 
+                # When Plaid posts a previously-pending transaction, the new
+                # row gets a fresh plaid_transaction_id and the old (pending)
+                # row is reported in `removed`. Carry user-set flags from the
+                # pending twin so privacy and notes survive the re-keying.
+                # delete_removed_transactions runs *after* import in the
+                # scheduler, so the pending row is still present here.
+                carry_is_private = False
+                carry_user_note = None
+                carry_category_id = None
+                pending_ref = data.get("pending_transaction_id")
+                if pending_ref:
+                    pending_row = await conn.fetchrow(
+                        """
+                        SELECT is_private, user_note, category_id
+                        FROM transactions
+                        WHERE plaid_transaction_id = $1
+                        """,
+                        pending_ref,
+                    )
+                    if pending_row is not None:
+                        carry_is_private = bool(pending_row["is_private"])
+                        carry_user_note = pending_row["user_note"]
+                        carry_category_id = pending_row["category_id"]
+
+                # A user-assigned category on the pending row always wins over
+                # Plaid's default categorisation for the posted twin; the
+                # merchant-rule lookup above still takes precedence because it
+                # was applied first, but a user override from the pending row
+                # trumps raw PFC.
+                if carry_category_id is not None and rule_cat is None:
+                    data["category_id"] = carry_category_id
+
                 await conn.execute(
                     """
                     INSERT INTO transactions (
@@ -473,10 +509,12 @@ class PlaidRepository:
                         merchant_entity_id, logo_url, website, payment_channel,
                         pfc_primary, pfc_detailed, pfc_confidence, pfc_icon_url,
                         counterparties, location, payment_meta,
-                        is_pending, source, display_title
+                        is_pending, source, display_title,
+                        pending_transaction_id, is_private, user_note
                     ) VALUES (
                         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
-                        $16,$17,$18,$19,$20,$21,$22,$23,$24,$25
+                        $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,
+                        $26,$27,$28
                     )
                     ON CONFLICT (plaid_transaction_id) DO UPDATE SET
                         account_id          = EXCLUDED.account_id,
@@ -502,6 +540,7 @@ class PlaidRepository:
                         is_pending          = EXCLUDED.is_pending,
                         source              = EXCLUDED.source,
                         display_title       = EXCLUDED.display_title,
+                        pending_transaction_id = EXCLUDED.pending_transaction_id,
                         updated_at          = NOW()
                     """,
                     data.get("plaid_transaction_id"),
@@ -529,6 +568,9 @@ class PlaidRepository:
                     data.get("is_pending", False),
                     data.get("source", "plaid"),
                     data.get("display_title"),
+                    pending_ref,
+                    carry_is_private,
+                    carry_user_note,
                 )
                 imported += 1
 

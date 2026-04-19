@@ -31,10 +31,10 @@ Each category has `source`: **`plaid_pfc`** (created when syncing Plaid transact
 
 | Method | Path | Description |
 |---|---|---|
-| GET | /api/categories | List all categories. Response rows include `parent_id` (nullable self-FK) so the frontend can render a two-level hierarchy (primary bucket → detailed subcategories). |
+| GET | /api/categories | List all categories. Response rows include `parent_id` (nullable self-FK) so the frontend can render a two-level hierarchy, plus `is_income` (family-wide flag that marks the category as income everywhere in the app). |
 | POST | /api/categories | Create **custom** category (`name`, optional `color`, `icon`; no Plaid PFC fields) |
 | GET | /api/categories/{id} | Get category |
-| PATCH | /api/categories/{id} | Update `name`, `color`, `icon` |
+| PATCH | /api/categories/{id} | Update `name`, `color`, `icon`, `is_income` |
 | DELETE | /api/categories/{id} | Delete **custom** only (`404` if Plaid-derived or missing) |
 
 ## Tags
@@ -121,7 +121,7 @@ so the monthly totals never reveal a gift someone else is planning.
 
 | Method | Path | Description |
 |---|---|---|
-| GET | /api/reports/cash-flow | Income vs expenses for a month (privacy-aware) |
+| GET | /api/reports/cash-flow | Income vs expenses for a month (privacy-aware). Income uses the shared `is_income` predicate (category flag, not just amount sign). |
 | GET | /api/reports/cash-flow/history | Last N months (default 12) |
 | GET | /api/reports/by-category | Spending by category for month, split-aware (privacy-aware). Query params: `rollup=primary\|detailed` (default `primary` → rolls detailed PFC children into their parent bucket, returns ~10-15 slices, `bucket_key='p:<id>'`, plus `children_count`) and `parent_category_id` (used with `rollup=detailed` to scope the response to children of that primary bucket — powers the Reports "Focus mode" drilldown). |
 | GET | /api/reports/by-tag | Spending by tag (optional month + tag_id filter) |
@@ -129,7 +129,8 @@ so the monthly totals never reveal a gift someone else is planning.
 | GET | /api/reports/net-worth | Current net worth snapshot |
 | GET | /api/reports/net-worth/history | Historical snapshots (default 12 months) |
 | GET | /api/reports/forecast | Cash flow forecast for next N days (30/60/90) |
-| GET | /api/reports/financial-health | Health score 0–100 with metrics (privacy-aware) |
+| GET | /api/reports/financial-health | Health score 0–100 with metrics (privacy-aware). Monthly income uses the shared `is_income` predicate. |
+| GET | /api/reports/income | Family income for a month split per person, with per-category sources. Query param: `month=YYYY-MM` (default current). "Income" = transactions mapped to a category where `is_income = TRUE`. Privacy-aware. |
 
 ## Insights
 

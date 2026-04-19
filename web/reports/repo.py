@@ -32,6 +32,26 @@ def _private_tx_filter_with_idx(alias: str, idx: int) -> str:
     )
 
 
+def _income_predicate(alias: str = "t") -> str:
+    """
+    Canonical SQL predicate for "transaction is income" across the app.
+
+    A row is counted as income iff (a) its amount is a credit
+    (``amount_cents < 0`` per the Plaid convention) AND (b) it is mapped to a
+    category flagged ``is_income = TRUE``. The flag is family-wide and seeded
+    from Plaid PFC=INCOME on sync; users can amend it from the Income tab.
+
+    Using a single predicate here guarantees the Income tab, Cash Flow,
+    Financial Health and any future income consumer all agree on the same
+    definition.
+    """
+    prefix = f"{alias}." if alias else ""
+    return (
+        f"{prefix}amount_cents < 0 AND EXISTS ("
+        f"SELECT 1 FROM categories _ic WHERE _ic.id = {prefix}category_id AND _ic.is_income = TRUE)"
+    )
+
+
 class ReportsRepository:
     async def _pool(self):
         return await get_pool()
@@ -48,7 +68,7 @@ class ReportsRepository:
             row = await conn.fetchrow(
                 f"""
                 SELECT
-                    COALESCE(SUM(CASE WHEN t.amount_cents < 0 THEN ABS(t.amount_cents) ELSE 0 END), 0) AS income_cents,
+                    COALESCE(SUM(CASE WHEN {_income_predicate("t")} THEN ABS(t.amount_cents) ELSE 0 END), 0) AS income_cents,
                     COALESCE(SUM(CASE WHEN t.amount_cents > 0 THEN t.amount_cents ELSE 0 END), 0) AS expenses_cents
                 FROM transactions t
                 WHERE COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
@@ -80,7 +100,7 @@ class ReportsRepository:
                 f"""
                 SELECT
                     TO_CHAR(COALESCE(t.authorized_date, t.date), 'YYYY-MM') AS month,
-                    COALESCE(SUM(CASE WHEN t.amount_cents < 0 THEN ABS(t.amount_cents) ELSE 0 END), 0) AS income_cents,
+                    COALESCE(SUM(CASE WHEN {_income_predicate("t")} THEN ABS(t.amount_cents) ELSE 0 END), 0) AS income_cents,
                     COALESCE(SUM(CASE WHEN t.amount_cents > 0 THEN t.amount_cents ELSE 0 END), 0) AS expenses_cents
                 FROM transactions t
                 WHERE COALESCE(t.authorized_date, t.date) >= (CURRENT_DATE - INTERVAL '1 month' * $1)::date
@@ -337,6 +357,120 @@ class ReportsRepository:
             )
         return [dict(r) for r in rows]
 
+    async def get_income_breakdown(
+        self, month: str, viewer_user_id: Optional[int] = None
+    ) -> Dict[str, Any]:
+        """
+        Per-person income for a calendar month, broken down by the category the
+        transaction was mapped to.
+
+        A transaction is counted as income only when ``_income_predicate``
+        holds (credit side of the ledger AND belongs to a category flagged
+        ``is_income = TRUE``). Ownership is resolved via the account
+        (``accounts.user_id``); unassigned accounts show up as a ``null`` user
+        so the frontend can still surface them.
+
+        Private transactions owned by other family members are filtered out
+        for the requesting viewer, mirroring the rest of the reports module.
+
+        Returns a dict shaped for the UI::
+
+            {
+                "month": "YYYY-MM",
+                "total_cents": int,
+                "users": [
+                    {
+                        "user_id": int | None,
+                        "username": str,
+                        "amount_cents": int,
+                        "sources": [
+                            {
+                                "category_id": int | None,
+                                "category_name": str,
+                                "color": str | None,
+                                "amount_cents": int,
+                                "transaction_count": int,
+                            },
+                            ...
+                        ],
+                    },
+                    ...
+                ],
+            }
+        """
+        pool = await self._pool()
+        private_filter = (
+            _private_tx_filter_with_idx("t", 2) if viewer_user_id is not None else ""
+        )
+        params: list = [month]
+        if viewer_user_id is not None:
+            params.append(viewer_user_id)
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT
+                    a.user_id                     AS user_id,
+                    u.username                    AS username,
+                    t.category_id                 AS category_id,
+                    COALESCE(c.name, 'Uncategorized') AS category_name,
+                    c.color                       AS category_color,
+                    SUM(ABS(t.amount_cents))      AS amount_cents,
+                    COUNT(*)                      AS transaction_count
+                FROM transactions t
+                JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN users u ON u.id = a.user_id
+                LEFT JOIN categories c ON c.id = t.category_id
+                WHERE COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
+                  AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
+                  AND {_income_predicate("t")}
+                  {_sandbox_tx_filter("t")}
+                  {private_filter}
+                GROUP BY a.user_id, u.username, t.category_id, c.name, c.color
+                ORDER BY a.user_id NULLS LAST, amount_cents DESC
+                """,
+                *params,
+            )
+
+        # Group source rows under their owner so the UI can render per-person
+        # cards without reshaping on the client.
+        users_by_id: Dict[Any, Dict[str, Any]] = {}
+        total = 0
+        for r in rows:
+            user_key = r["user_id"]
+            bucket = users_by_id.get(user_key)
+            if bucket is None:
+                bucket = {
+                    "user_id": user_key,
+                    # Unassigned accounts (no linked owner) still contribute to
+                    # family income; surface them with a clear label rather
+                    # than hiding them.
+                    "username": r["username"] or "Unassigned",
+                    "amount_cents": 0,
+                    "sources": [],
+                }
+                users_by_id[user_key] = bucket
+            amount = int(r["amount_cents"] or 0)
+            bucket["amount_cents"] += amount
+            total += amount
+            bucket["sources"].append({
+                "category_id": r["category_id"],
+                "category_name": r["category_name"],
+                "color": r["category_color"],
+                "amount_cents": amount,
+                "transaction_count": int(r["transaction_count"] or 0),
+            })
+
+        users = sorted(
+            users_by_id.values(),
+            key=lambda row: row["amount_cents"],
+            reverse=True,
+        )
+        return {
+            "month": month,
+            "total_cents": total,
+            "users": users,
+        }
+
     async def get_net_worth(self) -> Dict[str, Any]:
         pool = await self._pool()
         async with pool.acquire() as conn:
@@ -435,7 +569,7 @@ class ReportsRepository:
                         TO_CHAR(COALESCE(authorized_date, date), 'YYYY-MM') AS m,
                         SUM(ABS(amount_cents)) AS monthly_total
                     FROM transactions
-                    WHERE amount_cents < 0
+                    WHERE {_income_predicate("")}
                       AND COALESCE(authorized_date, date) >= (DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '3 months')
                       AND COALESCE(authorized_date, date) < DATE_TRUNC('month', CURRENT_DATE)
                       {_sandbox_tx_filter_no_alias()}

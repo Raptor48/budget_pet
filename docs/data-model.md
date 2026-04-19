@@ -50,6 +50,7 @@ becomes a parent itself in practice).
 | icon | TEXT | Emoji or icon name |
 | pfc_icon_url | TEXT | From Plaid personal_finance_category_icon_url |
 | source | TEXT | `plaid_pfc` \| `custom` — Plaid rows come from sync; custom from API only |
+| is_income | BOOLEAN NOT NULL | Family-wide flag: when TRUE, transactions mapped here count as **income** in every aggregate (Income tab, Cash Flow, Financial Health). Seeded TRUE for `plaid_pfc_primary = 'INCOME'` on first migration and for any new INCOME PFC rows created by sync. Editable via `PATCH /api/categories/{id}`; once the column exists the migration never overwrites it, so a user toggling OFF sticks. Partial index `idx_categories_is_income` keeps income lookups fast. |
 
 Resolution contract (`web/categories/repo.py::resolve_category`):
 1. If `pfc_primary` is provided, the primary-only parent row is upserted
@@ -97,7 +98,8 @@ All transactions from Plaid, cash wallet (`source=cash`), and legacy `manual` ro
 | is_pending | BOOLEAN | |
 | source | TEXT | plaid \| plaid_sandbox \| cash \| manual (cash = offline cash via API). Whether `plaid_sandbox` participates in reports/budgets/export is controlled by `web.env_flags.reports_include_plaid_sandbox()` (see `docs/plaid.md`). |
 | user_note | TEXT | User annotation |
-| is_private | BOOLEAN NOT NULL DEFAULT FALSE | Hide the row from other family members. Enforced by a sparse index `idx_transactions_is_private` and the `viewer_user_id` filter applied in every list/detail/report/export/insight query. |
+| is_private | BOOLEAN NOT NULL DEFAULT FALSE | Hide the row from other family members. Enforced by a sparse index `idx_transactions_is_private` and the `viewer_user_id` filter applied in every list/detail/report/export/insight query. When Plaid promotes a pending transaction to posted (new `plaid_transaction_id` + pending row reported as `removed`) the flag is carried from the pending twin via `pending_transaction_id` during import, so privacy survives autosync. |
+| pending_transaction_id | TEXT | Plaid's link from a posted transaction back to its pending twin (`pending_transaction_id` on the Plaid transaction object). Populated on import; used to forward user-set flags (`is_private`, `user_note`, user-chosen `category_id`) before the pending row is deleted by `/transactions/sync`. Indexed sparsely. |
 | display_title | TEXT | Materialized output of `normalize_transaction_title(...)`. Written on every upsert/import (Plaid + cash) and recomputed when `merchant_name` is edited; `update_transaction` refreshes it in the same transaction. Indexed on `lower(display_title)` and used by merchant-rule matching to fall back when `merchant_name` is NULL (ACH / checks / bill pays). Historical rows are backfilled by `_migrate_transactions_display_title_backfill` in batches of 1000 (idempotent: rows with a non-NULL value are skipped). API clients should read this column; `_enrich` still falls back to runtime normalization if the column is NULL for any reason. |
 
 ### Cash wallet (accounts)

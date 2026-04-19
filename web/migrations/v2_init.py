@@ -341,6 +341,11 @@ TRANSACTIONS_COLUMNS = [
     "CREATE INDEX IF NOT EXISTS idx_transactions_is_private ON transactions(is_private) WHERE is_private = TRUE",
     "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS display_title TEXT",
     "CREATE INDEX IF NOT EXISTS idx_transactions_display_title_lower ON transactions(lower(display_title))",
+    # Plaid links a newly-posted transaction back to its pending twin via
+    # `pending_transaction_id`. We store it so the sync loop can copy user-set
+    # flags (is_private, user_note) from the pending row before it is removed.
+    "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS pending_transaction_id TEXT",
+    "CREATE INDEX IF NOT EXISTS idx_transactions_pending_transaction_id ON transactions(pending_transaction_id) WHERE pending_transaction_id IS NOT NULL",
 ]
 
 AUDIT_LOG_INDEXES = [
@@ -725,6 +730,44 @@ async def _migrate_transactions_display_title_backfill(conn) -> None:
         )
 
 
+async def _migrate_categories_is_income(conn) -> None:
+    """
+    Add ``categories.is_income`` (user-controlled flag that defines what counts
+    as income across the app). On first run, backfill every category whose
+    Plaid personal-finance-category primary is ``INCOME`` to TRUE. On
+    subsequent runs the backfill is skipped so a user-toggled OFF flag is not
+    silently re-enabled.
+    """
+    async with conn.transaction():
+        has_col = await conn.fetchval(
+            """
+            SELECT EXISTS(
+                SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'categories'
+                  AND column_name = 'is_income'
+            )
+            """
+        )
+        if not has_col:
+            await _ddl(
+                conn,
+                "ALTER TABLE categories ADD COLUMN is_income BOOLEAN NOT NULL DEFAULT FALSE",
+            )
+            await _ddl(
+                conn,
+                """
+                UPDATE categories
+                SET is_income = TRUE
+                WHERE plaid_pfc_primary = 'INCOME'
+                """,
+            )
+        await _ddl(
+            conn,
+            "CREATE INDEX IF NOT EXISTS idx_categories_is_income ON categories(is_income) WHERE is_income = TRUE",
+        )
+
+
 async def run_v2_migrations(pool) -> None:
     """Execute all V2 DDL statements against the provided asyncpg pool."""
     logger.info("Running V2 database migrations...")
@@ -739,6 +782,7 @@ async def run_v2_migrations(pool) -> None:
         await _migrate_v21_addons(conn)
         await _migrate_merchant_rules_global_family(conn)
         await _migrate_categories_parent_id(conn)
+        await _migrate_categories_is_income(conn)
         await _migrate_recurring_price_change_signed(conn)
         await _migrate_transactions_display_title_backfill(conn)
     logger.info("V2 database migrations completed successfully.")

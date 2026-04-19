@@ -7,7 +7,13 @@ from tests.v2.conftest import make_mock_pool
 from web.plaid.repo import PlaidRepository
 
 
-def _make_txn(txn_id: str, account_id: str, amount: float = 12.50):
+def _make_txn(
+    txn_id: str,
+    account_id: str,
+    amount: float = 12.50,
+    pending_transaction_id: str | None = None,
+    pending: bool = False,
+):
     txn = MagicMock()
     txn.to_dict.return_value = {
         "transaction_id": txn_id,
@@ -33,7 +39,8 @@ def _make_txn(txn_id: str, account_id: str, amount: float = 12.50):
         "counterparties": [],
         "location": None,
         "payment_meta": None,
-        "pending": False,
+        "pending": pending,
+        "pending_transaction_id": pending_transaction_id,
     }
     return txn
 
@@ -70,12 +77,14 @@ class TestPlaidRepository:
             "location": None,
             "payment_meta": None,
             "pending": False,
+            "pending_transaction_id": "pending-123",
         }
         row = repo._extract_txn(raw, account_id=42, source="plaid")
         assert row["pfc_primary"] == "TRAVEL"
         assert row["pfc_detailed"] == "TRAVEL_FLIGHTS"
         assert row["pfc_confidence"] == "VERY_HIGH"
         assert row["pfc_icon_url"] == "https://cdn.plaid.com/pfc/travel.png"
+        assert row["pending_transaction_id"] == "pending-123"
 
     @pytest.mark.asyncio
     async def test_import_transactions_counts_correctly(self, repo):
@@ -109,6 +118,93 @@ class TestPlaidRepository:
 
         assert count == 0
         conn.execute.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_pending_to_posted_preserves_user_flags(self, repo):
+        """
+        When Plaid posts a previously-pending transaction it issues a brand new
+        ``transaction_id`` and marks the pending row ``removed``. The import
+        loop must look up the pending twin via ``pending_transaction_id`` and
+        forward user-set flags (is_private, user_note) into the newly inserted
+        posted row. Otherwise, anything a family member privately tagged while
+        the transaction was pending would leak to the rest of the family after
+        autosync.
+        """
+        conn = AsyncMock()
+        pool = make_mock_pool(conn)
+
+        executed_args: list[tuple] = []
+
+        async def fake_execute(sql, *args):
+            executed_args.append(args)
+            return "INSERT 0 1"
+
+        async def fake_fetchrow(sql, *args):
+            if "FROM transactions" in sql and "plaid_transaction_id = $1" in sql:
+                return {
+                    "is_private": True,
+                    "user_note": "honeymoon surprise",
+                    "category_id": 77,
+                }
+            return None
+
+        conn.execute = AsyncMock(side_effect=fake_execute)
+        conn.fetchrow = AsyncMock(side_effect=fake_fetchrow)
+
+        posted = _make_txn(
+            "txn-posted-1",
+            "acct-1",
+            pending_transaction_id="txn-pending-1",
+        )
+        account_id_map = {"acct-1": 1}
+
+        with patch("web.plaid.repo.get_pool", AsyncMock(return_value=pool)), patch(
+            "web.merchant_rules.repo.MerchantRulesRepository.lookup_category",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            count = await repo.import_transactions(
+                [posted], account_id_map, source="plaid"
+            )
+
+        assert count == 1
+        assert executed_args, "expected an INSERT"
+        args = executed_args[0]
+        # Column order in the INSERT ends with ...pending_transaction_id, is_private, user_note.
+        assert args[-3] == "txn-pending-1"
+        assert args[-2] is True, "is_private must be carried from the pending twin"
+        assert args[-1] == "honeymoon surprise", "user_note must be carried forward"
+        # Category from pending twin should win when no merchant rule applied.
+        assert args[2] == 77
+
+    @pytest.mark.asyncio
+    async def test_posted_without_pending_twin_defaults_to_public(self, repo):
+        """A brand-new posted transaction with no pending predecessor must
+        insert with ``is_private=False`` — carrying over should be a no-op."""
+        conn = AsyncMock()
+        pool = make_mock_pool(conn)
+
+        executed_args: list[tuple] = []
+
+        async def fake_execute(sql, *args):
+            executed_args.append(args)
+            return "INSERT 0 1"
+
+        conn.execute = AsyncMock(side_effect=fake_execute)
+        conn.fetchrow = AsyncMock(return_value=None)
+
+        fresh = _make_txn("txn-fresh", "acct-1")  # no pending_transaction_id
+        with patch("web.plaid.repo.get_pool", AsyncMock(return_value=pool)), patch(
+            "web.merchant_rules.repo.MerchantRulesRepository.lookup_category",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            await repo.import_transactions([fresh], {"acct-1": 1}, source="plaid")
+
+        args = executed_args[0]
+        assert args[-3] is None
+        assert args[-2] is False
+        assert args[-1] is None
 
     @pytest.mark.asyncio
     async def test_delete_removed_transactions(self, repo):

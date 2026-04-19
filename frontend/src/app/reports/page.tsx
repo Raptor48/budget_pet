@@ -13,6 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MonthYearPicker } from "@/components/ui/month-year-picker";
 import { ArrowLeft, PieChart } from "lucide-react";
+import { IncomeTab } from "@/components/reports/income-tab";
 import { reportsApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type {
@@ -319,8 +320,9 @@ export default function Reports() {
         </header>
 
         <Tabs defaultValue="cashflow" className="gap-6">
-          <TabsList className="grid h-auto w-full max-w-4xl grid-cols-2 gap-1 p-1 sm:grid-cols-3 lg:grid-cols-5">
+          <TabsList className="grid h-auto w-full max-w-4xl grid-cols-2 gap-1 p-1 sm:grid-cols-3 lg:grid-cols-6">
             <TabsTrigger value="cashflow">Cash Flow</TabsTrigger>
+            <TabsTrigger value="income">Income</TabsTrigger>
             <TabsTrigger value="category">By Category</TabsTrigger>
             <TabsTrigger value="networth">Net Worth</TabsTrigger>
             <TabsTrigger value="merchants">Top Merchants</TabsTrigger>
@@ -405,6 +407,10 @@ export default function Reports() {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="income" className="space-y-6">
+            <IncomeTab month={month} onMonthChange={setMonth} />
           </TabsContent>
 
           <TabsContent value="category" className="space-y-6">

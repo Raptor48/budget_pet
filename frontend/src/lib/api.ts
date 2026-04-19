@@ -16,6 +16,7 @@ import type {
   CategorySpend,
   FinancialHealthScore,
   ForecastEntry,
+  IncomeBreakdown,
   InvestmentHolding,
   Member,
   MerchantSpend,
@@ -374,6 +375,11 @@ export const reportsApi = {
 
   getFinancialHealth: (): Promise<FinancialHealthScore> =>
     apiRequest('/api/reports/financial-health'),
+
+  getIncome: (month?: string): Promise<IncomeBreakdown> => {
+    const qs = month ? `?month=${month}` : '';
+    return apiRequest(`/api/reports/income${qs}`);
+  },
 };
 
 // ---------------------------------------------------------------------------
