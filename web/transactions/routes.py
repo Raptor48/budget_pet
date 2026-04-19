@@ -79,6 +79,15 @@ async def list_transactions(
             "into the underlying transactions."
         ),
     ),
+    exclude_internal_transfers: Optional[bool] = Query(
+        None,
+        description=(
+            "When true, drops rows with `transaction_class = 'internal_transfer'` "
+            "from the response. Powers the \"Show internal transactions\" toggle "
+            "on the Transactions page (default OFF so intra-family transfers stay "
+            "hidden)."
+        ),
+    ),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
 ):
@@ -102,6 +111,7 @@ async def list_transactions(
         user_id=user_id,
         viewer_user_id=current_id,
         transaction_class=transaction_class,
+        exclude_internal_transfers=exclude_internal_transfers,
         limit=limit,
         offset=offset,
         omit_heavy_fields=True,
@@ -173,6 +183,7 @@ async def export_transactions(
     category_id: Optional[int] = Query(None),
     tag_id: Optional[int] = Query(None),
     source: Optional[str] = Query(None),
+    exclude_internal_transfers: Optional[bool] = Query(None),
 ):
     """Export transactions as CSV. Splits become individual rows."""
     current_user = getattr(request.state, "user", None) or {}
@@ -188,6 +199,7 @@ async def export_transactions(
         source=source,
         user_id=None,
         viewer_user_id=current_id,
+        exclude_internal_transfers=exclude_internal_transfers,
         limit=10000,
         omit_heavy_fields=True,
         exclude_plaid_sandbox=not reports_include_plaid_sandbox(),

@@ -68,7 +68,7 @@ Matching SQL coalesces `NULLIF(merchant_name, '')` onto `transactions.display_ti
 
 | Method | Path | Description |
 |---|---|---|
-| GET | /api/transactions | List transactions (filters: month, account_id, category_id, tag_id, search, channel, pending_only, `transaction_class` (`'income' \| 'expense' \| 'internal_transfer' \| 'uncategorized'`, used by the Income/Expenses drill-down), optional `user_id` for one member's accounts, limit, offset). Family-wide by default; `is_private` rows owned by others are omitted. |
+| GET | /api/transactions | List transactions (filters: month, account_id, category_id, tag_id, search, channel, pending_only, `transaction_class` (`'income' \| 'expense' \| 'internal_transfer' \| 'uncategorized'`, used by the Income/Expenses drill-down), `exclude_internal_transfers` (boolean — when true, drops `transaction_class = 'internal_transfer'` rows; powers the "Show internal transactions" toggle on the Transactions page, default hidden), optional `user_id` for one member's accounts, limit, offset). Family-wide by default; `is_private` rows owned by others are omitted. |
 | GET | /api/transactions/date-range | Earliest and latest transaction dates visible to the caller (`{ min_month, max_month, earliest, latest }`). Used by the shared month/year picker to bound year and month options. Same auth + privacy + sandbox filters as `GET /api/transactions`. |
 | POST | /api/transactions | Create **cash** transaction on the user's Cash wallet (`source=cash`); body: `amount_cents`, `date`, `name`, optional `category_id`, `authorized_date`, `merchant_name`, `user_note`. Server sets `payment_channel=other`, `currency=USD`, `is_pending=false`. |
 | GET | /api/transactions/{id} | Get transaction with tags and splits (returns 404 when the row is `is_private` and the caller is not the owner) |
@@ -79,7 +79,7 @@ Matching SQL coalesces `NULLIF(merchant_name, '')` onto `transactions.display_ti
 | GET | /api/transactions/{id}/splits | Get splits |
 | POST | /api/transactions/{id}/splits | Replace splits (validates SUM invariant) |
 | DELETE | /api/transactions/{id}/splits | Clear all splits |
-| GET | /api/transactions/export | CSV export (same filters as list); **`plaid_sandbox` rows follow `reports_include_plaid_sandbox()`** (included when `PLAID_ENV=sandbox` unless `REPORTS_INCLUDE_PLAID_SANDBOX=false`; production defaults to exclude) |
+| GET | /api/transactions/export | CSV export (same filters as list, including `exclude_internal_transfers`); **`plaid_sandbox` rows follow `reports_include_plaid_sandbox()`** (included when `PLAID_ENV=sandbox` unless `REPORTS_INCLUDE_PLAID_SANDBOX=false`; production defaults to exclude) |
 
 ## Recurring Streams
 
