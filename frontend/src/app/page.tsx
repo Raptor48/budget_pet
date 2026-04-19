@@ -189,13 +189,6 @@ function DashboardContent() {
     [byCategory],
   );
 
-  const forecastOutflowCents = useMemo(
-    () => forecastSorted.reduce((s, e) => s + Math.abs(e.amount_cents || 0), 0),
-    [forecastSorted],
-  );
-  const cashflowWarn =
-    netWorth && netWorth.liquid_cents > 0 && forecastOutflowCents > netWorth.liquid_cents * 0.4;
-
   const COMPACT_DEFAULT = 3;
   const visibleForecast = forecastExpanded ? forecastSorted : forecastSorted.slice(0, COMPACT_DEFAULT);
   const visiblePriceChanges = priceChangesExpanded ? priceChanges : priceChanges.slice(0, COMPACT_DEFAULT);
@@ -352,19 +345,6 @@ function DashboardContent() {
           </Card>
         </Link>
       </div>
-
-      {/* TODO(V2.1 Phase 4): if we introduce a `liquidity_buffer` insight card,
-         fold this standalone warn into the feed so we don't double-surface. */}
-      {cashflowWarn && (
-        <Card className="border-amber-500/40 bg-amber-500/5">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Cash flow heads-up</CardTitle>
-            <CardDescription>
-              Upcoming bills in the next 30 days are a large share of your cash & bank balances. Review the forecast and recurring payments.
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      )}
 
       {/* Row 2 — Spending pie (2/3) + Budget compact (1/3) */}
       <div className="grid gap-6 lg:grid-cols-3">
