@@ -209,7 +209,13 @@ export const transactionsApi = {
 
   update: (
     id: number,
-    data: { category_id?: number | null; user_note?: string; merchant_name?: string; is_private?: boolean },
+    data: {
+      category_id?: number | null;
+      user_note?: string;
+      merchant_name?: string;
+      is_private?: boolean;
+      is_internal_transfer?: boolean;
+    },
   ): Promise<Transaction> =>
     apiRequest(`/api/transactions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
 
@@ -515,6 +521,42 @@ export const appSettingsApi = {
     apiRequest('/api/settings/app', {
       method: 'PATCH',
       body: JSON.stringify(patch),
+    }),
+};
+
+// ---------------------------------------------------------------------------
+// Internal-transfer settings (family-wide names list + rescan)
+// ---------------------------------------------------------------------------
+
+export interface InternalTransferSettings {
+  names: string[];
+  normalized_names?: string[] | null;
+}
+
+export type InternalTransferRescanHorizon = 'last_90_days' | 'all_time';
+
+export interface InternalTransferRescanResult {
+  rows_updated: number;
+  horizon: InternalTransferRescanHorizon;
+  configured_names_count: number;
+}
+
+export const internalTransfersApi = {
+  get: (): Promise<InternalTransferSettings> =>
+    apiRequest('/api/settings/internal-transfers'),
+
+  update: (names: string[]): Promise<InternalTransferSettings> =>
+    apiRequest('/api/settings/internal-transfers', {
+      method: 'PUT',
+      body: JSON.stringify({ names }),
+    }),
+
+  rescan: (
+    horizon: InternalTransferRescanHorizon = 'last_90_days',
+  ): Promise<InternalTransferRescanResult> =>
+    apiRequest('/api/settings/internal-transfers/rescan', {
+      method: 'POST',
+      body: JSON.stringify({ horizon }),
     }),
 };
 

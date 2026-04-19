@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { format } from "date-fns";
-import { CreditCard, EyeOff, Loader2, Trash2 } from "lucide-react";
+import { ArrowLeftRight, CreditCard, EyeOff, Loader2, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -133,6 +133,15 @@ export function TransactionMobileCard({
             <span className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/10 px-1.5 py-0 text-[9px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-400">
               <EyeOff className="size-2.5" aria-hidden />
               Private
+            </span>
+          ) : null}
+          {tx.is_internal_transfer ? (
+            <span
+              className="inline-flex items-center gap-0.5 rounded-full bg-sky-500/10 px-1.5 py-0 text-[9px] font-medium uppercase tracking-wide text-sky-700 dark:text-sky-400"
+              title="Intra-family transfer — excluded from income/expense totals."
+            >
+              <ArrowLeftRight className="size-2.5" aria-hidden />
+              Internal
             </span>
           ) : null}
           {onDeleteCash ? (

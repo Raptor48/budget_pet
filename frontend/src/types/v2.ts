@@ -189,6 +189,18 @@ export interface Transaction {
   payment_meta: PaymentMeta | null;
   is_pending: boolean;
   is_private: boolean;
+  /**
+   * True when the transaction is a transfer between family members (e.g.
+   * Zelle between spouses). Excluded from every income/expense aggregate
+   * across the app, so the same dollar isn't counted twice.
+   */
+  is_internal_transfer: boolean;
+  /**
+   * True when a user explicitly toggled `is_internal_transfer`. The auto
+   * re-classifier (run after editing the names list or via explicit rescan)
+   * skips rows with this flag so manual decisions are preserved.
+   */
+  is_internal_transfer_manual: boolean;
   /** plaid | plaid_sandbox | manual | cash */
   source: string;
   user_note: string | null;

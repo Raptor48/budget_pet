@@ -52,6 +52,21 @@ def _income_predicate(alias: str = "t") -> str:
     )
 
 
+def _not_internal_transfer(alias: str = "t") -> str:
+    """
+    Canonical SQL fragment "transaction is NOT an internal transfer".
+
+    Keeps every income/expense aggregate aligned on a single definition,
+    so when the user configures a counterparty (e.g. a spouse) as an
+    internal-transfer source via ``/api/settings/internal-transfers`` the
+    exclusion is applied uniformly to Cash Flow, Financial Health, Income
+    tab, By Category, Top Merchants and Budgets. Returns a standalone
+    boolean predicate — callers prepend the ``AND`` they need.
+    """
+    prefix = f"{alias}." if alias else ""
+    return f"NOT {prefix}is_internal_transfer"
+
+
 class ReportsRepository:
     async def _pool(self):
         return await get_pool()
@@ -73,6 +88,7 @@ class ReportsRepository:
                 FROM transactions t
                 WHERE COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
                   AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
+                  AND {_not_internal_transfer("t")}
                   {_sandbox_tx_filter("t")}
                   {private_filter}
                 """,
@@ -104,6 +120,7 @@ class ReportsRepository:
                     COALESCE(SUM(CASE WHEN t.amount_cents > 0 THEN t.amount_cents ELSE 0 END), 0) AS expenses_cents
                 FROM transactions t
                 WHERE COALESCE(t.authorized_date, t.date) >= (CURRENT_DATE - INTERVAL '1 month' * $1)::date
+                  AND {_not_internal_transfer("t")}
                   {_sandbox_tx_filter("t")}
                   {private_filter}
                 GROUP BY month
@@ -172,6 +189,7 @@ class ReportsRepository:
                     SELECT t.category_id, SUM(t.amount_cents) AS amount_cents
                     FROM transactions t
                     WHERE t.amount_cents > 0
+                      AND {_not_internal_transfer("t")}
                       AND COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
                       AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
                       AND NOT EXISTS (SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id)
@@ -186,6 +204,7 @@ class ReportsRepository:
                     FROM transaction_splits ts
                     JOIN transactions t ON t.id = ts.parent_transaction_id
                     WHERE t.amount_cents > 0
+                      AND {_not_internal_transfer("t")}
                       AND COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
                       AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
                       {_sandbox_tx_filter("t")}
@@ -260,7 +279,7 @@ class ReportsRepository:
         self, month: Optional[str] = None, tag_id: Optional[int] = None, viewer_user_id: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         pool = await self._pool()
-        conditions = ["t.amount_cents > 0"]
+        conditions = ["t.amount_cents > 0", _not_internal_transfer("t")]
         params: List[Any] = []
         idx = 1
         if month:
@@ -313,6 +332,7 @@ class ReportsRepository:
         pool = await self._pool()
         conditions = [
             "t.amount_cents > 0",
+            _not_internal_transfer("t"),
             "t.merchant_name IS NOT NULL",
         ]
         params: List[Any] = []
@@ -423,6 +443,7 @@ class ReportsRepository:
                 WHERE COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
                   AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
                   AND {_income_predicate("t")}
+                  AND {_not_internal_transfer("t")}
                   {_sandbox_tx_filter("t")}
                   {private_filter}
                 GROUP BY a.user_id, u.username, t.category_id, c.name, c.color
@@ -570,6 +591,7 @@ class ReportsRepository:
                         SUM(ABS(amount_cents)) AS monthly_total
                     FROM transactions
                     WHERE {_income_predicate("")}
+                      AND {_not_internal_transfer("")}
                       AND COALESCE(authorized_date, date) >= (DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '3 months')
                       AND COALESCE(authorized_date, date) < DATE_TRUNC('month', CURRENT_DATE)
                       {_sandbox_tx_filter_no_alias()}
@@ -592,6 +614,7 @@ class ReportsRepository:
                 SELECT COALESCE(SUM(amount_cents), 0)
                 FROM transactions
                 WHERE amount_cents > 0
+                  AND {_not_internal_transfer("")}
                   AND COALESCE(authorized_date, date) >= ($1 || '-01')::date
                   AND COALESCE(authorized_date, date) < (($1 || '-01')::date + INTERVAL '1 month')
                   {_sandbox_tx_filter_no_alias()}
@@ -615,6 +638,7 @@ class ReportsRepository:
                         SUM(amount_cents) AS monthly_total
                     FROM transactions
                     WHERE amount_cents > 0
+                      AND {_not_internal_transfer("")}
                       AND COALESCE(authorized_date, date) >= (CURRENT_DATE - INTERVAL '6 months')
                       {_sandbox_tx_filter_no_alias()}
                       {avg_filter}

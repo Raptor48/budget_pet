@@ -141,6 +141,8 @@ class TransactionsRepository:
                        NULL::jsonb AS payment_meta,
                        t.is_pending,
                        t.is_private,
+                       t.is_internal_transfer,
+                       t.is_internal_transfer_manual,
                        t.source,
                        t.user_note,
                        t.display_title,
@@ -439,10 +441,23 @@ class TransactionsRepository:
     async def update_transaction(
         self, transaction_id: int, data: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        allowed = {"category_id", "user_note", "merchant_name", "is_private"}
+        allowed = {
+            "category_id",
+            "user_note",
+            "merchant_name",
+            "is_private",
+            "is_internal_transfer",
+        }
         fields = {k: v for k, v in data.items() if k in allowed}
         if not fields:
             return await self.get_transaction(transaction_id)
+        # When the user explicitly sets is_internal_transfer, also flip the
+        # `_manual` sentinel so the auto re-classifier (triggered on names
+        # list edits / explicit /rescan) never overwrites their choice.
+        # Keeping this inside the repo means every PATCH path — web and any
+        # future bot/CLI — gets the same protection for free.
+        if "is_internal_transfer" in fields:
+            fields["is_internal_transfer_manual"] = True
         set_clause = ", ".join(f"{col} = ${i + 2}" for i, col in enumerate(fields.keys()))
         pool = await self._pool()
         async with pool.acquire() as conn:

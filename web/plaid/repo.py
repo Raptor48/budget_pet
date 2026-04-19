@@ -433,6 +433,16 @@ class PlaidRepository:
         imported = 0
 
         async with pool.acquire() as conn:
+            # Load the internal-transfer names list once per sync batch —
+            # these are family-wide so every row we classify uses the same
+            # snapshot. Cheap query; we don't reach into Python settings
+            # because the list can be edited between syncs.
+            from web.plaid.internal_transfer import (
+                classify_internal_transfer,
+                get_configured_names,
+            )
+            internal_names = await get_configured_names(conn)
+
             for txn in plaid_transactions:
                 raw = txn.to_dict() if hasattr(txn, "to_dict") else txn
                 plaid_account_id = raw.get("account_id", "")
@@ -500,6 +510,36 @@ class PlaidRepository:
                 if carry_category_id is not None and rule_cat is None:
                     data["category_id"] = carry_category_id
 
+                # Classify as internal transfer (Zelle between family members
+                # etc.). Only set the flag on INSERT; existing rows keep
+                # whatever the user explicitly chose. If the pending twin had
+                # a user-flagged value, propagate it so the posted row
+                # inherits the manual decision.
+                auto_internal = classify_internal_transfer(
+                    pfc_primary=data.get("pfc_primary"),
+                    merchant_name=data.get("merchant_name"),
+                    name=data.get("name"),
+                    counterparties=data.get("counterparties"),
+                    normalized_names=internal_names,
+                )
+                carry_internal = False
+                carry_internal_manual = False
+                if pending_ref:
+                    pending_flags = await conn.fetchrow(
+                        """
+                        SELECT is_internal_transfer, is_internal_transfer_manual
+                        FROM transactions
+                        WHERE plaid_transaction_id = $1
+                        """,
+                        pending_ref,
+                    )
+                    if pending_flags is not None:
+                        carry_internal = bool(pending_flags["is_internal_transfer"])
+                        carry_internal_manual = bool(
+                            pending_flags["is_internal_transfer_manual"]
+                        )
+                is_internal_value = carry_internal if carry_internal_manual else auto_internal
+
                 await conn.execute(
                     """
                     INSERT INTO transactions (
@@ -510,11 +550,12 @@ class PlaidRepository:
                         pfc_primary, pfc_detailed, pfc_confidence, pfc_icon_url,
                         counterparties, location, payment_meta,
                         is_pending, source, display_title,
-                        pending_transaction_id, is_private, user_note
+                        pending_transaction_id, is_private, user_note,
+                        is_internal_transfer, is_internal_transfer_manual
                     ) VALUES (
                         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
                         $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,
-                        $26,$27,$28
+                        $26,$27,$28,$29,$30
                     )
                     ON CONFLICT (plaid_transaction_id) DO UPDATE SET
                         account_id          = EXCLUDED.account_id,
@@ -541,6 +582,11 @@ class PlaidRepository:
                         source              = EXCLUDED.source,
                         display_title       = EXCLUDED.display_title,
                         pending_transaction_id = EXCLUDED.pending_transaction_id,
+                        -- Preserve the internal-transfer flag on updates so
+                        -- a manual user toggle (or the first-time auto
+                        -- classification from INSERT) survives subsequent
+                        -- Plaid /transactions/sync calls that refresh the
+                        -- row's other fields.
                         updated_at          = NOW()
                     """,
                     data.get("plaid_transaction_id"),
@@ -571,6 +617,8 @@ class PlaidRepository:
                     pending_ref,
                     carry_is_private,
                     carry_user_note,
+                    is_internal_value,
+                    carry_internal_manual,
                 )
                 imported += 1
 

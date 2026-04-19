@@ -140,13 +140,23 @@ class TestPlaidRepository:
             return "INSERT 0 1"
 
         async def fake_fetchrow(sql, *args):
-            if "FROM transactions" in sql and "plaid_transaction_id = $1" in sql:
+            if "FROM transactions" not in sql or "plaid_transaction_id = $1" not in sql:
+                return None
+            # The pending-twin lookup happens twice during import_transactions:
+            # once for the carryover fields (is_private / user_note /
+            # category_id) and once for the internal-transfer flags. Both
+            # SELECTs use plaid_transaction_id = $1, so distinguish by the
+            # column list the query requested.
+            if "is_internal_transfer" in sql:
                 return {
-                    "is_private": True,
-                    "user_note": "honeymoon surprise",
-                    "category_id": 77,
+                    "is_internal_transfer": False,
+                    "is_internal_transfer_manual": False,
                 }
-            return None
+            return {
+                "is_private": True,
+                "user_note": "honeymoon surprise",
+                "category_id": 77,
+            }
 
         conn.execute = AsyncMock(side_effect=fake_execute)
         conn.fetchrow = AsyncMock(side_effect=fake_fetchrow)
@@ -170,10 +180,14 @@ class TestPlaidRepository:
         assert count == 1
         assert executed_args, "expected an INSERT"
         args = executed_args[0]
-        # Column order in the INSERT ends with ...pending_transaction_id, is_private, user_note.
-        assert args[-3] == "txn-pending-1"
-        assert args[-2] is True, "is_private must be carried from the pending twin"
-        assert args[-1] == "honeymoon surprise", "user_note must be carried forward"
+        # Column order ends with:
+        #   ... pending_transaction_id, is_private, user_note,
+        #       is_internal_transfer, is_internal_transfer_manual
+        assert args[-5] == "txn-pending-1"
+        assert args[-4] is True, "is_private must be carried from the pending twin"
+        assert args[-3] == "honeymoon surprise", "user_note must be carried forward"
+        assert args[-2] is False, "internal-transfer flag stays False when twin wasn't flagged"
+        assert args[-1] is False, "manual-override sentinel stays False"
         # Category from pending twin should win when no merchant rule applied.
         assert args[2] == 77
 
@@ -202,9 +216,13 @@ class TestPlaidRepository:
             await repo.import_transactions([fresh], {"acct-1": 1}, source="plaid")
 
         args = executed_args[0]
+        # No pending_transaction_id, defaults for is_private/user_note/
+        # is_internal_transfer/is_internal_transfer_manual.
+        assert args[-5] is None
+        assert args[-4] is False
         assert args[-3] is None
         assert args[-2] is False
-        assert args[-1] is None
+        assert args[-1] is False
 
     @pytest.mark.asyncio
     async def test_delete_removed_transactions(self, repo):

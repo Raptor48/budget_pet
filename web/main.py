@@ -68,6 +68,7 @@ from web.piggy import router as piggy_router  # noqa: E402
 from web.merchant_rules import merchant_rules_router  # noqa: E402
 from web.insights import insights_router  # noqa: E402
 from web.app_settings import app_settings_router  # noqa: E402
+from web.internal_transfers import internal_transfers_router  # noqa: E402
 from web.audit import audit_router  # noqa: E402
 
 app.include_router(auth_router)
@@ -84,6 +85,7 @@ app.include_router(piggy_router)
 app.include_router(merchant_rules_router)
 app.include_router(insights_router)
 app.include_router(app_settings_router)
+app.include_router(internal_transfers_router)
 app.include_router(audit_router)
 
 # ---------------------------------------------------------------------------
