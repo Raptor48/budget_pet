@@ -1812,8 +1812,7 @@ function FragmentRow({
         className={cn(
           "cursor-pointer transition-[box-shadow] duration-300",
           highlight && "ring-2 ring-primary ring-offset-2 ring-offset-background",
-          tx.is_private &&
-            "relative bg-amber-500/[0.04] before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:border-l-2 before:border-dashed before:border-amber-500/60",
+          tx.is_private && "bg-muted/30",
         )}
         onClick={onRowClick}
       >
@@ -1842,7 +1841,7 @@ function FragmentRow({
                 <TooltipProvider delayDuration={200}>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-400">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-muted/70 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                         <EyeOff className="size-3" />
                         Private
                       </span>
