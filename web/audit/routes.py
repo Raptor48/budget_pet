@@ -1,12 +1,22 @@
 """FastAPI routes for the audit log."""
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from .models import AuditEntry, AuditListResponse
 from .repo import get_audit_repo
+from .service import record as audit_record
 
 router = APIRouter(prefix="/api/audit", tags=["audit"])
+
+
+def _require_owner(request: Request) -> dict:
+    user = getattr(request.state, "user", None) or {}
+    if user.get("id") is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if not user.get("is_owner"):
+        raise HTTPException(status_code=403, detail="Owner role required")
+    return user
 
 
 @router.get("", response_model=AuditListResponse)
@@ -44,3 +54,46 @@ async def list_event_types():
         return await repo.event_types()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.delete("")
+async def clear_audit_log(
+    request: Request,
+    category: Optional[str] = Query(
+        None,
+        description=(
+            "Optional namespace filter — e.g. 'plaid', 'auth', 'settings'. "
+            "Deletes only rows whose event_type starts with 'category.'."
+        ),
+    ),
+    before_id: Optional[int] = Query(
+        None,
+        ge=1,
+        description=(
+            "Optional cursor; only rows with ``id < before_id`` are deleted. "
+            "Use this to wipe older pages while keeping the latest ones."
+        ),
+    ),
+):
+    """Owner-only. Delete audit rows matching the filter.
+
+    After the delete we write one final ``audit.log_cleared`` row so
+    there's always a breadcrumb pointing at who wiped the log, how many
+    rows were removed, and which filter they used.
+    """
+    user = _require_owner(request)
+    repo = get_audit_repo()
+    prefix = f"{category}." if category else None
+    deleted = await repo.delete(event_prefix=prefix, before_id=before_id)
+
+    await audit_record(
+        "audit.log_cleared",
+        source="manual",
+        request=request,
+        metadata={
+            "rows_deleted": deleted,
+            "category": category,
+            "before_id": before_id,
+        },
+    )
+    return {"deleted": deleted, "cleared_by": user.get("username")}

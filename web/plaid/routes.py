@@ -306,6 +306,32 @@ async def get_sync_log():
     return [PlaidSyncLogEntry(**e) for e in entries]
 
 
+@router.delete("/sync/log")
+async def clear_sync_log(request: Request):
+    """Owner-only. Wipe plaid_sync_log and write an audit breadcrumb.
+
+    The sync log is a rolling per-item runs history (errors, counts). It
+    can accumulate rows that look alarming to family members long after
+    they've been resolved — giving the owner a visible "clear" lets them
+    start from a clean slate without needing DB access.
+    """
+    user = getattr(request.state, "user", None) or {}
+    if user.get("id") is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    if not user.get("is_owner"):
+        raise HTTPException(status_code=403, detail="Owner role required")
+
+    repo = get_plaid_repo()
+    deleted = await repo.clear_sync_log()
+    await audit_record(
+        "plaid.sync_log_cleared",
+        source="manual",
+        request=request,
+        metadata={"rows_deleted": deleted},
+    )
+    return {"deleted": deleted, "cleared_by": user.get("username")}
+
+
 @router.delete("/sandbox-data")
 async def delete_sandbox_data(request: Request):
     """

@@ -9,6 +9,17 @@ logger = logging.getLogger(__name__)
 _VALID_SOURCES = {"manual", "scheduler", "webhook", "system"}
 
 
+def _rows_affected(status: str) -> int:
+    """Parse asyncpg ``conn.execute`` command tag (e.g. ``'DELETE 42'``)."""
+    if not status:
+        return 0
+    parts = status.split()
+    if not parts:
+        return 0
+    tail = parts[-1]
+    return int(tail) if tail.isdigit() else 0
+
+
 class AuditRepository:
     async def _pool(self):
         from web.db import get_pool
@@ -106,6 +117,39 @@ class AuditRepository:
                 d["metadata"] = {}
             out.append(d)
         return out
+
+    async def delete(
+        self,
+        *,
+        event_prefix: Optional[str] = None,
+        before_id: Optional[int] = None,
+    ) -> int:
+        """Delete audit rows matching the filter. Returns number deleted.
+
+        ``event_prefix`` matches ``event_type LIKE prefix || '%'`` (same
+        semantics as :meth:`list`). ``before_id`` bounds deletion to rows
+        older than the cursor so callers can keep the latest page visible.
+        With no arguments the whole log is wiped.
+
+        Called from ``DELETE /api/audit`` after owner-only auth; see
+        :mod:`web.audit.routes` for the final audit breadcrumb.
+        """
+        clauses: List[str] = []
+        args: List[Any] = []
+        if event_prefix:
+            args.append(f"{event_prefix}%")
+            clauses.append(f"event_type LIKE ${len(args)}")
+        if before_id is not None:
+            args.append(int(before_id))
+            clauses.append(f"id < ${len(args)}")
+
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        sql = f"DELETE FROM audit_log {where}".rstrip()
+
+        pool = await self._pool()
+        async with pool.acquire() as conn:
+            status = await conn.execute(sql, *args)
+        return _rows_affected(status)
 
     async def event_types(self) -> List[str]:
         pool = await self._pool()
