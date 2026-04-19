@@ -62,6 +62,8 @@ class TransactionOut(BaseModel):
     payment_meta: Optional[Any] = None
     is_pending: bool = False
     is_private: bool = False
+    is_internal_transfer: bool = False
+    is_internal_transfer_manual: bool = False
     source: str = "manual"
     user_note: Optional[str] = None
     created_at: Optional[DateTime] = None
@@ -107,6 +109,7 @@ class TransactionUpdate(BaseModel):
     user_note: Optional[str] = None
     merchant_name: Optional[str] = None
     is_private: Optional[bool] = None
+    is_internal_transfer: Optional[bool] = None
 
 
 class SplitCreate(BaseModel):

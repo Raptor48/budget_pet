@@ -165,6 +165,47 @@ payment_meta           → payment_meta (JSONB)
 pending                → is_pending
 ```
 
+## Intra-family transfer classification
+
+Plaid `TRANSFER_IN` / `TRANSFER_OUT` rows (Zelle, ACH, wire, P2P) can
+represent money moving between family members rather than real income or
+expense. Without special handling this double-counts: the sender's
+`TRANSFER_OUT` looks like an expense, and the recipient then spends the
+same $100 at a store, producing a second, independent expense.
+
+The solution is a family-wide list of counterparty names stored in
+`app_settings.internal_transfer_names` (managed via Settings →
+Internal transfers, `PUT /api/settings/internal-transfers`). During
+`PlaidRepository.import_transactions`:
+
+1. The list is loaded once per sync batch (see
+   `web/plaid/internal_transfer.py::get_configured_names`).
+2. For each posted/pending row, `classify_internal_transfer(...)` checks
+   `pfc_primary ∈ {TRANSFER_IN, TRANSFER_OUT}` **and** whether any
+   configured name (case-insensitively, with boilerplate like
+   `Zelle payment from` stripped) appears in `merchant_name`, `name`, or
+   `counterparties[*].name`.
+3. Positive matches set `transactions.is_internal_transfer = TRUE` on
+   INSERT. The `ON CONFLICT … DO UPDATE` clause deliberately does **not**
+   touch `is_internal_transfer` or `is_internal_transfer_manual` — sync
+   never undoes a manual or historical decision.
+4. When a pending twin is resolved (`pending_transaction_id`), both
+   internal-transfer columns are copied from it, so a user flag made on
+   the pending row survives the swap to posted.
+
+Retroactive re-classification happens in two places:
+
+* `PUT /api/settings/internal-transfers` auto-rescans the last 90 days
+  so a newly added name applies without a second button press.
+* `POST /api/settings/internal-transfers/rescan` with
+  `horizon="all_time"` covers the full history on demand.
+
+Both paths go through `rescan_internal_transfers(...)`, which skips any
+row where `is_internal_transfer_manual = TRUE`. Every income/expense
+aggregate in `web/reports/repo.py` and `web/budgets/repo.py` filters
+`is_internal_transfer = FALSE` via the shared `_not_internal_transfer`
+SQL fragment.
+
 ## PFC Category Auto-Mapping
 
 There is **no** separate Plaid endpoint for the full PFC catalog; taxonomy reference is Plaid’s [CSV](https://plaid.com/documents/pfc-taxonomy-all.csv). Do **not** use deprecated **`/categories/get`** for PFC (that endpoint is for legacy `category` / `category_id` only).

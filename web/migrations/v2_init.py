@@ -346,7 +346,22 @@ TRANSACTIONS_COLUMNS = [
     # flags (is_private, user_note) from the pending row before it is removed.
     "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS pending_transaction_id TEXT",
     "CREATE INDEX IF NOT EXISTS idx_transactions_pending_transaction_id ON transactions(pending_transaction_id) WHERE pending_transaction_id IS NOT NULL",
+    # Internal-transfer flag: TRUE when the transaction is a payment between
+    # family members (e.g. Zelle spouse-to-spouse). Excluded from every
+    # income/expense aggregate so the same dollar isn't counted twice.
+    # `_manual` is TRUE when the user set the flag explicitly — the auto
+    # re-classifier never overrides a manual setting.
+    "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS is_internal_transfer BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS is_internal_transfer_manual BOOLEAN NOT NULL DEFAULT FALSE",
+    "CREATE INDEX IF NOT EXISTS idx_transactions_is_internal_transfer ON transactions(is_internal_transfer) WHERE is_internal_transfer = TRUE",
 ]
+
+APP_SETTINGS_INTERNAL_TRANSFER_COLUMN = (
+    # TEXT[] so we can store a flat list of counterparty names (e.g. "ANASTASIIA STOLPOVSKAIA")
+    # that should be treated as internal transfers when they appear on a
+    # TRANSFER_IN/TRANSFER_OUT transaction. Family-wide setting; one list per family.
+    "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS internal_transfer_names TEXT[] NOT NULL DEFAULT '{}'::TEXT[]"
+)
 
 AUDIT_LOG_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at DESC)",
@@ -369,6 +384,7 @@ ALL_STATEMENTS = [
     CREATE_APP_SETTINGS,
     ALTER_APP_SETTINGS_WEBHOOKS,
     ALTER_APP_SETTINGS_FREQUENCY,
+    APP_SETTINGS_INTERNAL_TRANSFER_COLUMN,
     BACKFILL_APP_SETTINGS_FREQUENCY,
     DROP_APP_SETTINGS_ENABLED,
     ADD_APP_SETTINGS_FREQUENCY_CHK,

@@ -140,7 +140,9 @@ class BudgetsRepository:
         Actual spending uses splits if they exist, otherwise uses transaction.category_id.
         Only counts expenses (amount_cents > 0). Excludes ``plaid_sandbox`` when
         ``reports_include_plaid_sandbox()`` is false. Excludes private transactions
-        from other users when viewer_user_id is provided.
+        from other users when viewer_user_id is provided. Excludes rows flagged as
+        internal transfers (``is_internal_transfer = TRUE``) so spouse-to-spouse
+        Zelle doesn't inflate the "spent" total.
         """
         pool = await self._pool()
         sandbox_ex = "" if reports_include_plaid_sandbox() else "AND t.source != 'plaid_sandbox'"
@@ -165,6 +167,7 @@ class BudgetsRepository:
                     LEFT JOIN categories c ON c.id = t.category_id
                     WHERE
                         t.amount_cents > 0
+                        AND NOT t.is_internal_transfer
                         {sandbox_ex}
                         {private_ex}
                         AND COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
@@ -186,6 +189,7 @@ class BudgetsRepository:
                     LEFT JOIN categories sc ON sc.id = ts.category_id
                     WHERE
                         t.amount_cents > 0
+                        AND NOT t.is_internal_transfer
                         {sandbox_ex}
                         {private_ex}
                         AND COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date

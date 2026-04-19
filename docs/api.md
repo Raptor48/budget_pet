@@ -72,7 +72,7 @@ Matching SQL coalesces `NULLIF(merchant_name, '')` onto `transactions.display_ti
 | GET | /api/transactions/date-range | Earliest and latest transaction dates visible to the caller (`{ min_month, max_month, earliest, latest }`). Used by the shared month/year picker to bound year and month options. Same auth + privacy + sandbox filters as `GET /api/transactions`. |
 | POST | /api/transactions | Create **cash** transaction on the user's Cash wallet (`source=cash`); body: `amount_cents`, `date`, `name`, optional `category_id`, `authorized_date`, `merchant_name`, `user_note`. Server sets `payment_channel=other`, `currency=USD`, `is_pending=false`. |
 | GET | /api/transactions/{id} | Get transaction with tags and splits (returns 404 when the row is `is_private` and the caller is not the owner) |
-| PATCH | /api/transactions/{id} | Update `category_id`, `user_note`, `merchant_name`, `is_private` |
+| PATCH | /api/transactions/{id} | Update `category_id`, `user_note`, `merchant_name`, `is_private`, `is_internal_transfer`. Patching `is_internal_transfer` also flips the internal `is_internal_transfer_manual` sentinel — a subsequent auto-rescan will never overwrite that explicit choice. |
 | DELETE | /api/transactions/{id} | Delete non-Plaid rows (`cash`, `manual`, etc.); reverses Cash wallet balance for `source=cash` |
 | POST | /api/transactions/{id}/tags/{tag_id} | Add tag |
 | DELETE | /api/transactions/{id}/tags/{tag_id} | Remove tag |
@@ -118,6 +118,13 @@ production approval; it returns an empty list when the product is off.
 All report endpoints that aggregate transactions respect the `is_private`
 filter: private rows owned by someone else are dropped before aggregation,
 so the monthly totals never reveal a gift someone else is planning.
+
+Every income/expense aggregate additionally excludes transactions flagged
+`is_internal_transfer = TRUE` (Zelle-style intra-family transfers). The
+`ReportsRepository._not_internal_transfer(...)` helper is the single SQL
+fragment that gates this across Cash flow, By category, By tag, Merchants,
+Income breakdown and Financial health. See `Settings → Internal transfers`
+below for how rows get flagged.
 
 | Method | Path | Description |
 |---|---|---|
@@ -187,6 +194,26 @@ settings. Two settings are currently stored here:
 |---|---|---|
 | GET | /api/settings/app | Current `{ frequency, hour_utc, minute_utc, webhooks_enabled, webhook_url_configured, updated_at, updated_by_username, next_run_at, webhook_reconcile }`. `frequency` is one of `off` / `daily` / `weekly` / `semimonthly` / `monthly` — anchor days are fixed (`weekly` = Sunday, `semimonthly` = 1st + 15th, `monthly` = 1st). `next_run_at` is null when `frequency === "off"`. `webhook_url_configured` mirrors the `PLAID_WEBHOOK_URL` env var — when false, the UI must prevent re-enabling webhooks. `webhook_reconcile` is null on GET. |
 | PATCH | /api/settings/app | Partial update. Any of `frequency` (enum above), `hour_utc` (0-23), `minute_utc` (0-59), `webhooks_enabled`. Reschedules the APScheduler job immediately (adds, reschedules, or removes it depending on the new frequency), pushes webhook changes to every Plaid item when `webhooks_enabled` flipped, and writes a `settings.autosync_updated` row to `audit_log` (the metadata includes both the frequency and the reconcile summary). Responds with the same shape as GET plus a populated `webhook_reconcile` object `{ updated, failed, total, errors }` when the flag flipped. |
+
+## Internal transfers (Settings)
+
+Family-wide list of counterparty names that marks Plaid `TRANSFER_IN` /
+`TRANSFER_OUT` transactions as intra-family transfers. Flagged rows are
+excluded from every income/expense aggregate so that, for example, a Zelle
+from spouse A to spouse B is not double-counted (sender's `TRANSFER_OUT`
+plus whatever the recipient actually spends with that money).
+
+Matching is case-insensitive and tolerates bank boilerplate (`Zelle payment
+from J DOE`, `ACH credit J DOE`, raw counterparty names from the JSONB
+blob — see `web/plaid/internal_transfer.py::normalize_name`). Manual user
+toggles set `transactions.is_internal_transfer_manual = TRUE`, which
+protects them from future auto-rescans.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | /api/settings/internal-transfers | Current `{ names: string[], normalized_names: string[] }`. The normalized list is an echo of how the classifier sees the raw values (useful for debugging). |
+| PUT | /api/settings/internal-transfers | Replace the full names list (`{ names: string[] }`). Sanitizes entries (trims, dedupes on uppercase) and auto-rescans the last 90 days so the change is visible immediately. Writes a `settings.internal_transfer_names_updated` audit row. |
+| POST | /api/settings/internal-transfers/rescan | Re-run the classifier over the last 90 days (`horizon: "last_90_days"`, default) or the full history (`horizon: "all_time"`). Returns `{ rows_updated, horizon, configured_names_count }` and writes a `settings.internal_transfer_rescan` audit row. Manual flags are always preserved. |
 
 ## Audit log
 

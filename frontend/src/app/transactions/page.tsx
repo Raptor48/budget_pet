@@ -13,10 +13,11 @@ import {
 import { usePathname, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, isValid } from "date-fns";
-import { Columns2, CreditCard, Download, EyeOff, Eye, Loader2, Store, Trash2, Wifi, CircleDot } from "lucide-react";
+import { ArrowLeftRight, Columns2, CreditCard, Download, EyeOff, Eye, Loader2, Settings, Store, Trash2, Wifi, CircleDot } from "lucide-react";
 
 import { AddCashTransactionDialog } from "@/app/transactions/_components/add-cash-transaction-dialog";
 import { CreateRuleFromTransactionButton } from "@/app/transactions/_components/create-rule-from-transaction-button";
+import { InternalTransferSettingsDialog } from "@/app/transactions/_components/internal-transfer-settings-dialog";
 import { TransactionMobileCard } from "@/app/transactions/_components/transaction-mobile-card";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Badge } from "@/components/ui/badge";
@@ -363,6 +364,8 @@ function TransactionDetailsDialog({
   isDeletingCash,
   onTogglePrivate,
   isTogglingPrivate,
+  onToggleInternalTransfer,
+  isTogglingInternalTransfer,
 }: {
   transactionId: number | null;
   open: boolean;
@@ -374,6 +377,8 @@ function TransactionDetailsDialog({
   isDeletingCash?: boolean;
   onTogglePrivate?: (id: number, isPrivate: boolean) => void;
   isTogglingPrivate?: boolean;
+  onToggleInternalTransfer?: (id: number, isInternalTransfer: boolean) => void;
+  isTogglingInternalTransfer?: boolean;
 }) {
   const [editNote, setEditNote] = useState("");
   const [editCategoryId, setEditCategoryId] = useState(ALL);
@@ -679,6 +684,40 @@ function TransactionDetailsDialog({
                   {transaction.is_private
                     ? "Hidden from other family members."
                     : "Hide the amount from other family members (e.g. a gift)."}
+                </p>
+              </div>
+            ) : null}
+            {transaction && !isLoading && !isError && onToggleInternalTransfer ? (
+              <div className="flex flex-col gap-1">
+                <Button
+                  type="button"
+                  variant={transaction.is_internal_transfer ? "secondary" : "outline"}
+                  className="gap-1.5"
+                  disabled={isTogglingInternalTransfer || isSaving}
+                  onClick={() =>
+                    onToggleInternalTransfer(transaction.id, !transaction.is_internal_transfer)
+                  }
+                  title={
+                    transaction.is_internal_transfer
+                      ? "Treat as regular income/expense"
+                      : "Exclude from income/expense totals"
+                  }
+                >
+                  {isTogglingInternalTransfer ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <ArrowLeftRight className="size-4" />
+                  )}
+                  {transaction.is_internal_transfer
+                    ? "Internal transfer"
+                    : "Mark internal transfer"}
+                </Button>
+                <p className="text-[11px] text-muted-foreground">
+                  {transaction.is_internal_transfer
+                    ? transaction.is_internal_transfer_manual
+                      ? "Manually flagged — excluded from reports."
+                      : "Auto-flagged — excluded from reports."
+                    : "Mark family transfers (e.g. spouse Zelle) to avoid double-counting."}
                 </p>
               </div>
             ) : null}
@@ -1111,6 +1150,7 @@ export default function TransactionsPage() {
   const [splitTx, setSplitTx] = useState<Transaction | null>(null);
   const [splitOpen, setSplitOpen] = useState(false);
   const [addCashOpen, setAddCashOpen] = useState(false);
+  const [internalTransferSettingsOpen, setInternalTransferSettingsOpen] = useState(false);
 
   detailTxIdRef.current = detailTxId;
   splitTxRef.current = splitTx;
@@ -1198,6 +1238,20 @@ export default function TransactionsPage() {
       await queryClient.invalidateQueries({ queryKey: ["transaction", variables.id] });
     },
     onError: onMutationError("Could not update privacy."),
+  });
+
+  const toggleInternalTransferMutation = useMutation({
+    mutationFn: ({ id, is_internal_transfer }: { id: number; is_internal_transfer: boolean }) =>
+      transactionsApi.update(id, { is_internal_transfer }),
+    onSuccess: async (_, variables) => {
+      await queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      await queryClient.invalidateQueries({ queryKey: ["transaction", variables.id] });
+      // Internal-transfer state feeds every income/expense aggregate — refresh
+      // reports and budgets so the change is visible immediately.
+      await queryClient.invalidateQueries({ queryKey: ["reports"] });
+      await queryClient.invalidateQueries({ queryKey: ["budgets"] });
+    },
+    onError: onMutationError("Could not update internal-transfer flag."),
   });
 
   const addTagMutation = useMutation({
@@ -1308,12 +1362,28 @@ export default function TransactionsPage() {
               Review, tag, and categorize imported, cash, and linked account activity.
             </p>
           </div>
-          <Button type="button" className="shrink-0" onClick={() => setAddCashOpen(true)}>
-            Add cash transaction
-          </Button>
+          <div className="flex shrink-0 gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={() => setInternalTransferSettingsOpen(true)}
+              title="Internal-transfer settings"
+              aria-label="Internal-transfer settings"
+            >
+              <Settings className="size-4" />
+            </Button>
+            <Button type="button" onClick={() => setAddCashOpen(true)}>
+              Add cash transaction
+            </Button>
+          </div>
         </div>
 
         <AddCashTransactionDialog open={addCashOpen} onOpenChange={setAddCashOpen} categories={categories} />
+        <InternalTransferSettingsDialog
+          open={internalTransferSettingsOpen}
+          onOpenChange={setInternalTransferSettingsOpen}
+        />
 
         <Card className="border-border/80 shadow-sm">
           <CardHeader className="pb-4">
@@ -1575,6 +1645,17 @@ export default function TransactionsPage() {
             detailTxId != null &&
             togglePrivateMutation.variables?.id === detailTxId
           }
+          onToggleInternalTransfer={(id, isInternalTransfer) =>
+            toggleInternalTransferMutation.mutate({
+              id,
+              is_internal_transfer: isInternalTransfer,
+            })
+          }
+          isTogglingInternalTransfer={
+            toggleInternalTransferMutation.isPending &&
+            detailTxId != null &&
+            toggleInternalTransferMutation.variables?.id === detailTxId
+          }
         />
 
         <SplitTransactionDialog
@@ -1667,6 +1748,23 @@ function FragmentRow({
                     <TooltipContent>
                       <p className="max-w-[240px] text-xs">
                         Only you can see the amount and details. Other family members see this row as hidden.
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ) : null}
+              {tx.is_internal_transfer ? (
+                <TooltipProvider delayDuration={200}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-sky-700 dark:text-sky-400">
+                        <ArrowLeftRight className="size-3" />
+                        Internal
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p className="max-w-[240px] text-xs">
+                        Flagged as an intra-family transfer. Excluded from income and expense totals to avoid double-counting.
                       </p>
                     </TooltipContent>
                   </Tooltip>
