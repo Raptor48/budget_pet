@@ -4,25 +4,16 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { insightsApi, type InsightCard as InsightCardModel } from "@/lib/api";
+import { groupInsightCards } from "@/lib/insights-grouping";
+import {
+  InsightGroupCard,
+  type InsightActionHandlers,
+} from "@/components/insights/insight-group-card";
 import { onMutationError } from "@/lib/notify";
-import { cn } from "@/lib/utils";
-import { ArrowLeft, BellOff, EyeOff, Sparkles, Undo2 } from "lucide-react";
-
-function severityStyles(sev: string) {
-  if (sev === "warn")
-    return "border-amber-500/40 bg-amber-500/5";
-  return "border-border/80 bg-card";
-}
+import { ArrowLeft, Sparkles } from "lucide-react";
 
 export default function InsightsPage() {
   const queryClient = useQueryClient();
@@ -86,6 +77,15 @@ export default function InsightsPage() {
   }, [feedQuery.isLoading, feedQuery.isError]);
 
   const data = feedQuery.data;
+  const groups = groupInsightCards(data?.cards);
+  const handlers: InsightActionHandlers = {
+    onSnooze: handleSnooze,
+    onDismiss: (card) => dismissMutation.mutate(card.dedupe_key),
+    onUnhide: (card) => unhideMutation.mutate(card.dedupe_key),
+    isSnoozing: snoozeMutation.isPending,
+    isDismissing: dismissMutation.isPending,
+    isUnhiding: unhideMutation.isPending,
+  };
 
   return (
     <AppLayout>
@@ -153,98 +153,13 @@ export default function InsightsPage() {
           </Card>
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
-            {data?.cards?.map((card, i) => {
-              const isHidden =
-                card.user_state?.dismissed === true ||
-                (!!card.user_state?.snoozed_until &&
-                  new Date(card.user_state.snoozed_until) > new Date());
-              return (
-                <Card
-                  key={card.dedupe_key ?? `${card.type}-${i}`}
-                  className={cn(
-                    "overflow-hidden transition-shadow duration-300 hover:shadow-md",
-                    severityStyles(card.severity),
-                    isHidden && "opacity-60",
-                  )}
-                >
-                  <CardHeader className="pb-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <CardTitle className="flex items-center gap-2 text-base">
-                        <Sparkles className="size-4 shrink-0 text-primary" />
-                        {card.title}
-                        {card.is_new && !isHidden && (
-                          <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
-                            NEW
-                          </Badge>
-                        )}
-                      </CardTitle>
-                      <Badge
-                        variant={card.severity === "warn" ? "destructive" : "secondary"}
-                        className="shrink-0 capitalize"
-                      >
-                        {card.severity}
-                      </Badge>
-                    </div>
-                    <CardDescription className="text-foreground/90 font-medium">
-                      {card.summary}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {card.detail && (
-                      <p className="text-muted-foreground text-sm leading-relaxed">
-                        {card.detail}
-                      </p>
-                    )}
-                    <div className="flex flex-wrap items-center gap-2">
-                      {card.action_url && card.action_label && (
-                        <Button asChild size="sm" variant="outline">
-                          <Link href={card.action_url}>{card.action_label}</Link>
-                        </Button>
-                      )}
-                      {isHidden ? (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => unhideMutation.mutate(card.dedupe_key)}
-                          disabled={unhideMutation.isPending}
-                        >
-                          <Undo2 className="mr-1 size-3.5" />
-                          Unhide
-                        </Button>
-                      ) : (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleSnooze(card, 7)}
-                            disabled={snoozeMutation.isPending}
-                            title="Hide for 7 days"
-                          >
-                            <BellOff className="mr-1 size-3.5" />
-                            Snooze 7d
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => dismissMutation.mutate(card.dedupe_key)}
-                            disabled={dismissMutation.isPending}
-                            title="Dismiss this alert"
-                          >
-                            <EyeOff className="mr-1 size-3.5" />
-                            Dismiss
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                    {card.user_state?.snoozed_until && !card.user_state?.dismissed && (
-                      <p className="text-muted-foreground text-xs">
-                        Snoozed until {new Date(card.user_state.snoozed_until).toLocaleDateString()}
-                      </p>
-                    )}
-                  </CardContent>
-                </Card>
-              );
-            })}
+            {groups.map((group) => (
+              <InsightGroupCard
+                key={group.key}
+                group={group}
+                handlers={handlers}
+              />
+            ))}
           </div>
         )}
       </div>
