@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request  # noqa: F401
 
 from web.accounts.cash_wallet import is_designated_cash_wallet
 
@@ -42,24 +42,85 @@ async def get_account(account_id: int):
     return acct
 
 
+_MANUAL_OVERRIDE_FIELDS = ("credit_limit_cents_manual", "apr_percent_manual")
+
+# Map manual override → Plaid source of truth, for the "bank already
+# reports this" guard.
+_MANUAL_TO_PLAID_SOURCE = {
+    "credit_limit_cents_manual": ("credit_limit_cents", "credit_limit"),
+    "apr_percent_manual": ("apr_percent", "APR"),
+}
+
+
 @router.patch("/{account_id}", response_model=AccountOut)
 async def update_account(account_id: int, body: AccountUpdate, request: Request):
     repo = _repo()
-    payload = body.model_dump(exclude_none=True)
-    if "current_balance_cents" in payload:
+    sent_keys = body.model_fields_set
+    # ``exclude_unset`` preserves explicit ``null`` so users can clear a
+    # manual override. Other fields keep the ``exclude_none`` behaviour
+    # via the ``sent_keys`` filter below.
+    raw = body.model_dump(exclude_unset=True)
+
+    # Build the payload for the repo: everything the client sent, dropping
+    # ``None`` for non-override fields (they historically meant "do not
+    # touch") but keeping it for override fields (where it means "clear").
+    payload: dict = {}
+    for k, v in raw.items():
+        if k in _MANUAL_OVERRIDE_FIELDS:
+            payload[k] = v  # may be None
+        elif v is not None:
+            payload[k] = v
+
+    # Authorize and validate against the current DB state for anything
+    # that needs it. We only load the row when needed.
+    acct: Optional[dict] = None
+    needs_acct = ("current_balance_cents" in sent_keys) or any(
+        k in sent_keys for k in _MANUAL_OVERRIDE_FIELDS
+    )
+    if needs_acct:
         acct = await repo.get_account(account_id)
         if not acct:
             raise HTTPException(status_code=404, detail="Account not found")
+
+    user = getattr(request.state, "user", None) or {}
+    current_id = user.get("id")
+    is_owner = bool(user.get("is_owner"))
+
+    if "current_balance_cents" in sent_keys and acct is not None:
         if not is_designated_cash_wallet(acct):
             raise HTTPException(
                 status_code=422,
                 detail="current_balance_cents can only be set on the designated Cash wallet",
             )
-        user = getattr(request.state, "user", None) or {}
-        current_id = user.get("id")
         owner_id = acct.get("user_id")
         if owner_id is not None and current_id is not None and owner_id != current_id:
             raise HTTPException(status_code=403, detail="Cannot update this account")
+
+    # Manual override guard: same-owner OR platform owner, AND the bank
+    # must not already be reporting the value. Clearing (``None``) skips
+    # the bank guard so users can always walk back a stale manual number.
+    override_keys = [k for k in _MANUAL_OVERRIDE_FIELDS if k in sent_keys]
+    if override_keys and acct is not None:
+        owner_id = acct.get("user_id")
+        if not is_owner and owner_id is not None and owner_id != current_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Cannot update this account",
+            )
+        for key in override_keys:
+            if raw.get(key) is None:
+                continue
+            plaid_col, pretty = _MANUAL_TO_PLAID_SOURCE[key]
+            if acct.get(plaid_col) is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Bank already reports {pretty}; manual override "
+                        "is disabled. Clear the field to fall back to the "
+                        "bank-reported value."
+                    ),
+                )
+
     updated = await repo.update_account(account_id, payload)
     if not updated:
         raise HTTPException(status_code=404, detail="Account not found")
