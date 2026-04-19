@@ -16,6 +16,11 @@ class CategoryOut(BaseModel):
     created_at: datetime
     # NULL = top-level (primary/custom root). Depth is always ≤ 2 in the DB.
     parent_id: Optional[int] = None
+    # Family-wide flag: TRUE means transactions mapped to this category are
+    # treated as income in every income aggregate (Income tab, Cash Flow,
+    # Financial Health, ...). Defaults are seeded from Plaid PFC=INCOME and
+    # can be toggled per family via PATCH /api/categories/{id}.
+    is_income: bool = False
 
     class Config:
         from_attributes = True
@@ -33,3 +38,4 @@ class CategoryUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     color: Optional[str] = None
     icon: Optional[str] = None
+    is_income: Optional[bool] = None

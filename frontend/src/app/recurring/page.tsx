@@ -41,6 +41,7 @@ import { AccountChip } from "@/components/ui/account-chip";
 import { PriceChangeBadge, classifyPriceChange } from "@/components/ui/price-change-badge";
 import { cn } from "@/lib/utils";
 import { normalizeTransactionTitle } from "@/lib/transaction-display";
+import { formatNextRecurringDate, formatRecurringDate } from "@/lib/recurring-dates";
 import type { RecurringStream } from "@/types/v2";
 import { Pencil, Check, X, Plus } from "lucide-react";
 
@@ -357,6 +358,18 @@ export default function RecurringPage() {
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                     <span>{formatFrequency(row.frequency)}</span>
+                    <span className="inline-flex items-center gap-1" title="Last charge date">
+                      <span className="text-[10px] uppercase tracking-wide">Last</span>
+                      <span className="tabular-nums text-foreground/80">
+                        {formatRecurringDate(row.last_date)}
+                      </span>
+                    </span>
+                    <span className="inline-flex items-center gap-1" title="Expected next charge">
+                      <span className="text-[10px] uppercase tracking-wide">Next</span>
+                      <span className="tabular-nums text-foreground/80">
+                        {formatNextRecurringDate(row.last_date, row.frequency)}
+                      </span>
+                    </span>
                     {categoryLabel ? (
                       <span
                         className="inline-flex max-w-[55%] items-center gap-1 truncate"
@@ -429,6 +442,7 @@ export default function RecurringPage() {
             <TableHead>Description</TableHead>
             <TableHead>Charged to</TableHead>
             <TableHead>Frequency</TableHead>
+            <TableHead>Next payment</TableHead>
             <TableHead className="text-right">Avg</TableHead>
             <TableHead className="text-right">Last</TableHead>
             <TableHead>Category</TableHead>
@@ -440,7 +454,7 @@ export default function RecurringPage() {
         <TableBody>
           {rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={9} className="text-muted-foreground h-24 text-center">
+              <TableCell colSpan={10} className="text-muted-foreground h-24 text-center">
                 No recurring streams for this tab.
               </TableCell>
             </TableRow>
@@ -529,6 +543,16 @@ export default function RecurringPage() {
                     />
                   </TableCell>
                   <TableCell>{formatFrequency(row.frequency)}</TableCell>
+                  <TableCell className="whitespace-nowrap tabular-nums">
+                    <div className="flex flex-col leading-tight">
+                      <span>{formatNextRecurringDate(row.last_date, row.frequency)}</span>
+                      {row.last_date ? (
+                        <span className="text-[11px] text-muted-foreground">
+                          last {formatRecurringDate(row.last_date)}
+                        </span>
+                      ) : null}
+                    </div>
+                  </TableCell>
                   <TableCell className="text-right tabular-nums">
                     <PlaidTxnAmount cents={row.average_amount_cents ?? 0} size="inherit" tone="flow" />
                   </TableCell>

@@ -85,7 +85,7 @@ class CategoriesRepository:
     async def update_category(
         self, category_id: int, data: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        allowed = {"name", "color", "icon"}
+        allowed = {"name", "color", "icon", "is_income"}
         fields = {k: v for k, v in data.items() if k in allowed}
         if not fields:
             return await self.get_category(category_id)
@@ -132,15 +132,20 @@ class CategoriesRepository:
         if row:
             return row["id"]
         label = PFC_PRIMARY_LABELS.get(pfc_primary, _pretty_name(pfc_primary, pfc_primary))
+        # Plaid's INCOME primary is the default "what counts as income" bucket;
+        # auto-flag every new INCOME parent so the new Income reports pick it
+        # up without manual setup. Users can still flip the flag off later.
+        is_income = pfc_primary == "INCOME"
         inserted = await conn.fetchrow(
             """
-            INSERT INTO categories (name, plaid_pfc_primary, plaid_pfc_detailed, source)
-            VALUES ($1, $2, NULL, 'plaid_pfc')
+            INSERT INTO categories (name, plaid_pfc_primary, plaid_pfc_detailed, source, is_income)
+            VALUES ($1, $2, NULL, 'plaid_pfc', $3)
             ON CONFLICT (name) DO NOTHING
             RETURNING id
             """,
             label,
             pfc_primary,
+            is_income,
         )
         if inserted:
             return inserted["id"]
@@ -194,10 +199,16 @@ class CategoriesRepository:
 
             # 3. Auto-create detailed row (source=plaid_pfc) and link to parent.
             name = _pretty_name(pfc_detailed or pfc_primary or "Other", pfc_primary)
+            # Every PFC INCOME_* subcategory (wages, interest, tax refund, ...)
+            # counts as income by default; mirror the parent-row behaviour so
+            # the new Income report captures newly-synced income subcategories
+            # automatically. The ON CONFLICT clause does NOT touch is_income
+            # so an existing user-set value is preserved.
+            is_income = pfc_primary == "INCOME"
             row = await conn.fetchrow(
                 """
-                INSERT INTO categories (name, plaid_pfc_primary, plaid_pfc_detailed, pfc_icon_url, source, parent_id)
-                VALUES ($1, $2, $3, $4, 'plaid_pfc', $5)
+                INSERT INTO categories (name, plaid_pfc_primary, plaid_pfc_detailed, pfc_icon_url, source, parent_id, is_income)
+                VALUES ($1, $2, $3, $4, 'plaid_pfc', $5, $6)
                 ON CONFLICT (name) DO UPDATE SET
                     plaid_pfc_primary = EXCLUDED.plaid_pfc_primary,
                     plaid_pfc_detailed = EXCLUDED.plaid_pfc_detailed,
@@ -212,6 +223,7 @@ class CategoriesRepository:
                 pfc_detailed,
                 pfc_icon_url,
                 parent_id,
+                is_income,
             )
             if row:
                 return row["id"]

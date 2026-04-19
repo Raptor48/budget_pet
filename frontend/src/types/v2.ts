@@ -72,6 +72,12 @@ export interface Category {
   created_at: string;
   /** FK to categories.id; null = top-level primary (depth ≤ 2 enforced). */
   parent_id: number | null;
+  /**
+   * Family-wide flag: when TRUE, transactions in this category count as
+   * income everywhere in the app (Income tab, Cash Flow, Financial Health).
+   * Defaults are seeded from Plaid PFC=INCOME; any family member can toggle.
+   */
+  is_income: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -399,6 +405,28 @@ export interface ForecastEntry {
   amount_cents: number;
   frequency: string | null;
   stream_id: number;
+}
+
+export interface IncomeSource {
+  category_id: number | null;
+  category_name: string;
+  color: string | null;
+  amount_cents: number;
+  transaction_count: number;
+}
+
+export interface IncomeByUser {
+  /** null when the owning account has no linked user (rare). */
+  user_id: number | null;
+  username: string;
+  amount_cents: number;
+  sources: IncomeSource[];
+}
+
+export interface IncomeBreakdown {
+  month: string;
+  total_cents: number;
+  users: IncomeByUser[];
 }
 
 export interface FinancialHealthScore {

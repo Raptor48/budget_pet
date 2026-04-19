@@ -1,13 +1,17 @@
 /**
  * Authentication utilities for frontend.
- * Primary: httpOnly cookie set by server.
- * Fallback: Bearer token stored in sessionStorage for cross-origin cookie restrictions
- * (e.g. Safari ITP, Chrome third-party cookie blocking).
- * sessionStorage is cleared automatically when the browser tab/session closes.
+ * Primary: httpOnly cookie set by server (30-day lifetime).
+ * Fallback: Bearer token stored in localStorage for cross-origin cookie restrictions
+ * (Safari ITP, Chrome third-party cookie blocking, PWAs on iOS where cookies are
+ * routinely dropped between app launches).
+ * localStorage persists across browser/app restarts, mirroring the 30-day server
+ * session — users stay signed in until they log out or the server session expires.
+ * A legacy sessionStorage token (from earlier versions) is migrated transparently.
  */
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
 const SESSION_TOKEN_KEY = 'session_token';
+const LEGACY_LOCAL_KEY = 'auth_token';
 
 export interface User {
   username: string;
@@ -32,20 +36,36 @@ export interface AuthStatus {
 
 function getStoredToken(): string | null {
   if (typeof window === 'undefined') return null;
-  return sessionStorage.getItem(SESSION_TOKEN_KEY);
+  // Prefer the persistent localStorage token. Fall back to any lingering
+  // sessionStorage token from older builds so signed-in users are not kicked
+  // out on upgrade; the token is migrated to localStorage on next write.
+  const persistent = localStorage.getItem(SESSION_TOKEN_KEY);
+  if (persistent) return persistent;
+  try {
+    return sessionStorage.getItem(SESSION_TOKEN_KEY);
+  } catch {
+    return null;
+  }
 }
 
 function setStoredToken(token: string): void {
-  if (typeof window !== 'undefined') {
-    sessionStorage.setItem(SESSION_TOKEN_KEY, token);
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(SESSION_TOKEN_KEY, token);
+  try {
+    sessionStorage.removeItem(SESSION_TOKEN_KEY);
+  } catch {
+    // sessionStorage may be unavailable (private mode on some browsers).
   }
 }
 
 function clearStoredToken(): void {
-  if (typeof window !== 'undefined') {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(SESSION_TOKEN_KEY);
+  localStorage.removeItem(LEGACY_LOCAL_KEY);
+  try {
     sessionStorage.removeItem(SESSION_TOKEN_KEY);
-    // Also clear legacy localStorage token if present
-    localStorage.removeItem('auth_token');
+  } catch {
+    // Ignore — already unavailable.
   }
 }
 

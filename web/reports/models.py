@@ -59,6 +59,29 @@ class ForecastEntry(BaseModel):
     stream_id: int
 
 
+class IncomeSource(BaseModel):
+    category_id: Optional[int] = None
+    category_name: str
+    color: Optional[str] = None
+    amount_cents: int
+    transaction_count: int
+
+
+class IncomeByUser(BaseModel):
+    # ``user_id`` is None for income booked against accounts with no owner
+    # (rare; the UI labels these "Unassigned").
+    user_id: Optional[int] = None
+    username: str
+    amount_cents: int
+    sources: List[IncomeSource]
+
+
+class IncomeBreakdown(BaseModel):
+    month: str
+    total_cents: int
+    users: List[IncomeByUser]
+
+
 class FinancialHealthScore(BaseModel):
     score: int
     label: str
