@@ -12,7 +12,14 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronUp, Settings2, TrendingUp } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
+  Loader2,
+  Settings2,
+  TrendingUp,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -23,9 +30,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { MonthYearPicker } from "@/components/ui/month-year-picker";
-import { reportsApi } from "@/lib/api";
+import { reportsApi, transactionsApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import type { IncomeByUser } from "@/types/v2";
+import type { IncomeByUser, IncomeSource, Transaction } from "@/types/v2";
 
 import { IncomeCategoriesDialog } from "./income-categories-dialog";
 
@@ -46,6 +53,22 @@ function formatMoney(cents: number): string {
 function initial(name: string): string {
   const trimmed = name.trim();
   return trimmed ? trimmed[0]!.toUpperCase() : "?";
+}
+
+function transactionLabel(tx: Transaction): string {
+  return (
+    tx.display_title ||
+    tx.merchant_name ||
+    tx.name ||
+    "Untitled"
+  );
+}
+
+function formatShortDate(iso: string): string {
+  // Parse as local noon to avoid TZ-driven off-by-one on the client.
+  const d = new Date(`${iso.slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 export function IncomeTab({ month, onMonthChange }: Props) {
@@ -136,6 +159,7 @@ export function IncomeTab({ month, onMonthChange }: Props) {
                     key={user.user_id ?? `unassigned-${user.username}`}
                     user={user}
                     total={data.total_cents}
+                    month={data.month}
                   />
                 ))}
               </div>
@@ -154,13 +178,15 @@ const COLLAPSED_SOURCES = 3;
 function PersonCard({
   user,
   total,
+  month,
 }: {
   user: IncomeByUser;
   total: number;
+  month: string;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const share = total > 0 ? (user.amount_cents / total) * 100 : 0;
-  const sources = expanded ? user.sources : user.sources.slice(0, COLLAPSED_SOURCES);
+  const sources = showAll ? user.sources : user.sources.slice(0, COLLAPSED_SOURCES);
   const hidden = user.sources.length - COLLAPSED_SOURCES;
 
   return (
@@ -191,26 +217,14 @@ function PersonCard({
       </div>
 
       {user.sources.length > 0 && (
-        <ul className="mt-4 space-y-1.5">
+        <ul className="mt-4 divide-y divide-border/40 rounded-lg border border-border/40">
           {sources.map((src) => (
-            <li
+            <IncomeSourceRow
               key={`${src.category_id ?? "none"}-${src.category_name}`}
-              className="flex items-center justify-between gap-2 text-sm"
-            >
-              <span className="inline-flex min-w-0 items-center gap-2">
-                <span
-                  className="size-2 shrink-0 rounded-full"
-                  style={{ backgroundColor: src.color || "#64748b" }}
-                />
-                <span className="truncate">{src.category_name}</span>
-                <span className="shrink-0 text-[11px] text-muted-foreground">
-                  ×{src.transaction_count}
-                </span>
-              </span>
-              <span className="shrink-0 tabular-nums text-muted-foreground">
-                {formatMoney(src.amount_cents)}
-              </span>
-            </li>
+              source={src}
+              userId={user.user_id}
+              month={month}
+            />
           ))}
         </ul>
       )}
@@ -218,10 +232,10 @@ function PersonCard({
       {hidden > 0 && (
         <button
           type="button"
-          onClick={() => setExpanded((v) => !v)}
+          onClick={() => setShowAll((v) => !v)}
           className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
         >
-          {expanded ? (
+          {showAll ? (
             <>
               <ChevronUp className="size-3.5" aria-hidden />
               Show less
@@ -235,5 +249,138 @@ function PersonCard({
         </button>
       )}
     </div>
+  );
+}
+
+/**
+ * A single income source (one category inside a person's card). Clicking the
+ * row reveals the underlying transactions fetched via `transactionsApi.list`.
+ *
+ * Drilldown is intentionally disabled for unassigned-owner rows (user_id ==
+ * null) and for rows with an unknown category_id (shouldn't normally happen,
+ * but harmless to guard) — the transactions endpoint can't target "no owner"
+ * cleanly, and a category-less filter would leak non-income rows.
+ */
+function IncomeSourceRow({
+  source,
+  userId,
+  month,
+}: {
+  source: IncomeSource;
+  userId: number | null;
+  month: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const drillable = userId != null && source.category_id != null;
+
+  const txQuery = useQuery({
+    queryKey: [
+      "reports",
+      "income",
+      "transactions",
+      month,
+      userId,
+      source.category_id,
+    ],
+    queryFn: () =>
+      transactionsApi.list({
+        month,
+        user_id: userId ?? undefined,
+        category_id: source.category_id ?? undefined,
+        limit: 200,
+      }),
+    enabled: drillable && expanded,
+    staleTime: 30_000,
+  });
+
+  return (
+    <li className="text-sm">
+      <button
+        type="button"
+        onClick={() => drillable && setExpanded((v) => !v)}
+        disabled={!drillable}
+        className={cn(
+          "flex w-full items-center justify-between gap-2 px-3 py-2 text-left",
+          drillable ? "cursor-pointer hover:bg-muted/40" : "cursor-default",
+        )}
+        aria-expanded={drillable ? expanded : undefined}
+      >
+        <span className="inline-flex min-w-0 items-center gap-2">
+          {drillable ? (
+            <ChevronRight
+              className={cn(
+                "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                expanded ? "rotate-90" : undefined,
+              )}
+              aria-hidden
+            />
+          ) : (
+            <span className="size-3.5 shrink-0" aria-hidden />
+          )}
+          <span
+            className="size-2 shrink-0 rounded-full"
+            style={{ backgroundColor: source.color || "#64748b" }}
+          />
+          <span className="truncate">{source.category_name}</span>
+          <span className="shrink-0 text-[11px] text-muted-foreground">
+            ×{source.transaction_count}
+          </span>
+        </span>
+        <span className="shrink-0 tabular-nums text-muted-foreground">
+          {formatMoney(source.amount_cents)}
+        </span>
+      </button>
+
+      {expanded && drillable && (
+        <div className="border-t border-border/40 bg-muted/10 px-3 py-2">
+          {txQuery.isLoading && (
+            <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+              <Loader2 className="size-3.5 animate-spin" />
+              Loading transactions…
+            </div>
+          )}
+          {txQuery.isError && (
+            <p className="py-2 text-xs text-destructive">
+              {(txQuery.error as Error)?.message || "Failed to load transactions."}
+            </p>
+          )}
+          {txQuery.data && txQuery.data.length === 0 && (
+            <p className="py-2 text-xs text-muted-foreground">
+              No transactions found.
+            </p>
+          )}
+          {txQuery.data && txQuery.data.length > 0 && (
+            <ul className="space-y-1">
+              {txQuery.data.map((tx) => (
+                <li
+                  key={tx.id}
+                  className="flex items-center justify-between gap-2 text-xs"
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="shrink-0 tabular-nums text-muted-foreground">
+                      {formatShortDate(tx.authorized_date || tx.date)}
+                    </span>
+                    <span className="truncate">{transactionLabel(tx)}</span>
+                    {tx.is_pending && (
+                      <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                        pending
+                      </span>
+                    )}
+                    {tx.is_private && (
+                      <span className="shrink-0 rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-medium text-violet-700 dark:text-violet-400">
+                        private
+                      </span>
+                    )}
+                  </span>
+                  <span className="shrink-0 tabular-nums text-emerald-700 dark:text-emerald-400">
+                    {formatMoney(Math.abs(tx.amount_cents))}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </li>
   );
 }
