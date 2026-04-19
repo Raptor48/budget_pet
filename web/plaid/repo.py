@@ -351,6 +351,21 @@ class PlaidRepository:
             )
         return [dict(r) for r in rows]
 
+    async def clear_sync_log(self) -> int:
+        """Remove every row from ``plaid_sync_log``.
+
+        Called from ``DELETE /api/plaid/sync/log`` after owner-only auth.
+        Returns the number of rows deleted so callers can surface the count
+        to the user.
+        """
+        pool = await self._pool()
+        async with pool.acquire() as conn:
+            status = await conn.execute("DELETE FROM plaid_sync_log")
+        if not status:
+            return 0
+        tail = status.split()[-1]
+        return int(tail) if tail.isdigit() else 0
+
     # ------------------------------------------------------------------
     # Transactions import (V2 — writes to transactions table)
     # ------------------------------------------------------------------
