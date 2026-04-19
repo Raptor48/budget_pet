@@ -13,10 +13,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MonthYearPicker } from "@/components/ui/month-year-picker";
-import { ArrowLeft, PieChart } from "lucide-react";
+import { ArrowLeft, ChevronRight, Loader2, PieChart } from "lucide-react";
 import { IncomeTab } from "@/components/reports/income-tab";
 import { ExpensesTab } from "@/components/reports/expenses-tab";
-import { reportsApi } from "@/lib/api";
+import { reportsApi, transactionsApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type {
   CashFlowMonth,
@@ -24,6 +24,7 @@ import type {
   FinancialHealthScore,
   MerchantSpend,
   NetWorthSnapshot,
+  Transaction,
 } from "@/types/v2";
 
 // ---------------------------------------------------------------------------
@@ -336,6 +337,52 @@ export default function Reports() {
       }),
   });
 
+  // Deep-link support: `/reports?tab=category&category=<id>` opens the
+  // By Category tab already focused on a specific primary bucket. This
+  // powers CTAs from Insights ("Open Category" on e.g. top_category or
+  // category_trend), so landing on the tab shows the same drill-down
+  // the user would have reached by clicking the pie slice manually.
+  //
+  // Runs only when:
+  //   - we're on the category tab,
+  //   - a numeric `category` id is in the URL,
+  //   - nothing is focused yet,
+  //   - and the primary-rollup query has resolved (we need the row to
+  //     populate `focusedParent` with its full CategorySpend shape,
+  //     matching what handleSliceDrilldown would have produced).
+  //
+  // If the id isn't found in the primary rollup (e.g. it's a detailed
+  // PFC child), we don't try to recover — the user still lands on the
+  // tab and can pick manually. Better than an incorrect focus.
+  const paramCategoryId = searchParams.get("category");
+  useEffect(() => {
+    if (tab !== "category") return;
+    if (focusedParent) return;
+    if (!paramCategoryId) return;
+    const numeric = Number(paramCategoryId);
+    if (!Number.isFinite(numeric)) return;
+    if (byCategoryQuery.isLoading) return;
+    const row = byCategoryQuery.data?.find((r) => r.category_id === numeric);
+    if (!row) return;
+    // Only focus parents that actually have children — otherwise the
+    // "detailed" rollup query would return an empty bucket and the
+    // header would say "No subcategory spending in X", which is worse
+    // UX than showing the transaction list on the primary row instead.
+    const hasChildren = (row.children_count ?? 0) > 0;
+    if (!hasChildren) return;
+    setFocusedParent(row);
+    resetCategoryHighlight();
+    // We intentionally don't strip `category` from the URL — keeping it
+    // means the state survives a refresh / back navigation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    tab,
+    paramCategoryId,
+    focusedParent,
+    byCategoryQuery.isLoading,
+    byCategoryQuery.data,
+  ]);
+
   const netWorthQuery = useQuery({
     queryKey: ["reports", "net-worth"],
     queryFn: () => reportsApi.getNetWorth(),
@@ -589,57 +636,21 @@ export default function Reports() {
                             const hasChildren = (row.children_count ?? 0) > 0;
                             const canDrill = !focusedParent && hasChildren;
                             return (
-                              <tr
-                                key={row.category_name}
-                                className={cn(
-                                  "border-b border-border/50 last:border-0 cursor-pointer transition-colors",
-                                  isActive ? "bg-muted/50" : "hover:bg-muted/20",
-                                )}
-                                onMouseEnter={() => setCatHoveredIdx(i)}
-                                onMouseLeave={() => setCatHoveredIdx(null)}
-                                onClick={() => {
-                                  if (canDrill) {
-                                    handleSliceDrilldown(row, i);
-                                  } else {
-                                    setCatLockedIdx((prev) => (prev === i ? null : i));
-                                  }
-                                }}
-                              >
-                                <td className="px-4 py-3">
-                                  <span className="inline-flex items-center gap-2 font-medium">
-                                    <span
-                                      className="size-2.5 shrink-0 rounded-full"
-                                      style={{ backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length] }}
-                                    />
-                                    <span className="truncate">{row.category_name}</span>
-                                    {canDrill ? (
-                                      <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                                        {row.children_count}×
-                                      </span>
-                                    ) : null}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
-                                  {formatMoney(row.amount_cents)}
-                                </td>
-                                <td className="px-4 py-3">
-                                  <div className="flex items-center gap-2">
-                                    <div className="h-2 flex-1 max-w-[140px] overflow-hidden rounded-full bg-muted">
-                                      <div
-                                        className="h-full rounded-full transition-all"
-                                        style={{
-                                          width: `${Math.min(100, Math.max(0, row.percent))}%`,
-                                          backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length],
-                                          opacity: isActive ? 1 : 0.7,
-                                        }}
-                                      />
-                                    </div>
-                                    <span className="w-12 tabular-nums text-muted-foreground text-right text-xs">
-                                      {row.percent.toFixed(1)}%
-                                    </span>
-                                  </div>
-                                </td>
-                              </tr>
+                              <CategorySpendRow
+                                key={`${row.category_id ?? "none"}-${row.category_name}`}
+                                row={row}
+                                month={month}
+                                colorIndex={i}
+                                isActive={isActive}
+                                canDrillToSubcategories={canDrill}
+                                onHover={() => setCatHoveredIdx(i)}
+                                onLeave={() => setCatHoveredIdx(null)}
+                                onDrillToSubcategories={() => handleSliceDrilldown(row, i)}
+                                onLock={() =>
+                                  setCatLockedIdx((prev) => (prev === i ? null : i))
+                                }
+                                mode={focusedParent ? "detailed" : "primary"}
+                              />
                             );
                           })}
                         </tbody>
@@ -887,5 +898,256 @@ function HealthMetric({
       <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
       <p className={`mt-1 font-semibold tabular-nums ${highlight ? "text-destructive" : ""}`}>{value}</p>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// By Category row — expandable, mirrors the Income / Expenses drill-down
+// ---------------------------------------------------------------------------
+
+function transactionLabel(tx: Transaction): string {
+  return tx.display_title || tx.merchant_name || tx.name || "Untitled";
+}
+
+function formatShortDate(iso: string): string {
+  const d = new Date(`${iso.slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+/**
+ * One row in the Reports → By Category table. Click toggles an inline list
+ * of the underlying transactions for the selected month — same affordance
+ * the Income / Expenses tabs use when the user drills into a per-person
+ * category total. `transaction_class: "expense"` keeps refunds in the
+ * picture so the drilldown sum matches the bucket number even when the
+ * category received a net credit.
+ *
+ * Primary view: `parent_category_id` rolls up the primary bucket + every
+ * PFC-detailed child (`categories.parent_id`), mirroring the COALESCE
+ * rule in /api/reports/by-category. Focus view: exact `category_id`.
+ *
+ * Drill-into-subcategories stays on the pie slice / legend (not on the
+ * row click) — otherwise a single click would be ambiguous.
+ */
+function CategorySpendRow({
+  row,
+  month,
+  colorIndex,
+  isActive,
+  canDrillToSubcategories,
+  onHover,
+  onLeave,
+  onDrillToSubcategories,
+  onLock,
+  mode,
+}: {
+  row: CategorySpend;
+  month: string;
+  colorIndex: number;
+  isActive: boolean;
+  canDrillToSubcategories: boolean;
+  onHover: () => void;
+  onLeave: () => void;
+  onDrillToSubcategories: () => void;
+  onLock: () => void;
+  mode: "primary" | "detailed";
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const hasCategoryId = row.category_id != null;
+  const drillable = hasCategoryId;
+
+  const txQuery = useQuery({
+    queryKey: [
+      "reports",
+      "by-category",
+      "transactions",
+      month,
+      mode,
+      row.category_id,
+    ],
+    queryFn: () =>
+      transactionsApi.list({
+        month,
+        ...(mode === "primary"
+          ? { parent_category_id: row.category_id ?? undefined }
+          : { category_id: row.category_id ?? undefined }),
+        transaction_class: "expense",
+        limit: 500,
+      }),
+    enabled: drillable && expanded,
+    staleTime: 30_000,
+  });
+
+  return (
+    <>
+      <tr
+        className={cn(
+          "border-b border-border/50 last:border-0 transition-colors",
+          isActive ? "bg-muted/50" : "hover:bg-muted/20",
+          drillable ? "cursor-pointer" : "cursor-default",
+        )}
+        onMouseEnter={onHover}
+        onMouseLeave={onLeave}
+        onClick={() => {
+          if (!drillable) {
+            onLock();
+            return;
+          }
+          setExpanded((v) => !v);
+        }}
+        aria-expanded={drillable ? expanded : undefined}
+      >
+        <td className="px-4 py-3">
+          <span className="inline-flex items-center gap-2 font-medium">
+            {drillable ? (
+              <ChevronRight
+                className={cn(
+                  "size-3.5 shrink-0 text-muted-foreground transition-transform",
+                  expanded ? "rotate-90" : undefined,
+                )}
+                aria-hidden
+              />
+            ) : (
+              <span className="size-3.5 shrink-0" aria-hidden />
+            )}
+            <span
+              className="size-2.5 shrink-0 rounded-full"
+              style={{ backgroundColor: CATEGORY_COLORS[colorIndex % CATEGORY_COLORS.length] }}
+            />
+            <span className="truncate">{row.category_name}</span>
+            {canDrillToSubcategories ? (
+              <button
+                type="button"
+                className="shrink-0 rounded-full border border-border/60 bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground transition-colors hover:border-border hover:bg-muted/80 hover:text-foreground"
+                onClick={(event) => {
+                  // Stop the row's toggle so "Focus" is a distinct action
+                  // from "expand transactions". Mirror: pie slice click
+                  // also drills into subcategories; row click expands.
+                  event.stopPropagation();
+                  onDrillToSubcategories();
+                }}
+                title={`Focus on ${row.children_count} subcategor${row.children_count === 1 ? "y" : "ies"}`}
+              >
+                {row.children_count}× subcategories
+              </button>
+            ) : null}
+          </span>
+        </td>
+        <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
+          {formatMoney(row.amount_cents)}
+        </td>
+        <td className="px-4 py-3">
+          <div className="flex items-center gap-2">
+            <div className="h-2 flex-1 max-w-[140px] overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full transition-all"
+                style={{
+                  width: `${Math.min(100, Math.max(0, row.percent))}%`,
+                  backgroundColor: CATEGORY_COLORS[colorIndex % CATEGORY_COLORS.length],
+                  opacity: isActive ? 1 : 0.7,
+                }}
+              />
+            </div>
+            <span className="w-12 tabular-nums text-muted-foreground text-right text-xs">
+              {row.percent.toFixed(1)}%
+            </span>
+          </div>
+        </td>
+      </tr>
+      {expanded && drillable ? (
+        <tr className="border-b border-border/50 last:border-0 bg-muted/10">
+          <td colSpan={3} className="px-4 py-3">
+            <CategoryTransactionsList
+              isLoading={txQuery.isLoading}
+              isError={txQuery.isError}
+              error={txQuery.error as Error | null}
+              rows={txQuery.data ?? []}
+            />
+          </td>
+        </tr>
+      ) : null}
+    </>
+  );
+}
+
+function CategoryTransactionsList({
+  isLoading,
+  isError,
+  error,
+  rows,
+}: {
+  isLoading: boolean;
+  isError: boolean;
+  error: Error | null;
+  rows: Transaction[];
+}) {
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 py-2 text-xs text-muted-foreground">
+        <Loader2 className="size-3.5 animate-spin" />
+        Loading transactions…
+      </div>
+    );
+  }
+  if (isError) {
+    return (
+      <p className="py-2 text-xs text-destructive">
+        {error?.message || "Failed to load transactions."}
+      </p>
+    );
+  }
+  if (rows.length === 0) {
+    return (
+      <p className="py-2 text-xs text-muted-foreground">
+        No transactions in this category for the selected month.
+      </p>
+    );
+  }
+  return (
+    <ul className="space-y-1">
+      {rows.map((tx) => {
+        const isRefund = tx.amount_cents < 0;
+        return (
+          <li
+            key={tx.id}
+            className="flex items-center justify-between gap-2 text-xs"
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="shrink-0 tabular-nums text-muted-foreground">
+                {formatShortDate(tx.authorized_date || tx.date)}
+              </span>
+              <span className="truncate">{transactionLabel(tx)}</span>
+              {tx.is_pending ? (
+                <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                  pending
+                </span>
+              ) : null}
+              {tx.is_private ? (
+                <span className="shrink-0 rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-medium text-violet-700 dark:text-violet-400">
+                  private
+                </span>
+              ) : null}
+              {isRefund ? (
+                <span className="shrink-0 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
+                  refund
+                </span>
+              ) : null}
+            </span>
+            <span
+              className={cn(
+                "shrink-0 tabular-nums",
+                isRefund
+                  ? "text-emerald-700 dark:text-emerald-400"
+                  : "text-rose-700 dark:text-rose-400",
+              )}
+            >
+              {isRefund ? "−" : ""}
+              {formatMoney(Math.abs(tx.amount_cents))}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

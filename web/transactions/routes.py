@@ -64,6 +64,18 @@ async def list_transactions(
     month: Optional[str] = Query(None, regex=r"^\d{4}-\d{2}$"),
     account_id: Optional[int] = Query(None),
     category_id: Optional[int] = Query(None),
+    parent_category_id: Optional[int] = Query(
+        None,
+        description=(
+            "Roll a primary PFC bucket up to include detailed children. "
+            "Matches transactions whose category (or any split's category) "
+            "is the given primary id OR has that primary as `parent_id`. "
+            "Mirrors the COALESCE rule used in /api/reports/by-category so "
+            "the Reports By Category drill-down sums match the primary "
+            "bucket total exactly. Mutually exclusive with `category_id` "
+            "in practice (use one or the other)."
+        ),
+    ),
     tag_id: Optional[int] = Query(None),
     search: Optional[str] = Query(None, max_length=100),
     channel: Optional[str] = Query(None),
@@ -103,6 +115,7 @@ async def list_transactions(
         month=month,
         account_id=account_id,
         category_id=category_id,
+        parent_category_id=parent_category_id,
         tag_id=tag_id,
         search=search,
         channel=channel,

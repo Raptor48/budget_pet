@@ -21,6 +21,7 @@ class TransactionsRepository:
         month: Optional[str] = None,
         account_id: Optional[int] = None,
         category_id: Optional[int] = None,
+        parent_category_id: Optional[int] = None,
         tag_id: Optional[int] = None,
         search: Optional[str] = None,
         channel: Optional[str] = None,
@@ -62,6 +63,27 @@ class TransactionsRepository:
                 f"))"
             )
             params.append(category_id)
+            idx += 1
+
+        if parent_category_id is not None:
+            # Roll a primary PFC bucket up: include the parent itself plus every
+            # detailed PFC child linked via categories.parent_id. Mirrors the
+            # COALESCE(parent_id, id) rule used in /api/reports/by-category so
+            # the drill-down in Reports matches the bucket totals exactly
+            # (split-aware, same semantics as category_id above).
+            conditions.append(
+                f"("
+                f"t.category_id IN ("
+                f"SELECT id FROM categories WHERE id = ${idx} OR parent_id = ${idx}"
+                f") OR EXISTS ("
+                f"SELECT 1 FROM transaction_splits ts "
+                f"WHERE ts.parent_transaction_id = t.id "
+                f"AND ts.category_id IN ("
+                f"SELECT id FROM categories WHERE id = ${idx} OR parent_id = ${idx}"
+                f")"
+                f"))"
+            )
+            params.append(parent_category_id)
             idx += 1
 
         if tag_id is not None:

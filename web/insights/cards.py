@@ -186,7 +186,7 @@ def build_category_trend(
                 detail="Rolling average of the three completed months.",
                 dedupe_key=f"category_trend:{cat_id}:{month}",
                 action_url=(
-                    f"/reports?tab=expenses&category={cat_id}" if cat_id else "/reports?tab=expenses"
+                    f"/reports?tab=category&category={cat_id}" if cat_id else "/reports?tab=category"
                 ),
                 action_label="Open category",
             )
