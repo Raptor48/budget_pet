@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -15,46 +15,18 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { healthApi, plaidApi } from "@/lib/api";
-import { ThemeToggle } from "@/components/theme/theme-toggle";
+import { plaidApi } from "@/lib/api";
 import { PlaidBankConnections } from "./plaid-bank-connections";
+import { SystemStatusBar } from "./system-status-bar";
 import {
   Settings as SettingsIcon,
-  Palette,
   Database,
   Download,
-  CheckCircle2,
-  XCircle,
   Loader2,
   Trash2,
   AlertTriangle,
   CheckCircle,
 } from "lucide-react";
-
-function StatusIndicator({ ok, loading }: { ok: boolean | undefined; loading: boolean }) {
-  if (loading) {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-        <Loader2 className="size-3.5 animate-spin" />
-        Checking…
-      </span>
-    );
-  }
-  if (ok) {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-        <CheckCircle2 className="size-3.5" />
-        Online
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-destructive">
-      <XCircle className="size-3.5" />
-      Offline
-    </span>
-  );
-}
 
 export function SettingsPage() {
   const queryClient = useQueryClient();
@@ -66,12 +38,6 @@ export function SettingsPage() {
     net_worth_snapshots_deleted: number;
     plaid_items_deleted: number;
   } | null>(null);
-
-  const { data: health, isLoading: healthLoading } = useQuery({
-    queryKey: ["health"],
-    queryFn: healthApi.check,
-    refetchInterval: 30_000,
-  });
 
   const deleteSandboxMutation = useMutation({
     mutationFn: plaidApi.deleteSandboxData,
@@ -101,54 +67,8 @@ export function SettingsPage() {
         </Badge>
       </div>
 
-      {/* System Status — single compact card */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Database className="h-4 w-4" />
-            System Status
-          </CardTitle>
-          <CardDescription>Live status of application services (refreshes every 30s)</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="divide-y divide-border/60 rounded-lg border border-border/60">
-            <div className="flex items-center justify-between px-4 py-3">
-              <span className="text-sm font-medium">API</span>
-              <StatusIndicator ok={health?.ok} loading={healthLoading} />
-            </div>
-            <div className="flex items-center justify-between px-4 py-3">
-              <span className="text-sm font-medium">Database</span>
-              <StatusIndicator ok={health?.ok} loading={healthLoading} />
-            </div>
-            <div className="flex items-center justify-between px-4 py-3">
-              <span className="text-sm text-muted-foreground">Version</span>
-              <span className="text-xs font-mono text-muted-foreground">
-                {health?.version ?? "—"}
-              </span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Appearance */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Palette className="h-5 w-5" />
-            Appearance
-          </CardTitle>
-          <CardDescription>Customize the look and feel of the application</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label className="text-base">Theme</Label>
-              <p className="text-sm text-muted-foreground">Toggle between light and dark mode</p>
-            </div>
-            <ThemeToggle />
-          </div>
-        </CardContent>
-      </Card>
+      {/* Compact statusbar: System Status (left) + Appearance (right) */}
+      <SystemStatusBar />
 
       {/* Bank Connections (Plaid) — includes the autosync schedule + webhook toggle */}
       <PlaidBankConnections />

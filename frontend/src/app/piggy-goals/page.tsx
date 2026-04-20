@@ -9,6 +9,7 @@ import { piggyApi } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 import { PiggyBankCard } from './_components/piggy-bank-card';
 import { PiggyBankForm } from './_components/piggy-bank-form';
+import { AnimatedMoney } from '@/components/ui/animated-money';
 import { Target, TrendingUp, CheckCircle2, Filter } from 'lucide-react';
 
 type FilterType = 'all' | 'active' | 'completed' | 'overdue';
@@ -110,7 +111,11 @@ export default function PiggyGoalsPage() {
               <TrendingUp className="h-4 w-4 text-muted-foreground" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">{formatCurrency(stats.totalSaved)}</div>
+              <AnimatedMoney
+                cents={stats.totalSaved}
+                as="div"
+                className="text-2xl font-bold"
+              />
               <p className="text-xs text-muted-foreground">
                 of {formatCurrency(stats.totalTarget)} target
               </p>

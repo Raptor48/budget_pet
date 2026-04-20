@@ -1670,9 +1670,10 @@ export default function TransactionsPage() {
         {!isLoading && transactions.length > 0 ? (
           <>
             <div className="space-y-2 md:hidden">
-              {transactions.map((tx) => (
+              {transactions.map((tx, idx) => (
                 <TransactionMobileCard
                   key={tx.id}
+                  index={idx}
                   tx={tx}
                   highlight={highlightId === tx.id}
                   loadingList={loadingList}
@@ -1707,7 +1708,7 @@ export default function TransactionsPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {transactions.map((tx) => {
+                      {transactions.map((tx, idx) => {
                         const cat =
                           tx.category_id != null ? categoryById.get(tx.category_id) : undefined;
                         const catLabel =
@@ -1719,6 +1720,7 @@ export default function TransactionsPage() {
                         return (
                           <FragmentRow
                             key={tx.id}
+                            index={idx}
                             tx={tx}
                             catLabel={catLabel}
                             categoryById={categoryById}
@@ -1817,6 +1819,7 @@ export default function TransactionsPage() {
 }
 
 function FragmentRow({
+  index = 0,
   tx,
   catLabel,
   categoryById,
@@ -1830,6 +1833,7 @@ function FragmentRow({
   onDeleteCash,
   cashDeletePending,
 }: {
+  index?: number;
   tx: Transaction;
   catLabel: string;
   categoryById: Map<number, Category>;
@@ -1853,9 +1857,11 @@ function FragmentRow({
         data-txn-id={tx.id}
         className={cn(
           "cursor-pointer transition-[box-shadow] duration-300",
+          "motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300",
           highlight && "ring-2 ring-primary ring-offset-2 ring-offset-background",
           tx.is_private && "bg-muted/30",
         )}
+        style={{ animationDelay: `${Math.min(index, 12) * 30}ms` }}
         onClick={onRowClick}
       >
         <TableCell className="align-middle">
