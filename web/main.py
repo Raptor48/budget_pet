@@ -137,4 +137,4 @@ async def shutdown_event():
 
 @app.get("/healthz")
 async def health_check():
-    return {"ok": True, "version": "V2.1"}
+    return {"ok": True, "version": "V2.2"}
