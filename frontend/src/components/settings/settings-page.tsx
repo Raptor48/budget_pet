@@ -63,7 +63,7 @@ export function SettingsPage() {
         </div>
         <Badge variant="secondary" className="gap-2">
           <SettingsIcon className="h-4 w-4" />
-          V2.1
+          V2.2
         </Badge>
       </div>
 
