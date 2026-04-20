@@ -120,3 +120,108 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ---------------------------------------------------------------------- */
+/* Keyframes used across animated components.                              */
+/* ---------------------------------------------------------------------- */
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes trends-shimmer {
+  0%   { background-position: 0% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes trends-sweep {
+  0%, 100% { transform: translateX(0); }
+  50%      { transform: translateX(6%); }
+}
+
+@keyframes hero-glow-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* Ambient glow on hero cards. Dark mode only — the conic gradient is
+   baked for dark surfaces and would look muddy on bright backgrounds. */
+.hero-glow {
+  position: relative;
+  isolation: isolate;
+}
+
+.hero-glow::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from 0deg,
+    color-mix(in oklab, var(--primary) 55%, transparent),
+    color-mix(in oklab, #0ea5e9 40%, transparent),
+    color-mix(in oklab, #10b981 40%, transparent),
+    color-mix(in oklab, var(--primary) 55%, transparent)
+  );
+  filter: blur(22px);
+  opacity: 0;
+  z-index: -1;
+  transition: opacity 400ms ease;
+  animation: hero-glow-spin 18s linear infinite;
+  pointer-events: none;
+}
+
+:root.dark .hero-glow::before {
+  opacity: 0.32;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-glow::before {
+    animation-play-state: paused;
+  }
+}
+
+/* Subtle film-grain / noise texture over the whole viewport. Dark mode
+   only — on light backgrounds the overlay would noticeably dirty the UI. */
+.app-noise::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: url("/noise.svg");
+  background-repeat: repeat;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 0;
+  mix-blend-mode: overlay;
+  transition: opacity 500ms ease;
+}
+
+:root.dark .app-noise::before {
+  opacity: 0.05;
+}
+
+/* View Transitions for the Reports tab panel. Scoped so it only runs in
+   browsers that support `view-transition-name`. */
+@supports (view-transition-name: none) {
+  .reports-tab-content {
+    view-transition-name: reports-tabs-panel;
+  }
+  ::view-transition-old(reports-tabs-panel),
+  ::view-transition-new(reports-tabs-panel) {
+    animation-duration: 220ms;
+    animation-timing-function: ease-out;
+  }
+}
+
+/* ---------------------------------------------------------------------- */
+/* Reduced motion — respect OS/browser preference globally.                */
+/* ---------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+  }
+}

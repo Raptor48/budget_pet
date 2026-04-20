@@ -25,7 +25,13 @@ function formatMoney(cents: number): string {
   }).format(cents / 100);
 }
 
-/** Expanded active slice: grows outward + faint outer ring. */
+/**
+ * Expanded active slice: grows outward, sports a soft drop-shadow in the
+ * slice color, and gains a pulsating outer ring rendered with SVG
+ * `<animate>` — no JS animation frames involved. Falls back to a static
+ * ring for `prefers-reduced-motion` users via the global guard in
+ * `globals.css`.
+ */
 function ActiveShape(props: Record<string, unknown>) {
   const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill } = props as {
     cx: number; cy: number; innerRadius: number; outerRadius: number;
@@ -33,23 +39,36 @@ function ActiveShape(props: Record<string, unknown>) {
   };
   return (
     <g>
+      {/* Main slice, slightly enlarged with a colored glow */}
       <Sector
-        cx={cx} cy={cy}
+        cx={cx}
+        cy={cy}
         innerRadius={innerRadius}
         outerRadius={outerRadius + 8}
         startAngle={startAngle}
         endAngle={endAngle}
         fill={fill}
+        style={{
+          filter: `drop-shadow(0 0 6px ${fill})`,
+        }}
       />
+      {/* Outer pulsating ring */}
       <Sector
-        cx={cx} cy={cy}
+        cx={cx}
+        cy={cy}
         innerRadius={outerRadius + 12}
         outerRadius={outerRadius + 15}
         startAngle={startAngle}
         endAngle={endAngle}
         fill={fill}
-        opacity={0.35}
-      />
+      >
+        <animate
+          attributeName="opacity"
+          values="0.35;0.85;0.35"
+          dur="1.6s"
+          repeatCount="indefinite"
+        />
+      </Sector>
     </g>
   );
 }
@@ -111,7 +130,8 @@ export function CategoryDonutChart({
             outerRadius={outerRadius}
             paddingAngle={2}
             animationBegin={0}
-            animationDuration={700}
+            animationDuration={800}
+            animationEasing="ease-out"
             {...({ activeIndex: activeIdx, activeShape: ActiveShape } as unknown as object)}
             onMouseEnter={(_, i) => onHover(i)}
             onMouseLeave={() => onHover(null)}

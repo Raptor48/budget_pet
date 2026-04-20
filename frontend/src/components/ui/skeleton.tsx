@@ -1,8 +1,11 @@
 import { cn } from "@/lib/utils";
 
 /**
- * Minimal skeleton placeholder. Use in place of spinners for the initial
- * load of cards, lists, or tables so the page shape is preserved.
+ * Shimmer skeleton placeholder. Instead of a flat pulsing fill, a soft
+ * highlight sweeps across the element — matches modern loading patterns
+ * and makes the UI feel more responsive. Falls back to a muted fill
+ * when `prefers-reduced-motion` is enabled (handled globally in
+ * `globals.css`).
  */
 export function Skeleton({
   className,
@@ -10,7 +13,15 @@ export function Skeleton({
 }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn("animate-pulse rounded-md bg-muted/60", className)}
+      data-slot="skeleton"
+      className={cn(
+        "relative overflow-hidden rounded-md bg-muted/60",
+        "bg-gradient-to-r from-muted/70 via-muted/30 to-muted/70",
+        "bg-[length:200%_100%]",
+        "motion-safe:animate-[shimmer_1.6s_ease-in-out_infinite]",
+        "motion-reduce:animate-pulse",
+        className,
+      )}
       {...props}
     />
   );

@@ -16,10 +16,12 @@ import { MonthYearPicker } from "@/components/ui/month-year-picker";
 import { ArrowLeft, ChevronRight, Loader2, PieChart } from "lucide-react";
 import { IncomeTab } from "@/components/reports/income-tab";
 import { ExpensesTab } from "@/components/reports/expenses-tab";
+import { CashFlowHistoryChart } from "@/components/reports/cash-flow-history-chart";
+import { TrendsTab } from "@/components/reports/trends-tab";
+import { AnimatedMoney } from "@/components/ui/animated-money";
 import { reportsApi, transactionsApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type {
-  CashFlowMonth,
   CategorySpend,
   FinancialHealthScore,
   MerchantSpend,
@@ -43,16 +45,6 @@ function formatMoney(cents: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   }).format(cents / 100);
-}
-
-function shortMonthLabel(ym: string): string {
-  const d = new Date(`${ym}-01T12:00:00`);
-  if (Number.isNaN(d.getTime())) return ym;
-  return d.toLocaleString("en-US", { month: "short" });
-}
-
-function sortCashFlowMonths(rows: CashFlowMonth[]): CashFlowMonth[] {
-  return [...rows].sort((a, b) => a.month.localeCompare(b.month));
 }
 
 function formatRatioPercent(value: number | null | undefined): string {
@@ -146,61 +138,6 @@ function NetWorthLineChart({ data }: { data: NetWorthSnapshot[] }) {
   );
 }
 
-function CashFlowBarGroups({ months }: { months: CashFlowMonth[] }) {
-  const sorted = sortCashFlowMonths(months);
-  const maxVal = useMemo(() => {
-    let m = 1;
-    for (const row of sorted) {
-      m = Math.max(m, row.income_cents, row.expenses_cents);
-    }
-    return m;
-  }, [sorted]);
-
-  if (!sorted.length) {
-    return <p className="text-muted-foreground text-sm py-6 text-center">No data for this range.</p>;
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="flex items-stretch justify-between gap-1 sm:gap-2 h-52 pt-4 border-b border-border/60">
-        {sorted.map((row) => {
-          const hIn = maxVal > 0 ? (row.income_cents / maxVal) * 100 : 0;
-          const hEx = maxVal > 0 ? (row.expenses_cents / maxVal) * 100 : 0;
-          return (
-            <div
-              key={row.month}
-              className="flex flex-1 flex-col items-center gap-1 min-w-0 h-full"
-              title={`${row.month}: in ${formatMoney(row.income_cents)}, out ${formatMoney(row.expenses_cents)}`}
-            >
-              <div className="flex flex-1 min-h-0 w-full max-w-[2.5rem] items-end justify-center gap-0.5 mx-auto">
-                <div
-                  className="w-[42%] max-w-3 rounded-t-md bg-emerald-500/90 shadow-sm transition-all"
-                  style={{ height: `${Math.max(hIn, 1)}%` }}
-                />
-                <div
-                  className="w-[42%] max-w-3 rounded-t-md bg-rose-500/90 shadow-sm transition-all"
-                  style={{ height: `${Math.max(hEx, 1)}%` }}
-                />
-              </div>
-              <span className="text-[10px] sm:text-xs text-muted-foreground truncate w-full text-center shrink-0">
-                {shortMonthLabel(row.month)}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-      <div className="flex flex-wrap items-center justify-center gap-6 text-sm">
-        <span className="inline-flex items-center gap-2">
-          <span className="size-2.5 rounded-sm bg-emerald-500" /> Income
-        </span>
-        <span className="inline-flex items-center gap-2">
-          <span className="size-2.5 rounded-sm bg-rose-500" /> Expenses
-        </span>
-      </div>
-    </div>
-  );
-}
-
 function MerchantLogo({ url, name }: { url: string | null; name: string }) {
   const [failed, setFailed] = useState(false);
   if (!url || failed) {
@@ -229,6 +166,7 @@ function MerchantLogo({ url, name }: { url: string | null; name: string }) {
 
 const REPORT_TABS = [
   "cashflow",
+  "trends",
   "income",
   "expenses",
   "category",
@@ -279,7 +217,17 @@ export default function Reports() {
   }, [searchParams]);
 
   const handleTabChange = useCallback((value: string) => {
-    if (isReportTab(value)) setTab(value);
+    if (!isReportTab(value)) return;
+    // Use the View Transitions API for a smooth cross-fade between tab
+    // panels when the browser supports it. Falls back to a plain
+    // synchronous state update everywhere else.
+    const doc = typeof document !== "undefined" ? document : null;
+    const startVT = (doc as unknown as { startViewTransition?: (cb: () => void) => void } | null)?.startViewTransition;
+    if (typeof startVT === "function") {
+      startVT.call(doc, () => setTab(value));
+    } else {
+      setTab(value);
+    }
   }, []);
   /**
    * Focus-mode: when the user drills into a primary category, we pin it here
@@ -419,8 +367,9 @@ export default function Reports() {
         </header>
 
         <Tabs value={tab} onValueChange={handleTabChange} className="gap-6">
-          <TabsList className="grid h-auto w-full max-w-4xl grid-cols-2 gap-1 p-1 sm:grid-cols-4 lg:grid-cols-7">
+          <TabsList className="grid h-auto w-full max-w-5xl grid-cols-2 gap-1 p-1 sm:grid-cols-4 lg:grid-cols-8">
             <TabsTrigger value="cashflow">Cash Flow</TabsTrigger>
+            <TabsTrigger value="trends">Trends</TabsTrigger>
             <TabsTrigger value="income">Income</TabsTrigger>
             <TabsTrigger value="expenses">Expenses</TabsTrigger>
             <TabsTrigger value="category">By Category</TabsTrigger>
@@ -431,7 +380,7 @@ export default function Reports() {
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="cashflow" className="space-y-6">
+          <TabsContent value="cashflow" className="reports-tab-content space-y-6">
             <Card className="border-border/80 shadow-sm">
               <CardHeader className="flex flex-row flex-wrap items-end justify-between gap-4">
                 <div>
@@ -463,9 +412,11 @@ export default function Reports() {
                       <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
                         Income
                       </p>
-                      <p className="text-2xl font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
-                        {formatMoney(cf.income_cents)}
-                      </p>
+                      <AnimatedMoney
+                        cents={cf.income_cents}
+                        as="p"
+                        className="text-2xl font-semibold text-emerald-600 dark:text-emerald-400"
+                      />
                       <p className="mt-1 text-[11px] text-muted-foreground group-hover:text-emerald-700/80">
                         View breakdown →
                       </p>
@@ -479,9 +430,11 @@ export default function Reports() {
                       <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
                         Expenses
                       </p>
-                      <p className="text-2xl font-semibold tabular-nums text-rose-600 dark:text-rose-400">
-                        {formatMoney(cf.expenses_cents)}
-                      </p>
+                      <AnimatedMoney
+                        cents={cf.expenses_cents}
+                        as="p"
+                        className="text-2xl font-semibold text-rose-600 dark:text-rose-400"
+                      />
                       <p className="mt-1 text-[11px] text-muted-foreground group-hover:text-rose-700/80">
                         View breakdown →
                       </p>
@@ -496,15 +449,15 @@ export default function Reports() {
                       <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
                         Net
                       </p>
-                      <p
-                        className={`text-2xl font-semibold tabular-nums ${
+                      <AnimatedMoney
+                        cents={cf.net_cents}
+                        as="p"
+                        className={`text-2xl font-semibold ${
                           cf.net_cents >= 0
                             ? "text-sky-600 dark:text-sky-400"
                             : "text-amber-700 dark:text-amber-400"
                         }`}
-                      >
-                        {formatMoney(cf.net_cents)}
-                      </p>
+                      />
                       {cf.internal_transfer_cents > 0 && (
                         <p
                           className="mt-1 text-[11px] text-muted-foreground"
@@ -527,22 +480,30 @@ export default function Reports() {
                     <p className="text-destructive text-sm">Could not load history.</p>
                   )}
                   {cashFlowHistoryQuery.data && (
-                    <CashFlowBarGroups months={cashFlowHistoryQuery.data} />
+                    <CashFlowHistoryChart
+                      months={cashFlowHistoryQuery.data}
+                      activeMonth={month}
+                      onSelectMonth={setMonth}
+                    />
                   )}
                 </div>
               </CardContent>
             </Card>
           </TabsContent>
 
-          <TabsContent value="income" className="space-y-6">
+          <TabsContent value="trends" className="reports-tab-content space-y-6">
+            <TrendsTab />
+          </TabsContent>
+
+          <TabsContent value="income" className="reports-tab-content space-y-6">
             <IncomeTab month={month} onMonthChange={setMonth} />
           </TabsContent>
 
-          <TabsContent value="expenses" className="space-y-6">
+          <TabsContent value="expenses" className="reports-tab-content space-y-6">
             <ExpensesTab month={month} onMonthChange={setMonth} />
           </TabsContent>
 
-          <TabsContent value="category" className="space-y-6">
+          <TabsContent value="category" className="reports-tab-content space-y-6">
             <Card className="border-border/80 shadow-sm">
               <CardHeader className="flex flex-row flex-wrap items-end justify-between gap-4">
                 <div className="min-w-0 space-y-1">
@@ -639,6 +600,7 @@ export default function Reports() {
                               <CategorySpendRow
                                 key={`${row.category_id ?? "none"}-${row.category_name}`}
                                 row={row}
+                                index={i}
                                 month={month}
                                 colorIndex={i}
                                 isActive={isActive}
@@ -685,7 +647,7 @@ export default function Reports() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="networth" className="space-y-6">
+          <TabsContent value="networth" className="reports-tab-content space-y-6">
             <Card className="border-border/80 shadow-sm">
               <CardHeader>
                 <CardTitle>Net worth</CardTitle>
@@ -723,7 +685,7 @@ export default function Reports() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="merchants" className="space-y-6">
+          <TabsContent value="merchants" className="reports-tab-content space-y-6">
             <Card className="border-border/80 shadow-sm">
               <CardHeader className="flex flex-row flex-wrap items-end justify-between gap-4">
                 <div>
@@ -754,8 +716,12 @@ export default function Reports() {
                         </tr>
                       </thead>
                       <tbody>
-                        {merchantsQuery.data.map((m: MerchantSpend) => (
-                          <tr key={m.merchant_name} className="border-b border-border/50 last:border-0">
+                        {merchantsQuery.data.map((m: MerchantSpend, i: number) => (
+                          <tr
+                            key={m.merchant_name}
+                            className="border-b border-border/50 last:border-0 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300"
+                            style={{ animationDelay: `${Math.min(i, 12) * 30}ms` }}
+                          >
                             <td className="px-4 py-2">
                               <MerchantLogo url={m.logo_url} name={m.merchant_name} />
                             </td>
@@ -779,8 +745,8 @@ export default function Reports() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="health" className="space-y-6">
-            <Card className="border-border/80 shadow-sm overflow-hidden">
+          <TabsContent value="health" className="reports-tab-content space-y-6">
+            <Card className="hero-glow border-border/80 shadow-sm overflow-hidden">
               <CardHeader>
                 <CardTitle>Financial health</CardTitle>
                 <CardDescription>Holistic score from debt, utilization, savings, and safety buffer.</CardDescription>
@@ -932,6 +898,7 @@ function formatShortDate(iso: string): string {
  */
 function CategorySpendRow({
   row,
+  index = 0,
   month,
   colorIndex,
   isActive,
@@ -943,6 +910,7 @@ function CategorySpendRow({
   mode,
 }: {
   row: CategorySpend;
+  index?: number;
   month: string;
   colorIndex: number;
   isActive: boolean;
@@ -984,9 +952,11 @@ function CategorySpendRow({
       <tr
         className={cn(
           "border-b border-border/50 last:border-0 transition-colors",
+          "motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300",
           isActive ? "bg-muted/50" : "hover:bg-muted/20",
           drillable ? "cursor-pointer" : "cursor-default",
         )}
+        style={{ animationDelay: `${Math.min(index, 12) * 30}ms` }}
         onMouseEnter={onHover}
         onMouseLeave={onLeave}
         onClick={() => {

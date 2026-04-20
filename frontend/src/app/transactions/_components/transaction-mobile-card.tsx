@@ -74,6 +74,8 @@ export type TransactionMobileCardProps = {
   onDeleteCash?: (e: React.MouseEvent) => void;
   cashDeletePending?: boolean;
   loadingList?: boolean;
+  /** Used by the parent list to stagger the entrance animation. */
+  index?: number;
 };
 
 /**
@@ -87,6 +89,7 @@ export function TransactionMobileCard({
   onDeleteCash,
   cashDeletePending,
   loadingList,
+  index = 0,
 }: TransactionMobileCardProps) {
   const title = displayName(tx);
 
@@ -99,10 +102,12 @@ export function TransactionMobileCard({
       className={cn(
         "relative flex w-full min-w-0 items-start gap-2 rounded-lg border border-border/80 bg-card px-3 py-2.5 text-left transition-colors",
         "hover:bg-muted/40 active:bg-muted/60",
+        "motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300",
         highlight && "ring-2 ring-primary ring-offset-2 ring-offset-background",
         tx.is_private &&
           "relative border-amber-500/30 bg-amber-500/[0.04] before:absolute before:inset-y-2 before:left-1 before:w-0.5 before:rounded-full before:bg-amber-500/50",
       )}
+      style={{ animationDelay: `${Math.min(index, 12) * 30}ms` }}
     >
       <MobileMerchantAvatar tx={tx} />
       <div className="min-w-0 flex-1 space-y-0.5">

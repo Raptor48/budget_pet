@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Sidebar } from "./sidebar";
 import { Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,11 +10,45 @@ interface AppLayoutProps {
   children: React.ReactNode;
 }
 
+/**
+ * Track whether the user has scrolled the main content past `thresholdPx`.
+ * Uses an IntersectionObserver on a tiny sentinel — cheaper than a scroll
+ * listener, still reactive at ~60fps, and skipped automatically by
+ * `prefers-reduced-motion` CSS further down the tree.
+ */
+function useScrolledPast(
+  rootRef: React.RefObject<HTMLElement | null>,
+  thresholdPx = 8,
+): [boolean, React.RefObject<HTMLDivElement | null>] {
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const [scrolled, setScrolled] = useState(false);
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    const root = rootRef.current;
+    if (!sentinel || !root || typeof IntersectionObserver === "undefined") {
+      return;
+    }
+    const obs = new IntersectionObserver(
+      ([entry]) => setScrolled(!entry.isIntersecting),
+      {
+        root,
+        threshold: 0,
+        rootMargin: `-${thresholdPx}px 0px 0px 0px`,
+      },
+    );
+    obs.observe(sentinel);
+    return () => obs.disconnect();
+  }, [rootRef, thresholdPx]);
+  return [scrolled, sentinelRef];
+}
+
 export function AppLayout({ children }: AppLayoutProps) {
   // Desktop: null = expanded (256px), true = collapsed (icons only, 64px)
   // Mobile: mobileOpen controls overlay
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const mainRef = useRef<HTMLElement | null>(null);
+  const [scrolled, sentinelRef] = useScrolledPast(mainRef);
 
   // Persist collapsed preference
   useEffect(() => {
@@ -67,10 +101,22 @@ export function AppLayout({ children }: AppLayoutProps) {
 
       {/* ── Main content ── */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* Mobile top bar — safe-area so menu control stays below notch / status (PWA, Safari) */}
-        <header className="shrink-0 border-b border-border bg-card md:hidden">
+        {/* Mobile top bar — shrinks + blurs when user scrolls. */}
+        <header
+          className={cn(
+            "sticky top-0 z-20 shrink-0 border-b transition-[background-color,backdrop-filter,border-color,padding] duration-200 md:hidden",
+            scrolled
+              ? "border-border/60 bg-background/70 supports-[backdrop-filter]:backdrop-blur-md"
+              : "border-border bg-card",
+          )}
+        >
           <div className="pt-[env(safe-area-inset-top,0px)] pr-[env(safe-area-inset-right,0px)] pl-[env(safe-area-inset-left,0px)]">
-            <div className="flex h-14 items-center gap-3 px-4">
+            <div
+              className={cn(
+                "flex items-center gap-3 px-4 transition-[height] duration-200",
+                scrolled ? "h-11" : "h-14",
+              )}
+            >
               <Button
                 variant="ghost"
                 size="icon"
@@ -96,7 +142,12 @@ export function AppLayout({ children }: AppLayoutProps) {
           </div>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-y-auto pb-[env(safe-area-inset-bottom,0px)] md:pb-0">
+        <main
+          ref={mainRef}
+          className="min-h-0 flex-1 overflow-y-auto pb-[env(safe-area-inset-bottom,0px)] md:pb-0"
+        >
+          {/* Scroll sentinel for the parallax-blur header effect. */}
+          <div ref={sentinelRef} aria-hidden className="h-px w-full" />
           <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
             {children}
           </div>
