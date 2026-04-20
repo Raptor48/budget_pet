@@ -206,23 +206,31 @@
   }
 }
 
-/* Subtle film-grain / noise texture over the whole viewport. Dark mode
-   only — on light backgrounds the overlay would noticeably dirty the UI. */
+/* Subtle film-grain / noise over the viewport (dark only). Tune:
+   - opacity / mix-blend-mode here
+   - feTurbulence + feColorMatrix in public/noise.svg */
+:root.dark {
+  --app-noise-opacity: 0.1;
+  --app-noise-blend: soft-light;
+}
+
 .app-noise::before {
   content: "";
   position: fixed;
   inset: 0;
   background-image: url("/noise.svg");
   background-repeat: repeat;
+  background-size: 180px 180px;
   opacity: 0;
   pointer-events: none;
   z-index: 0;
-  mix-blend-mode: overlay;
+  mix-blend-mode: normal;
   transition: opacity 500ms ease;
 }
 
 :root.dark .app-noise::before {
-  opacity: 0.05;
+  opacity: var(--app-noise-opacity);
+  mix-blend-mode: var(--app-noise-blend);
 }
 
 /* View Transitions for the Reports tab panel. Scoped so it only runs in
