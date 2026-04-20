@@ -403,7 +403,7 @@ export function TrendsTab() {
 
   return (
     <div className="space-y-6">
-      <Card className="hero-glow border-border/80 shadow-sm">
+      <Card className="border-border/80 shadow-sm">
         <CardHeader className="flex flex-row flex-wrap items-end justify-between gap-4">
           <div className="space-y-1">
             <CardTitle className="flex items-center gap-2">
