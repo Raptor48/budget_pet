@@ -120,6 +120,8 @@ User-defined tags for custom classification (e.g., "alcohol", "business").
 ### recurring_streams
 From Plaid `/transactions/recurring/get`, plus **manual** rows created via `POST /api/recurring`. Plaid upsert skips rows where `stream_source = 'manual'`.
 
+**`GET /api/recurring`** and **`GET /api/recurring/price-changes`** return the full household list for any authenticated member (no per-account `viewer_user_id` filter). Rows are sorted by computed next payment date (`next_occurrence` rules), soonest first. Other callers (e.g. Insights) may still pass `viewer_user_id` into `RecurringRepository.list_streams` / `get_price_changes` to hide streams tied to another member’s personally owned account.
+
 | Column | Type | Notes |
 |---|---|---|
 | plaid_stream_id | TEXT UNIQUE | Plaid `stream_id`, or synthetic `manual:{uuid}` for user-created streams |

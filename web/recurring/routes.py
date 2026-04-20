@@ -27,27 +27,23 @@ async def create_stream(request: Request, body: RecurringStreamCreate):
 
 @router.get("", response_model=List[RecurringStreamOut])
 async def list_streams(
-    request: Request,
+    _request: Request,
     direction: Optional[str] = Query(None, pattern=r"^(inflow|outflow)$"),
     active_only: bool = Query(True),
 ):
-    user = getattr(request.state, "user", None) or {}
-    viewer_user_id = user.get("id")
+    # Family-wide: every logged-in member (and admin) sees all household streams.
+    # Per-account privacy is enforced elsewhere (e.g. Insights still passes viewer_user_id).
     return await _repo().list_streams(
         direction=direction,
         active_only=active_only,
-        viewer_user_id=int(viewer_user_id) if viewer_user_id is not None else None,
+        viewer_user_id=None,
     )
 
 
 @router.get("/price-changes", response_model=List[RecurringStreamOut])
-async def get_price_changes(request: Request):
+async def get_price_changes(_request: Request):
     """Return recurring streams where last price differs from average by more than 10%."""
-    user = getattr(request.state, "user", None) or {}
-    viewer_user_id = user.get("id")
-    return await _repo().get_price_changes(
-        viewer_user_id=int(viewer_user_id) if viewer_user_id is not None else None,
-    )
+    return await _repo().get_price_changes(viewer_user_id=None)
 
 
 @router.get("/{stream_id}", response_model=RecurringStreamOut)
