@@ -10,6 +10,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from web.accounts.repo import AccountsRepository
+from web.categories.pfc_display import format_plaid_category_for_display
 from web.db import get_pool
 from web.transactions.display import normalize_transaction_title
 
@@ -128,6 +129,13 @@ class RecurringRepository:
                     "user_label": d.get("user_label"),
                 }
             )
+            if not (d.get("primary_category_name") or "").strip():
+                fb = format_plaid_category_for_display(
+                    d.get("pfc_detailed"),
+                    d.get("pfc_primary"),
+                )
+                if fb:
+                    d["primary_category_name"] = fb
             enriched.append(d)
         _sort_streams_by_next_payment(enriched)
         return enriched

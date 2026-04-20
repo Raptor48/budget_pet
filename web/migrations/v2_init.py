@@ -579,7 +579,7 @@ async def _migrate_categories_parent_id(conn) -> None:
     Invariant: depth ≤ 2. Primary rows have parent_id IS NULL; detail rows
     reference their primary parent.
     """
-    from web.categories.repo import PFC_PRIMARY_LABELS, _pretty_name
+    from web.categories.pfc_display import PFC_PRIMARY_LABELS
 
     async with conn.transaction():
         await _ddl(
@@ -651,10 +651,6 @@ async def _migrate_categories_parent_id(conn) -> None:
               AND (c.parent_id IS DISTINCT FROM p.id)
             """,
         )
-
-    # Silence unused-import warning; helper is kept importable from this module.
-    del _pretty_name
-
 
 async def _migrate_recurring_price_change_signed(conn) -> None:
     """

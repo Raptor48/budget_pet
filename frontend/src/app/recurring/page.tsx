@@ -254,8 +254,7 @@ export default function RecurringPage() {
           const showPriceAlert = pct != null && Math.abs(pct) > PRICE_CHANGE_THRESHOLD_PCT;
           const annual = annualCostCents(row);
           const isEditing = editingId === row.id;
-          const categoryLabel =
-            row.primary_category_name ?? row.pfc_primary ?? null;
+          const categoryLabel = row.primary_category_name?.trim() || null;
           const categoryColor = row.primary_category_color ?? null;
 
           return (
@@ -467,8 +466,7 @@ export default function RecurringPage() {
               const showPriceAlert = pct != null && Math.abs(pct) > PRICE_CHANGE_THRESHOLD_PCT;
               const annual = annualCostCents(row);
               const isEditing = editingId === row.id;
-              const categoryLabel =
-                row.primary_category_name ?? row.pfc_primary ?? null;
+              const categoryLabel = row.primary_category_name?.trim() || null;
               const categoryColor = row.primary_category_color ?? null;
 
                 return (
