@@ -212,6 +212,55 @@ class TestListStreamsEnrichment:
         assert r["display_title"] == "Netflix"
         assert "category_parent_id" not in r
 
+    @pytest.mark.asyncio
+    async def test_fills_primary_category_name_from_pfc_when_unresolved(self):
+        """Same PFC→label rules as ``CategoriesRepository`` when no category JOIN name."""
+        from web.recurring.repo import RecurringRepository
+
+        conn = AsyncMock()
+        pool = make_mock_pool(conn)
+        conn.fetch.return_value = [
+            _minimal_stream_row(
+                id=1,
+                description="DoorDash",
+                frequency="MONTHLY",
+                last_date=date(2026, 4, 1),
+                pfc_primary="FOOD_AND_DRINK",
+                pfc_detailed="FOOD_AND_DRINK_RESTAURANTS",
+                primary_category_name=None,
+                primary_category_id=None,
+                primary_category_color=None,
+            ),
+        ]
+        with patch("web.recurring.repo.get_pool", AsyncMock(return_value=pool)):
+            rows = await RecurringRepository().list_streams()
+
+        assert len(rows) == 1
+        assert rows[0]["primary_category_name"] == "Food & Drink: Restaurants"
+
+    @pytest.mark.asyncio
+    async def test_keeps_resolved_primary_category_name_from_join(self):
+        from web.recurring.repo import RecurringRepository
+
+        conn = AsyncMock()
+        pool = make_mock_pool(conn)
+        conn.fetch.return_value = [
+            _minimal_stream_row(
+                id=2,
+                frequency="MONTHLY",
+                last_date=date(2026, 4, 1),
+                pfc_primary="FOOD_AND_DRINK",
+                pfc_detailed="FOOD_AND_DRINK_RESTAURANTS",
+                primary_category_id=99,
+                primary_category_name="Custom Groceries",
+                primary_category_color="#00aa00",
+            ),
+        ]
+        with patch("web.recurring.repo.get_pool", AsyncMock(return_value=pool)):
+            rows = await RecurringRepository().list_streams()
+
+        assert rows[0]["primary_category_name"] == "Custom Groceries"
+
 
 class TestUpsertSignedPriceChangePct:
     """`price_change_pct` must be signed so the UI can colour drops vs hikes."""

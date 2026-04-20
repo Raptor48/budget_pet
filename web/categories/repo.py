@@ -11,41 +11,9 @@ from typing import Any, Dict, List, Optional
 
 from web.db import get_pool
 
+from web.categories.pfc_display import PFC_PRIMARY_LABELS, format_pfc_detailed_label
+
 logger = logging.getLogger(__name__)
-
-# Human-readable labels for PFC primary enum values (used only when building display names).
-PFC_PRIMARY_LABELS: Dict[str, str] = {
-    "INCOME": "Income",
-    "TRANSFER_IN": "Transfer In",
-    "TRANSFER_OUT": "Transfer Out",
-    "LOAN_PAYMENTS": "Loan Payments",
-    "BANK_FEES": "Bank Fees",
-    "ENTERTAINMENT": "Entertainment",
-    "FOOD_AND_DRINK": "Food & Drink",
-    "GENERAL_MERCHANDISE": "Shopping",
-    "HOME_IMPROVEMENT": "Home Improvement",
-    "MEDICAL": "Medical",
-    "PERSONAL_CARE": "Personal Care",
-    "GENERAL_SERVICES": "Services",
-    "GOVERNMENT_AND_NON_PROFIT": "Government & Non-Profit",
-    "TRANSPORTATION": "Transportation",
-    "TRAVEL": "Travel",
-    "RENT_AND_UTILITIES": "Rent & Utilities",
-}
-
-
-def _pretty_name(pfc_detailed: str, pfc_primary: Optional[str] = None) -> str:
-    """Convert FOOD_AND_DRINK_RESTAURANTS → Food & Drink: Restaurants."""
-    primary_label = PFC_PRIMARY_LABELS.get(pfc_primary or "", pfc_primary or "")
-    # Strip primary prefix from detailed if present
-    if pfc_primary and pfc_detailed.startswith(pfc_primary + "_"):
-        suffix = pfc_detailed[len(pfc_primary) + 1:]
-    else:
-        suffix = pfc_detailed
-    suffix = suffix.replace("_", " ").title()
-    if primary_label and suffix and suffix.upper() != pfc_primary:
-        return f"{primary_label}: {suffix}"
-    return suffix or primary_label
 
 
 class CategoriesRepository:
@@ -131,7 +99,9 @@ class CategoriesRepository:
         )
         if row:
             return row["id"]
-        label = PFC_PRIMARY_LABELS.get(pfc_primary, _pretty_name(pfc_primary, pfc_primary))
+        label = PFC_PRIMARY_LABELS.get(
+            pfc_primary, format_pfc_detailed_label(pfc_primary, pfc_primary)
+        )
         # Plaid's INCOME primary is the default "what counts as income" bucket;
         # auto-flag every new INCOME parent so the new Income reports pick it
         # up without manual setup. Users can still flip the flag off later.
@@ -198,7 +168,9 @@ class CategoriesRepository:
                     return row["id"]
 
             # 3. Auto-create detailed row (source=plaid_pfc) and link to parent.
-            name = _pretty_name(pfc_detailed or pfc_primary or "Other", pfc_primary)
+            name = format_pfc_detailed_label(
+                pfc_detailed or pfc_primary or "Other", pfc_primary
+            )
             # Every PFC INCOME_* subcategory (wages, interest, tax refund, ...)
             # counts as income by default; mirror the parent-row behaviour so
             # the new Income report captures newly-synced income subcategories

@@ -4,23 +4,27 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from tests.v2.conftest import make_mock_pool
-from web.categories.repo import CategoriesRepository, _pretty_name
+from web.categories.pfc_display import format_pfc_detailed_label
+from web.categories.repo import CategoriesRepository
 
 
 class TestPrettyName:
     def test_basic_conversion(self):
-        assert _pretty_name("FOOD_AND_DRINK_RESTAURANTS", "FOOD_AND_DRINK") == "Food & Drink: Restaurants"
+        assert (
+            format_pfc_detailed_label("FOOD_AND_DRINK_RESTAURANTS", "FOOD_AND_DRINK")
+            == "Food & Drink: Restaurants"
+        )
 
     def test_no_primary(self):
-        name = _pretty_name("ENTERTAINMENT_MUSIC_AND_AUDIO", None)
+        name = format_pfc_detailed_label("ENTERTAINMENT_MUSIC_AND_AUDIO", None)
         assert name
 
     def test_primary_only(self):
-        name = _pretty_name("TRANSPORTATION", "TRANSPORTATION")
+        name = format_pfc_detailed_label("TRANSPORTATION", "TRANSPORTATION")
         assert name
 
     def test_income(self):
-        name = _pretty_name("INCOME_WAGES", "INCOME")
+        name = format_pfc_detailed_label("INCOME_WAGES", "INCOME")
         assert "Income" in name or "Wages" in name
 
 
