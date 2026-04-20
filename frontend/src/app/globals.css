@@ -140,9 +140,17 @@
   50%      { transform: translateX(6%); }
 }
 
+/* Register a custom angle property so we can animate the conic-gradient
+   rotation INTERNALLY, without rotating the pseudo-element box itself.
+   Rotating the box caused a giant "windshield wiper" on wide hero cards. */
+@property --hero-glow-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
 @keyframes hero-glow-spin {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
+  to { --hero-glow-angle: 360deg; }
 }
 
 /* Ambient glow on hero cards. Dark mode only — the conic gradient is
@@ -150,15 +158,17 @@
 .hero-glow {
   position: relative;
   isolation: isolate;
+  /* Clip the blurred glow so it never leaks outside the card bounds. */
+  overflow: hidden;
 }
 
 .hero-glow::before {
   content: "";
   position: absolute;
-  inset: -1px;
+  inset: 0;
   border-radius: inherit;
   background: conic-gradient(
-    from 0deg,
+    from var(--hero-glow-angle),
     color-mix(in oklab, var(--primary) 55%, transparent),
     color-mix(in oklab, #0ea5e9 40%, transparent),
     color-mix(in oklab, #10b981 40%, transparent),
@@ -173,7 +183,21 @@
 }
 
 :root.dark .hero-glow::before {
-  opacity: 0.32;
+  opacity: 0.28;
+}
+
+/* Fallback for browsers without @property support: no rotation, static glow. */
+@supports not (background: conic-gradient(from var(--hero-glow-angle), red, blue)) {
+  .hero-glow::before {
+    background: conic-gradient(
+      from 0deg,
+      color-mix(in oklab, var(--primary) 55%, transparent),
+      color-mix(in oklab, #0ea5e9 40%, transparent),
+      color-mix(in oklab, #10b981 40%, transparent),
+      color-mix(in oklab, var(--primary) 55%, transparent)
+    );
+    animation: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
