@@ -220,6 +220,17 @@ def schedule_debounced_sync_item(item_id: str, delay_sec: float = 12.0) -> None:
     _debounce_tasks[item_id] = loop.create_task(_job())
 
 
+async def iter_sync_all_items(*, audit_source: str = "manual"):
+    """Yield one result dict per Plaid item (same payloads as ``sync_all_items``)."""
+    from .repo import get_plaid_repo
+
+    repo = get_plaid_repo()
+    items = await repo.get_items()
+    source = _get_source()
+    for item in items:
+        yield await _sync_item_payload(item, source, audit_source=audit_source)
+
+
 async def sync_all_items(*, audit_source: str = "manual") -> List[dict]:
     """
     Sync all connected Plaid items.
@@ -228,17 +239,7 @@ async def sync_all_items(*, audit_source: str = "manual") -> List[dict]:
     ``audit_source`` flags who drove this run for the audit log — the
     scheduler passes ``scheduler``, manual endpoints pass ``manual``.
     """
-    from .repo import get_plaid_repo
-
-    repo = get_plaid_repo()
-    items = await repo.get_items()
-    source = _get_source()
-    results: List[dict] = []
-    for item in items:
-        results.append(
-            await _sync_item_payload(item, source, audit_source=audit_source)
-        )
-    return results
+    return [r async for r in iter_sync_all_items(audit_source=audit_source)]
 
 
 # ---------------------------------------------------------------------------

@@ -21,6 +21,7 @@ import {
   Building2, RefreshCw, Trash2, CheckCircle, AlertCircle, Clock, RotateCcw, Loader2,
 } from "lucide-react";
 import { plaidApi } from "@/lib/api";
+import { Progress } from "@/components/ui/progress";
 import { TRANSACTIONS_DATE_RANGE_QUERY_KEY } from "@/lib/hooks/use-transactions-date-range";
 import type { PlaidItem, PlaidSyncResult } from "@/types/v2";
 import { AutosyncPanel } from "./autosync-card";
@@ -150,11 +151,18 @@ function DangerConfirmDialog({
 // ---------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------
+type SyncUiProgress = {
+  index: number;
+  total: number;
+  bankLabel: string | null;
+};
+
 export function PlaidBankConnections() {
   const queryClient = useQueryClient();
 
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [resetTarget, setResetTarget] = useState<string | null>(null);
+  const [syncUiProgress, setSyncUiProgress] = useState<SyncUiProgress | null>(null);
 
   const { data: items = [], isLoading: itemsLoading } = useQuery<PlaidItem[]>({
     queryKey: ["plaid-items"],
@@ -167,7 +175,20 @@ export function PlaidBankConnections() {
   });
 
   const syncMutation = useMutation<PlaidSyncResult[]>({
-    mutationFn: plaidApi.sync,
+    mutationFn: async () => {
+      const snapshot = items;
+      const total = snapshot.length;
+      setSyncUiProgress({ index: 0, total, bankLabel: null });
+      return plaidApi.syncStream((ev) => {
+        setSyncUiProgress({
+          index: ev.index,
+          total: ev.total,
+          bankLabel:
+            snapshot.find((i) => i.item_id === ev.result.item_id)?.institution_name ??
+            "Bank",
+        });
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["plaid-items"] });
       queryClient.invalidateQueries({ queryKey: ["plaid-sync-log"] });
@@ -175,6 +196,7 @@ export function PlaidBankConnections() {
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
       queryClient.invalidateQueries({ queryKey: TRANSACTIONS_DATE_RANGE_QUERY_KEY });
     },
+    onSettled: () => setSyncUiProgress(null),
   });
 
   const deleteMutation = useMutation({
@@ -358,6 +380,20 @@ export function PlaidBankConnections() {
               ) : null}
             </Button>
           </div>
+
+          {syncMutation.isPending && syncUiProgress && syncUiProgress.total > 0 ? (
+            <div className="mt-3 space-y-2">
+              <Progress
+                value={Math.min(100, (syncUiProgress.index / syncUiProgress.total) * 100)}
+                className="h-2"
+              />
+              <p className="text-xs text-muted-foreground">
+                {syncUiProgress.index === 0
+                  ? `Starting sync (${syncUiProgress.total} ${syncUiProgress.total === 1 ? "bank" : "banks"})…`
+                  : `Finished ${syncUiProgress.index} of ${syncUiProgress.total} · ${syncUiProgress.bankLabel ?? "Bank"}`}
+              </p>
+            </div>
+          ) : null}
 
           {/* Sync results */}
           {syncMutation.data && (

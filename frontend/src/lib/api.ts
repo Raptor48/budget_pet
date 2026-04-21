@@ -3,6 +3,7 @@
  * Uses cookie auth with Authorization: Bearer fallback from sessionStorage.
  */
 import { getAuthHeaders } from '@/lib/auth';
+import { getApiBaseUrl } from '@/lib/api-base';
 import type {
   Account,
   AuditEntry,
@@ -433,6 +434,66 @@ export const reportsApi = {
 // Plaid
 // ---------------------------------------------------------------------------
 
+/** One bank finished during ``POST /api/plaid/sync/stream`` (NDJSON line). */
+export type PlaidSyncStreamEvent = {
+  index: number;
+  total: number;
+  result: PlaidSyncResult;
+};
+
+/**
+ * Manual Plaid sync with NDJSON progress (Settings → Sync Now).
+ * Yields one event per item as it completes; resolves with the full result list.
+ */
+export async function plaidSyncStream(
+  onProgress: (ev: PlaidSyncStreamEvent) => void,
+): Promise<PlaidSyncResult[]> {
+  const url = `${getApiBaseUrl()}/api/plaid/sync/stream`;
+  const headers: Record<string, string> = {
+    ...(getAuthHeaders() as Record<string, string>),
+  };
+  const response = await fetch(url, { method: 'POST', headers, credentials: 'include' });
+  if (!response.ok) {
+    let detail = `HTTP ${response.status}`;
+    try {
+      const body = await response.json();
+      detail = body.detail || body.message || detail;
+    } catch {
+      // ignore
+    }
+    throw new ApiError(response.status, detail, detail);
+  }
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new ApiError(0, 'No response body', 'No response body');
+  }
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const collected: PlaidSyncResult[] = [];
+
+  const flushLine = (raw: string) => {
+    const trimmed = raw.trim();
+    if (!trimmed) return;
+    const msg = JSON.parse(trimmed) as PlaidSyncStreamEvent;
+    onProgress(msg);
+    collected.push(msg.result);
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+    let nl: number;
+    while ((nl = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, nl);
+      buffer = buffer.slice(nl + 1);
+      flushLine(line);
+    }
+    if (done) break;
+  }
+  flushLine(buffer);
+  return collected;
+}
+
 export const plaidApi = {
   getLinkToken: (itemId?: string): Promise<{ link_token: string; expiration: string }> =>
     apiRequest('/api/plaid/link-token', {
@@ -472,6 +533,10 @@ export const plaidApi = {
 
   sync: (): Promise<PlaidSyncResult[]> =>
     apiRequest('/api/plaid/sync', { method: 'POST' }),
+
+  /** Same end state as ``sync``, but streams NDJSON progress for the UI. */
+  syncStream: (onProgress: (ev: PlaidSyncStreamEvent) => void): Promise<PlaidSyncResult[]> =>
+    plaidSyncStream(onProgress),
 
   getSyncLog: (): Promise<PlaidSyncLogEntry[]> =>
     apiRequest('/api/plaid/sync/log'),
