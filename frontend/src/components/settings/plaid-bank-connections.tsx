@@ -32,11 +32,15 @@ function ConnectBankButton({
   onSuccess,
   itemId,
   label = "Connect Bank",
+  buttonVariant = "default",
+  buttonSize = "default",
 }: {
   onSuccess: () => void;
   /** When set, Plaid Link opens in update mode for this item. */
   itemId?: string;
   label?: string;
+  buttonVariant?: "default" | "destructive" | "outline" | "secondary" | "ghost" | "link";
+  buttonSize?: "default" | "sm" | "lg" | "icon";
 }) {
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -84,7 +88,14 @@ function ConnectBankButton({
 
   return (
     <div className="flex flex-col items-start gap-1">
-      <Button type="button" onClick={handleConnect} disabled={loading} className="gap-2">
+      <Button
+        type="button"
+        variant={buttonVariant}
+        size={buttonSize}
+        onClick={handleConnect}
+        disabled={loading}
+        className="gap-2"
+      >
         <Building2 className="h-4 w-4" />
         {loading ? "Connecting..." : label}
       </Button>
@@ -257,16 +268,16 @@ export function PlaidBankConnections() {
                     </p>
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center justify-end gap-1 ml-3">
-                    {item.item_login_required ? (
-                      <ConnectBankButton
-                        itemId={item.item_id}
-                        label="Fix connection"
-                        onSuccess={() => {
-                          queryClient.invalidateQueries({ queryKey: ["plaid-items"] });
-                          queryClient.invalidateQueries({ queryKey: ["plaid-sync-log"] });
-                        }}
-                      />
-                    ) : null}
+                    <ConnectBankButton
+                      itemId={item.item_id}
+                      label={item.item_login_required ? "Fix connection" : "Update login"}
+                      buttonVariant={item.item_login_required ? "default" : "outline"}
+                      buttonSize="sm"
+                      onSuccess={() => {
+                        queryClient.invalidateQueries({ queryKey: ["plaid-items"] });
+                        queryClient.invalidateQueries({ queryKey: ["plaid-sync-log"] });
+                      }}
+                    />
                     {/* Reset cursor — danger */}
                     <Button
                       size="sm"
@@ -297,13 +308,7 @@ export function PlaidBankConnections() {
           )}
         </div>
 
-        {/* Autosync schedule + webhook toggle — tightly coupled with the
-            manual sync below, so we render them together inside the same
-            card. Hidden when no banks are connected because neither setting
-            has any effect yet. */}
-        {items.length > 0 ? <AutosyncPanel /> : null}
-
-        {/* Manual sync — always below the bank list */}
+        {/* Manual sync — directly under bank list */}
         <div className="rounded-lg border border-border/60 bg-muted/20 px-4 py-3">
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-0.5">
@@ -372,6 +377,9 @@ export function PlaidBankConnections() {
             </div>
           )}
         </div>
+
+        {/* Autosync schedule + webhook toggle — after Sync Now. Hidden when no banks. */}
+        {items.length > 0 ? <AutosyncPanel /> : null}
       </CardContent>
 
       {/* Danger dialogs */}
