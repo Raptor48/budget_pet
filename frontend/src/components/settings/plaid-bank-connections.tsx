@@ -398,18 +398,29 @@ export function PlaidBankConnections() {
           {/* Sync results */}
           {syncMutation.data && (
             <div className="mt-3 space-y-1">
-              {syncMutation.data.map((r) => (
+              {syncMutation.data.map((r) => {
+                const bankLabel =
+                  items.find((i) => i.item_id === r.item_id)?.institution_name ?? r.item_id;
+                return (
                 <Alert key={r.item_id} variant={r.status === "ok" ? "default" : "destructive"}>
                   {r.status === "ok"
                     ? <CheckCircle className="h-4 w-4" />
                     : <AlertCircle className="h-4 w-4" />}
                   <AlertDescription>
                     {r.status === "ok"
-                      ? `Synced: +${r.transactions_added} transactions, ${r.balances_updated} balances updated`
-                      : `Error: ${r.error_msg}`}
+                      ? `${bankLabel}: +${r.transactions_added} transactions, ${r.balances_updated} balances updated`
+                      : (
+                          <>
+                            <span className="font-medium">{bankLabel}</span>
+                            <span className="text-muted-foreground"> ({r.item_id})</span>
+                            {": "}
+                            {r.error_msg}
+                          </>
+                        )}
                   </AlertDescription>
                 </Alert>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
