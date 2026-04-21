@@ -77,6 +77,8 @@ async def _sync_item_payload(
     from web.investments.repo import InvestmentsRepository
     from web.reports.repo import ReportsRepository
 
+    from .reauth_errors import plaid_error_requires_item_reauth
+
     repo = get_plaid_repo()
     item_id = item["item_id"]
     access_token = item["access_token"]
@@ -154,6 +156,11 @@ async def _sync_item_payload(
         status = "error"
         error_msg = str(exc)
         logger.error("Plaid sync failed for item %s: %s", item_id, exc, exc_info=True)
+        if plaid_error_requires_item_reauth(exc):
+            await repo.set_item_login_required(item_id, True)
+            logger.warning(
+                "Marked item %s as item_login_required after re-auth Plaid error", item_id
+            )
 
     await repo.log_sync(
         item_id,
