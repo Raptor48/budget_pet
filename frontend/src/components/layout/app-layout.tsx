@@ -5,6 +5,7 @@ import { Sidebar } from "./sidebar";
 import { Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { PlaidAttentionBanner } from "@/components/layout/plaid-attention-banner";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -149,6 +150,7 @@ export function AppLayout({ children }: AppLayoutProps) {
           {/* Scroll sentinel for the parallax-blur header effect. */}
           <div ref={sentinelRef} aria-hidden className="h-px w-full" />
           <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
+            <PlaidAttentionBanner />
             {children}
           </div>
         </main>
