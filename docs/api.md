@@ -160,7 +160,8 @@ expense totals by the class predicate itself (no separate
 | GET | /api/plaid/items/{item_id}/data-summary | Counts of accounts and Plaid-sourced transactions tied to the item; used by the UI to warn before destructive delete + purge. |
 | DELETE | /api/plaid/items/{item_id} | Disconnect a bank. `?purge=true` also deletes accounts, Plaid-sourced transactions, recurring streams and investment holdings for this item. Default (`?purge=false`) keeps imported data for historical reports, but reconnecting the same bank will create duplicate rows because Plaid issues new `item_id` / `account_id` values on every re-link. Cash/manual transactions are never removed. |
 | POST | /api/plaid/items/{item_id}/reset-cursor | Reset sync cursor |
-| POST | /api/plaid/sync | Trigger manual sync for all items |
+| POST | /api/plaid/sync | Trigger manual sync for all items (JSON body: list of per-item results). |
+| POST | /api/plaid/sync/stream | Same sync + same audit as `/sync`, but response is **NDJSON**: one line per item as it finishes, ``{"index": 1, "total": N, "result": { … }}``. For long runs the Settings UI consumes this stream to show a progress bar. |
 | GET | /api/plaid/sync/log | Last 50 sync log entries |
 | DELETE | /api/plaid/sync/log | **Owner-only.** Deletes every row in `plaid_sync_log`. Writes a `plaid.sync_log_cleared` audit entry with `{ deleted }`. Used by Settings → Log "Clear sync log" button. |
 | POST | /api/plaid/webhook | Plaid webhooks (HTTPS); verifies Plaid JWT; handles `ITEM_LOGIN_REQUIRED`, `SYNC_UPDATES_AVAILABLE` |
