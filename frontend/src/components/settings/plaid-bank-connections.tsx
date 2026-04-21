@@ -229,7 +229,7 @@ export function PlaidBankConnections() {
   const lastSync = syncLog[0] as (typeof syncLog)[0] | undefined;
 
   return (
-    <Card>
+    <Card id="settings-bank-connections">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Building2 className="h-5 w-5" />
