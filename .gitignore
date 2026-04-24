@@ -12,8 +12,12 @@ env/
 
 # Sensitive
 .env
-.env.local
+.env.*
+!.env.template
 budget.db
+
+# Claude Code workspace
+.claude/
 
 # OS junk
 .DS_Store
