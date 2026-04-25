@@ -167,6 +167,10 @@ class AuthRepository:
         try:
             return bcrypt.checkpw(plain.encode(), hashed.encode())
         except Exception:
+            # Malformed hash or other bcrypt errors fail closed (no auth).
+            # Log at debug so corrupted user records can be diagnosed without
+            # leaking credentials into normal logs.
+            logger.debug("verify_password failed unexpectedly", exc_info=True)
             return False
 
 

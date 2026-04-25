@@ -509,7 +509,10 @@ async def _migrate_v21_addons(conn) -> None:
             try:
                 await _ddl(conn, col)
             except Exception:
-                pass
+                # IF NOT EXISTS should make this idempotent. A failure here
+                # signals a real schema mismatch (e.g. column exists with a
+                # different type) — log so it's not silently swallowed.
+                logger.warning("plaid_items column upgrade failed: %s", col, exc_info=True)
 
     await _ddl(conn,
         """
