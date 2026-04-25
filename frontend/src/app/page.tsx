@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
 import { CategoryDonutWidget } from "@/components/charts/category-donut-chart";
 import { FinancialHealthCompactCard } from "@/components/reports/financial-health-hero-card";
+import { PlaidAttentionPlate } from "@/components/layout/plaid-attention-banner";
 import {
   Card,
   CardContent,
@@ -27,7 +28,6 @@ import { PlaidTxnAmount } from "@/components/ui/plaid-txn-amount";
 import type { ForecastEntry, Transaction } from "@/types/v2";
 import { cn } from "@/lib/utils";
 import { composeInsightsBadge, pickTeaser } from "@/lib/insights-teaser";
-import { Button } from "@/components/ui/button";
 
 /** Plain currency (balances, aggregates — not Plaid signed transaction lines). */
 function formatUsd(cents: number): string {
@@ -192,12 +192,29 @@ function DashboardContent() {
   const visibleTransactions = txExpanded ? transactions : transactions.slice(0, COMPACT_DEFAULT);
   const visibleBudgets = budgetExpanded ? topBudgets : topBudgets.slice(0, COMPACT_DEFAULT);
 
+  // Pretty current-month label for the inline header — "April 2026" beats
+  // the raw "2026-04" YYYY-MM token.
+  const currentMonthLabel = (() => {
+    const [y, m] = month.split("-").map(Number);
+    if (!y || !m) return month;
+    return new Date(y, m - 1, 15).toLocaleDateString("en-US", {
+      month: "long",
+      year: "numeric",
+    });
+  })();
+
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground text-sm">Overview for {spendMonth}</p>
-      </div>
+      {/* Slim breadcrumb-style header: just the month label as a single line.
+          Sidebar already tells the user they're on the Dashboard, so the
+          "Dashboard" H1 was wasted vertical real estate. */}
+      <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300">
+        Overview · <span className="text-foreground">{currentMonthLabel}</span>
+      </p>
+
+      {/* Inline plate replaces the global full-width banner from before.
+          Auto-hides when nothing's wrong, so it doesn't add noise. */}
+      <PlaidAttentionPlate />
 
       {/* Row 1 — 4 KPI cards in a single line: Net Worth · Cash Flow · Health · Insights.
           Each card aims for the same visual weight (~150px tall): a headline number,
@@ -282,43 +299,53 @@ function DashboardContent() {
           isError={healthQuery.isError}
         />
 
-        <Link href="/insights" className="group block outline-none">
-          <Card
-            className={cn(
-              "h-full border-primary/20 transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-lg",
-              insightsTeaser?.severity === "warn" && "border-amber-500/60",
-            )}
-          >
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center justify-between gap-2 text-sm font-medium text-muted-foreground">
-                Insights
-                <Badge
-                  variant={insightsTeaser?.severity === "warn" ? "destructive" : "secondary"}
-                  className="font-normal"
-                >
-                  {composeInsightsBadge(insights)}
-                </Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <p className="text-sm leading-snug text-foreground">
-                {insightsTeaser?.summary ?? "Trends, health, and spending stories."}
-              </p>
-              {insightsTeaser?.action_url && insightsTeaser.action_label && (
-                <Button
-                  asChild
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Link href={insightsTeaser.action_url}>{insightsTeaser.action_label}</Link>
-                </Button>
-              )}
-              <p className="text-primary text-xs font-medium group-hover:underline">View all insights →</p>
-            </CardContent>
-          </Card>
-        </Link>
+        {/* Insights card. Single CTA contract: when the most-severe card has
+            an action URL we jump the user to that filtered view directly;
+            when there's no actionable target, the whole card links to the
+            full insights feed. Two visible CTAs were noisy and competed. */}
+        {(() => {
+          const hasAction = Boolean(
+            insightsTeaser?.action_url && insightsTeaser.action_label,
+          );
+          const cardHref = hasAction
+            ? insightsTeaser!.action_url!
+            : "/insights";
+          const ctaLabel = hasAction
+            ? insightsTeaser!.action_label!
+            : "View all insights";
+          return (
+            <Link href={cardHref} className="group block outline-none">
+              <Card
+                className={cn(
+                  "h-full border-primary/20 transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-lg",
+                  insightsTeaser?.severity === "warn" && "border-amber-500/60",
+                )}
+              >
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center justify-between gap-2 text-sm font-medium text-muted-foreground">
+                    Insights
+                    <Badge
+                      variant={
+                        insightsTeaser?.severity === "warn" ? "destructive" : "secondary"
+                      }
+                      className="font-normal"
+                    >
+                      {composeInsightsBadge(insights)}
+                    </Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <p className="line-clamp-3 text-sm leading-snug text-foreground">
+                    {insightsTeaser?.summary ?? "Trends, health, and spending stories."}
+                  </p>
+                  <p className="text-primary text-xs font-medium transition-transform group-hover:underline group-hover:translate-x-0.5">
+                    {ctaLabel} →
+                  </p>
+                </CardContent>
+              </Card>
+            </Link>
+          );
+        })()}
       </div>
 
       {/* Row 2 — Spending pie (2/3) + Budget compact (1/3) */}

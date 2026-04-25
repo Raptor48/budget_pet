@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { addMonths, format, subMonths } from "date-fns";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -456,67 +456,95 @@ export function BudgetsView() {
           ) : null}
         </Card>
       ) : (
-        <div className="space-y-6">
-          {groupedRows.map((group) => {
-            const parent = group.parent;
-            const hasKids = group.children.length > 0;
-            return (
-              <section key={group.key} className="space-y-3">
-                {parent ? (
-                  <BudgetCard
-                    row={parent}
-                    variant="parent"
-                    subtitle={
-                      hasKids
-                        ? `Parent bucket · rolls up ${group.children.length} subcategory ${
-                            group.children.length === 1 ? "budget" : "budgets"
-                          }`
-                        : "Parent bucket"
-                    }
-                    onEdit={openEdit}
-                    onDelete={handleDelete}
-                    deleting={deleteMutation.isPending}
-                  />
-                ) : hasKids ? (
-                  <header className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    <span
-                      className="size-2.5 shrink-0 rounded-full border"
-                      style={{ backgroundColor: group.children[0]?.category_color }}
+        (() => {
+          // Split groups into two visual flows so the page reads as a tight
+          // grid of standalone budgets up top and per-parent expanded
+          // sections below — instead of one full-width parent per row.
+          const standaloneGroups = groupedRows.filter(
+            (g) => g.parent != null && g.children.length === 0,
+          );
+          const expandedGroups = groupedRows.filter(
+            (g) => g.children.length > 0 || g.parent == null,
+          );
+          return (
+            <div className="space-y-6">
+              {standaloneGroups.length > 0 ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {standaloneGroups.map((group) => (
+                    <BudgetCard
+                      key={group.key}
+                      row={group.parent!}
+                      variant="parent"
+                      onEdit={openEdit}
+                      onDelete={handleDelete}
+                      deleting={deleteMutation.isPending}
                     />
-                    <span>
-                      {categoriesById.get(group.children[0]?.category_id)
-                        ? categoriesById
-                            .get(group.children[0]!.category_id)
-                            ?.parent_id != null
-                          ? (categoriesById.get(
-                              categoriesById.get(group.children[0]!.category_id)!
-                                .parent_id!,
-                            )?.name ?? "Other")
-                          : "Other"
-                        : "Other"}
-                    </span>
-                    <span className="text-muted-foreground/60">· subcategory budgets</span>
-                  </header>
-                ) : null}
+                  ))}
+                </div>
+              ) : null}
 
-                {hasKids ? (
-                  <div className="grid gap-3 pl-4 border-l-2 border-muted sm:grid-cols-2 xl:grid-cols-3">
-                    {group.children.map((child) => (
+              {expandedGroups.map((group) => {
+                const parent = group.parent;
+                const hasKids = group.children.length > 0;
+                return (
+                  <section key={group.key} className="space-y-3">
+                    {parent ? (
                       <BudgetCard
-                        key={child.budgetId}
-                        row={child}
-                        variant="child"
+                        row={parent}
+                        variant="parent"
+                        subtitle={
+                          hasKids
+                            ? `Rolls up ${group.children.length} ${
+                                group.children.length === 1 ? "subcategory" : "subcategories"
+                              }`
+                            : undefined
+                        }
                         onEdit={openEdit}
                         onDelete={handleDelete}
                         deleting={deleteMutation.isPending}
                       />
-                    ))}
-                  </div>
-                ) : null}
-              </section>
-            );
-          })}
-        </div>
+                    ) : hasKids ? (
+                      <header className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        <span
+                          className="size-2.5 shrink-0 rounded-full border"
+                          style={{ backgroundColor: group.children[0]?.category_color }}
+                        />
+                        <span>
+                          {categoriesById.get(group.children[0]?.category_id)
+                            ? categoriesById
+                                .get(group.children[0]!.category_id)
+                                ?.parent_id != null
+                              ? (categoriesById.get(
+                                  categoriesById.get(group.children[0]!.category_id)!
+                                    .parent_id!,
+                                )?.name ?? "Other")
+                              : "Other"
+                            : "Other"}
+                        </span>
+                        <span className="text-muted-foreground/60">· subcategory budgets</span>
+                      </header>
+                    ) : null}
+
+                    {hasKids ? (
+                      <div className="grid gap-3 pl-4 border-l-2 border-muted sm:grid-cols-2">
+                        {group.children.map((child) => (
+                          <BudgetCard
+                            key={child.budgetId}
+                            row={child}
+                            variant="child"
+                            onEdit={openEdit}
+                            onDelete={handleDelete}
+                            deleting={deleteMutation.isPending}
+                          />
+                        ))}
+                      </div>
+                    ) : null}
+                  </section>
+                );
+              })}
+            </div>
+          );
+        })()
       )}
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
@@ -686,9 +714,17 @@ export function BudgetsView() {
 }
 
 /**
- * Renders a single budget card. `variant="parent"` adds a "Parent bucket" badge
- * and slightly more prominent styling; `variant="child"` is the compact form
- * used inside a parent group's indented list.
+ * Compact budget card. ~100px tall — half the height of the previous version.
+ *
+ * Layout, top to bottom:
+ *   row 1   color dot · name · PARENT badge · percent · edit · delete
+ *   row 2   amounts inline (budget · spent · saved-last-month dopamine)
+ *   row 3   slim progress bar (h-1.5)
+ *   row 4   status (Remaining $X / Over by $X)
+ *
+ * Edit/Delete are subtle ghost icon-buttons in the top-right of the row;
+ * they reveal a colored hover state without dominating the card the way
+ * the previous big "Edit" / "Delete" buttons in a footer did.
  */
 function BudgetCard({
   row,
@@ -713,85 +749,103 @@ function BudgetCard({
       : tone === "yellow"
         ? "[&>div]:bg-amber-500"
         : "[&>div]:bg-emerald-600";
-  // Dopamine badge: positive diff = saved last month (emerald + sparkle),
-  // negative = ran over (muted gray, no shame). Null = no prior budget,
-  // hide entirely.
+  const percentClass =
+    tone === "red"
+      ? "text-destructive"
+      : tone === "yellow"
+        ? "text-amber-600 dark:text-amber-500"
+        : "text-emerald-600 dark:text-emerald-400";
   const prevDiff = row.previous_month_diff_cents;
   return (
     <Card
       className={cn(
-        "overflow-hidden transition-shadow motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300 hover:shadow-md",
-        variant === "parent" && "border-primary/20",
+        "group overflow-hidden transition-shadow motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300 hover:shadow-md",
+        variant === "parent" && "border-primary/25",
       )}
     >
-      <CardHeader className="pb-2">
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span
-              className="size-3 shrink-0 rounded-full border"
-              style={{ backgroundColor: row.category_color }}
-              title="Category color"
-            />
-            <CardTitle className="text-base leading-snug">{row.category_name}</CardTitle>
-            {variant === "parent" ? (
-              <Badge variant="secondary" className="ml-1 text-[10px] uppercase tracking-wide">
-                Parent
-              </Badge>
-            ) : null}
+      <div className="space-y-1.5 px-4 py-3">
+        {/* Row 1: title + percent + actions */}
+        <div className="flex items-center gap-2">
+          <span
+            className="size-2.5 shrink-0 rounded-full border"
+            style={{ backgroundColor: row.category_color }}
+            aria-hidden
+          />
+          <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+            {row.category_name}
+          </span>
+          {variant === "parent" ? (
+            <Badge
+              variant="secondary"
+              className="shrink-0 px-1.5 py-0 text-[9px] uppercase tracking-wide"
+            >
+              Parent
+            </Badge>
+          ) : null}
+          <span className={cn("shrink-0 text-xs font-semibold tabular-nums", percentClass)}>
+            {row.percent_used.toFixed(0)}%
+          </span>
+          {/* Action icons. Subtle by default, slightly emphasized on card hover. */}
+          <div className="flex shrink-0 items-center gap-0.5 opacity-70 transition-opacity group-hover:opacity-100">
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="size-7"
+              onClick={() => onEdit(row)}
+              aria-label={`Edit budget for ${row.category_name}`}
+            >
+              <Pencil className="size-3.5" />
+            </Button>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="size-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => onDelete(row)}
+              disabled={deleting}
+              aria-label={`Delete budget for ${row.category_name}`}
+            >
+              <Trash2 className="size-3.5" />
+            </Button>
           </div>
-          <Badge variant="outline" className="tabular-nums">
-            {row.percent_used.toFixed(0)}% used
-          </Badge>
         </div>
-        <CardDescription className="tabular-nums">
-          Budget {formatCurrency(row.budget_cents)} · Spent {formatCurrency(row.actual_cents)}
-        </CardDescription>
-        {prevDiff != null ? (
-          prevDiff > 0 ? (
-            <p className="flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+
+        {/* Row 2: amounts + dopamine inline */}
+        <p className="text-xs leading-snug text-muted-foreground tabular-nums">
+          <span className="font-medium text-foreground">{formatCurrency(row.budget_cents)}</span>
+          <span> · spent </span>
+          <span className="font-medium text-foreground">{formatCurrency(row.actual_cents)}</span>
+          {prevDiff != null && prevDiff > 0 ? (
+            <span className="ml-2 inline-flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400">
               <Sparkles className="size-3" aria-hidden />
               Saved {formatCurrency(prevDiff)} last month
-            </p>
-          ) : prevDiff < 0 ? (
-            <p className="text-xs text-muted-foreground">
-              Spent {formatCurrency(-prevDiff)} over last month
-            </p>
+            </span>
+          ) : prevDiff != null && prevDiff < 0 ? (
+            <span className="ml-2">over {formatCurrency(-prevDiff)} last month</span>
+          ) : null}
+        </p>
+
+        {/* Row 3: slim progress bar */}
+        <Progress value={barValue} className={cn("h-1.5", indicatorClass)} />
+
+        {/* Row 4: remaining / over status. Subtitle (rare, only on parent
+            standalone) tucks alongside as muted afterthought. */}
+        <div className="flex items-center justify-between gap-2 text-xs leading-snug">
+          {row.remaining_cents < 0 ? (
+            <span className="font-medium text-destructive">
+              Over by {formatCurrency(-row.remaining_cents)}
+            </span>
           ) : (
-            <p className="text-xs text-muted-foreground">Hit the budget exactly last month</p>
-          )
-        ) : null}
-        {subtitle ? (
-          <p className="text-xs text-muted-foreground/80">{subtitle}</p>
-        ) : null}
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <Progress value={barValue} className={cn("h-2", indicatorClass)} />
-        {row.remaining_cents < 0 ? (
-          <p className="text-destructive text-sm font-medium">
-            Over by {formatCurrency(-row.remaining_cents)}
-          </p>
-        ) : (
-          <p className="text-muted-foreground text-sm">
-            Remaining {formatCurrency(row.remaining_cents)}
-          </p>
-        )}
-      </CardContent>
-      <CardFooter className="flex justify-end gap-2 border-t pt-4">
-        <Button type="button" size="sm" variant="outline" onClick={() => onEdit(row)}>
-          <Pencil className="size-3.5" />
-          Edit
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="destructive"
-          onClick={() => onDelete(row)}
-          disabled={deleting}
-        >
-          <Trash2 className="size-3.5" />
-          Delete
-        </Button>
-      </CardFooter>
+            <span className="text-muted-foreground">
+              {formatCurrency(row.remaining_cents)} remaining
+            </span>
+          )}
+          {subtitle ? (
+            <span className="truncate text-[10px] text-muted-foreground/70">{subtitle}</span>
+          ) : null}
+        </div>
+      </div>
     </Card>
   );
 }
