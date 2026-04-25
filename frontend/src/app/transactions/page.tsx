@@ -201,8 +201,16 @@ function MerchantAvatar({ tx }: { tx: Transaction }) {
   const [failed, setFailed] = useState(false);
   const name = displayName(tx);
   const showImg = Boolean(tx.logo_url) && !failed;
-  const seed = (tx.merchant_name || tx.name || name || "?").toLowerCase();
-  const gradient = pickMerchantGradient(seed);
+  // Color must be stable across rows of the same merchant. Plaid's
+  // `merchant_entity_id` is the canonical merchant key; fall back to the
+  // *normalized* display title so two rows of the same Uber ride that
+  // differ only by POS payload still hash to the same gradient. Avoid
+  // raw `name` / `merchant_name` because they vary per transaction
+  // (trailing periods, store numbers, etc).
+  const seed = (tx.merchant_entity_id || name || "?")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+  const gradient = pickMerchantGradient(seed || "?");
 
   return (
     <div
@@ -531,6 +539,8 @@ function TransactionDetailsDialog({
   const [initialNote, setInitialNote] = useState("");
   const [initialCategoryId, setInitialCategoryId] = useState(ALL);
 
+  const queryClient = useQueryClient();
+
   const {
     data: transaction,
     isLoading,
@@ -540,6 +550,20 @@ function TransactionDetailsDialog({
     queryKey: ["transaction", transactionId],
     queryFn: () => transactionsApi.get(transactionId!),
     enabled: open && transactionId != null,
+    // The list query already holds an enriched copy of every visible row.
+    // Use it as the placeholder so the dialog renders instantly and the
+    // user is never blocked on a cold-start backend round-trip. The real
+    // GET still runs in the background and overwrites once it lands.
+    placeholderData: () => {
+      if (transactionId == null) return undefined;
+      const lists = queryClient.getQueriesData<Transaction[]>({ queryKey: ["transactions"] });
+      for (const [, data] of lists) {
+        if (!Array.isArray(data)) continue;
+        const found = data.find((t) => t && t.id === transactionId);
+        if (found) return found;
+      }
+      return undefined;
+    },
   });
 
   useEffect(() => {
