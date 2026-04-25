@@ -9,6 +9,14 @@ Tables used:
   - categories      (V2: auto-resolved via PFC)
 
 This module replaces the V1 implementation that used expenses + finance_* tables.
+
+Access tokens are encrypted at rest via :mod:`web.plaid.crypto` when
+``PLAID_ENCRYPTION_KEY`` is configured. ``save_item`` / ``get_item`` /
+``get_items`` shield callers from the encryption: they always operate
+on plaintext via the ``access_token`` field and persist ciphertext into
+``access_token_encrypted`` transparently. The legacy plain ``access_token``
+column is kept as a fallback so deploys made before the env var is set
+keep working.
 """
 import json
 import logging
@@ -17,6 +25,8 @@ from typing import Any, Dict, List, Optional
 import asyncpg
 
 from web.db import get_pool
+
+from . import crypto as plaid_crypto
 
 logger = logging.getLogger(__name__)
 
@@ -51,18 +61,28 @@ class PlaidRepository:
                     last_synced_at       TIMESTAMPTZ
                 )
             """)
-            # Additive columns for existing installations (idempotent)
+            # Additive columns for existing installations (idempotent).
+            # access_token_encrypted is BYTEA holding the Fernet ciphertext;
+            # NULL while a row predates encryption rollout (see backfill).
+            # Plain access_token loses its NOT NULL once encryption is in
+            # play — new rows write only the encrypted column.
             for col_sql in (
                 "ALTER TABLE plaid_items ADD COLUMN IF NOT EXISTS institution_logo TEXT",
                 "ALTER TABLE plaid_items ADD COLUMN IF NOT EXISTS institution_color VARCHAR(7)",
                 "ALTER TABLE plaid_items ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE SET NULL",
                 "ALTER TABLE plaid_items ADD COLUMN IF NOT EXISTS item_login_required BOOLEAN NOT NULL DEFAULT FALSE",
                 "ALTER TABLE plaid_items ADD COLUMN IF NOT EXISTS sync_updates_pending BOOLEAN NOT NULL DEFAULT FALSE",
+                "ALTER TABLE plaid_items ADD COLUMN IF NOT EXISTS access_token_encrypted BYTEA",
+                "ALTER TABLE plaid_items ALTER COLUMN access_token DROP NOT NULL",
             ):
                 try:
                     await conn.execute(col_sql)
                 except Exception:
-                    pass
+                    # IF NOT EXISTS / DROP NOT NULL are idempotent. A real
+                    # failure here means a schema drift — log so it's not
+                    # silently swallowed.
+                    logger.warning("plaid_items column upgrade failed: %s", col_sql, exc_info=True)
+            await self._backfill_access_token_encryption(conn)
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS plaid_sync_log (
                     id                   SERIAL PRIMARY KEY,
@@ -85,36 +105,116 @@ class PlaidRepository:
         institution_color: Optional[str] = None,
         user_id: Optional[int] = None,
     ) -> Dict[str, Any]:
+        """Insert/update a Plaid item.
+
+        When ``PLAID_ENCRYPTION_KEY`` is set, the token is stored in
+        ``access_token_encrypted`` and the legacy plain column is wiped
+        to NULL. Without a key, behavior matches the pre-encryption
+        contract (plain text into ``access_token``).
+        """
+        if plaid_crypto.encryption_available():
+            encrypted = plaid_crypto.encrypt(access_token)
+            plain_value: Optional[str] = None
+        else:
+            plaid_crypto.warn_if_missing_once()
+            encrypted = None
+            plain_value = access_token
+
         pool = await self._pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
                 INSERT INTO plaid_items
-                    (item_id, access_token, institution_name, institution_logo, institution_color, user_id)
-                VALUES ($1, $2, $3, $4, $5, $6)
+                    (item_id, access_token, access_token_encrypted,
+                     institution_name, institution_logo, institution_color, user_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 ON CONFLICT (item_id) DO UPDATE SET
-                    access_token      = EXCLUDED.access_token,
-                    institution_name  = COALESCE(EXCLUDED.institution_name,  plaid_items.institution_name),
-                    institution_logo  = COALESCE(EXCLUDED.institution_logo,  plaid_items.institution_logo),
-                    institution_color = COALESCE(EXCLUDED.institution_color, plaid_items.institution_color),
-                    user_id           = COALESCE(plaid_items.user_id,        EXCLUDED.user_id)
+                    access_token            = EXCLUDED.access_token,
+                    access_token_encrypted  = EXCLUDED.access_token_encrypted,
+                    institution_name        = COALESCE(EXCLUDED.institution_name,  plaid_items.institution_name),
+                    institution_logo        = COALESCE(EXCLUDED.institution_logo,  plaid_items.institution_logo),
+                    institution_color       = COALESCE(EXCLUDED.institution_color, plaid_items.institution_color),
+                    user_id                 = COALESCE(plaid_items.user_id,        EXCLUDED.user_id)
                 RETURNING *
                 """,
-                item_id, access_token, institution_name, institution_logo, institution_color, user_id,
+                item_id, plain_value, encrypted,
+                institution_name, institution_logo, institution_color, user_id,
             )
-        return dict(row)
+        return self._row_with_decrypted_token(dict(row))
 
     async def get_items(self) -> List[Dict[str, Any]]:
         pool = await self._pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch("SELECT * FROM plaid_items ORDER BY connected_at")
-        return [dict(r) for r in rows]
+        return [self._row_with_decrypted_token(dict(r)) for r in rows]
 
     async def get_item(self, item_id: str) -> Optional[Dict[str, Any]]:
         pool = await self._pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM plaid_items WHERE item_id = $1", item_id)
-        return dict(row) if row else None
+        return self._row_with_decrypted_token(dict(row)) if row else None
+
+    @staticmethod
+    def _row_with_decrypted_token(row: Dict[str, Any]) -> Dict[str, Any]:
+        """Replace ``row['access_token']`` with the decrypted value.
+
+        Reads prefer the encrypted column; rows that pre-date the rollout
+        keep being read from the plain column. The ciphertext is stripped
+        from the returned dict so callers cannot accidentally pass it to
+        the Plaid SDK.
+        """
+        encrypted = row.pop("access_token_encrypted", None)
+        if encrypted:
+            try:
+                row["access_token"] = plaid_crypto.decrypt(encrypted)
+            except plaid_crypto.InvalidToken:
+                logger.error(
+                    "plaid_items[item_id=%s] access_token_encrypted is unreadable "
+                    "with the current PLAID_ENCRYPTION_KEY. Row will appear empty "
+                    "to sync — re-link the institution from the UI.",
+                    row.get("item_id"),
+                )
+                row["access_token"] = ""
+        else:
+            plaid_crypto.warn_if_missing_once()
+        return row
+
+    async def _backfill_access_token_encryption(self, conn: asyncpg.Connection) -> None:
+        """One-shot: encrypt rows that still hold a plain-text access_token.
+
+        Idempotent and bounded — selects only rows where the encrypted
+        column is still NULL. Skipped entirely when the key is unset so
+        deploys without ``PLAID_ENCRYPTION_KEY`` boot cleanly.
+        """
+        if not plaid_crypto.encryption_available():
+            return
+        rows = await conn.fetch(
+            """
+            SELECT item_id, access_token
+            FROM plaid_items
+            WHERE access_token_encrypted IS NULL
+              AND access_token IS NOT NULL
+              AND access_token <> ''
+            """
+        )
+        if not rows:
+            return
+        for r in rows:
+            ciphertext = plaid_crypto.encrypt(r["access_token"])
+            await conn.execute(
+                """
+                UPDATE plaid_items
+                SET access_token_encrypted = $1,
+                    access_token = NULL
+                WHERE item_id = $2
+                """,
+                ciphertext,
+                r["item_id"],
+            )
+        logger.info(
+            "Encrypted %d Plaid access tokens at rest (one-shot backfill)",
+            len(rows),
+        )
 
     async def delete_item(self, item_id: str) -> bool:
         pool = await self._pool()
