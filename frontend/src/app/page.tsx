@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
 import { CategoryDonutWidget } from "@/components/charts/category-donut-chart";
+import { FinancialHealthHeroCard } from "@/components/reports/financial-health-hero-card";
 import {
   Card,
   CardContent,
@@ -198,8 +199,10 @@ function DashboardContent() {
         <p className="text-muted-foreground text-sm">Overview for {spendMonth}</p>
       </div>
 
-      {/* Row 1 — 4 KPI cards: Net Worth · Cash Flow · Health · Insights */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {/* Row 1 — 3 KPI cards: Net Worth · Cash Flow · Insights.
+          Financial Health used to live here as a thin tile; it's now hosted
+          as a dedicated hero card below this row. */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Net worth</CardTitle>
@@ -278,31 +281,6 @@ function DashboardContent() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Financial health</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {healthQuery.isLoading ? (
-              <SectionSkeleton className="h-16 w-full" />
-            ) : healthQuery.isError ? (
-              <p className="text-destructive text-sm">Could not load health score.</p>
-            ) : health ? (
-              <>
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl font-bold tabular-nums">{health.score}</span>
-                  <Badge className="border-0 font-medium text-white" style={{ backgroundColor: health.color }}>
-                    {health.label}
-                  </Badge>
-                </div>
-                {health.advice && (
-                  <p className="text-muted-foreground text-xs leading-snug">{health.advice}</p>
-                )}
-              </>
-            ) : null}
-          </CardContent>
-        </Card>
-
         <Link href="/insights" className="group block outline-none">
           <Card
             className={cn(
@@ -341,6 +319,15 @@ function DashboardContent() {
           </Card>
         </Link>
       </div>
+
+      {/* Row 1.5 — Financial Health hero. Lives on the Dashboard now (used to
+          be a separate Reports tab). Always visible because it's the most
+          actionable single number we surface. */}
+      <FinancialHealthHeroCard
+        score={health}
+        isLoading={healthQuery.isLoading}
+        isError={healthQuery.isError}
+      />
 
       {/* Row 2 — Spending pie (2/3) + Budget compact (1/3) */}
       <div className="grid gap-6 lg:grid-cols-3">

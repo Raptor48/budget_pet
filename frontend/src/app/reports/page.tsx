@@ -19,12 +19,12 @@ import { IncomeTab } from "@/components/reports/income-tab";
 import { ExpensesTab } from "@/components/reports/expenses-tab";
 import { CashFlowHistoryChart } from "@/components/reports/cash-flow-history-chart";
 import { TrendsTab } from "@/components/reports/trends-tab";
+import { BudgetHistoryTab } from "@/components/reports/budget-history-tab";
 import { AnimatedMoney } from "@/components/ui/animated-money";
-import { reportsApi, transactionsApi } from "@/lib/api";
+import { budgetsApi, reportsApi, transactionsApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type {
   CategorySpend,
-  FinancialHealthScore,
   MerchantSpend,
   NetWorthSnapshot,
   Transaction,
@@ -47,12 +47,6 @@ function formatMoney(cents: number): string {
     maximumFractionDigits: 2,
   }).format(cents / 100);
 }
-
-function formatRatioPercent(value: number | null | undefined): string {
-  if (value == null) return "—";
-  return `${(value * 100).toFixed(1)}%`;
-}
-
 
 function NetWorthLineChart({ data }: { data: NetWorthSnapshot[] }) {
   const sorted = useMemo(
@@ -172,8 +166,7 @@ const REPORT_TABS = [
   "expenses",
   "category",
   "networth",
-  "merchants",
-  "health",
+  "history",
 ] as const;
 type ReportTab = (typeof REPORT_TABS)[number];
 
@@ -346,14 +339,21 @@ export default function Reports() {
     queryFn: () => reportsApi.getTopMerchants(month, 10),
   });
 
-  const healthQuery = useQuery({
-    queryKey: ["reports", "financial-health"],
-    queryFn: () => reportsApi.getFinancialHealth(),
+  // Budget History feeds the Reports → Budget History tab heatmap. Lazy-load
+  // — only fetched when that tab is active so we don't pay the extra round
+  // trip on every Reports visit.
+  const budgetHistoryQuery = useQuery({
+    queryKey: ["budgets", "history", 12],
+    queryFn: () => budgetsApi.getHistory(12),
+    enabled: tab === "history",
   });
+
+  // Top Merchants embedded in the Cash Flow tab — collapsed (top 5) by
+  // default with an expand-to-10 control.
+  const [merchantsExpanded, setMerchantsExpanded] = useState(false);
 
   const cf = cashFlowQuery.data;
   const net = netWorthQuery.data;
-  const health = healthQuery.data;
 
   return (
     <AppLayout>
@@ -367,16 +367,15 @@ export default function Reports() {
         </header>
 
         <Tabs value={tab} onValueChange={handleTabChange} className="gap-6">
-          <TabsList className="grid h-auto w-full max-w-5xl grid-cols-2 gap-1 p-1 sm:grid-cols-4 lg:grid-cols-8">
+          <TabsList className="grid h-auto w-full max-w-5xl grid-cols-2 gap-1 p-1 sm:grid-cols-4 lg:grid-cols-7">
             <TabsTrigger value="cashflow">Cash Flow</TabsTrigger>
             <TabsTrigger value="trends">Trends</TabsTrigger>
             <TabsTrigger value="income">Income</TabsTrigger>
             <TabsTrigger value="expenses">Expenses</TabsTrigger>
             <TabsTrigger value="category">By Category</TabsTrigger>
             <TabsTrigger value="networth">Net Worth</TabsTrigger>
-            <TabsTrigger value="merchants">Top Merchants</TabsTrigger>
-            <TabsTrigger value="health" className="col-span-2 sm:col-span-1">
-              Financial Health
+            <TabsTrigger value="history" className="col-span-2 sm:col-span-4 lg:col-span-1">
+              Budget History
             </TabsTrigger>
           </TabsList>
 
@@ -486,6 +485,87 @@ export default function Reports() {
                       onSelectMonth={setMonth}
                     />
                   )}
+                </div>
+
+                {/* Top merchants — used to live in its own tab. Now an
+                    in-tab block under cash flow with collapse-to-5 default. */}
+                <div className="space-y-3 border-t border-border/60 pt-6">
+                  <div className="flex flex-row flex-wrap items-end justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-medium">Top merchants this month</h3>
+                      <p className="text-muted-foreground text-xs">
+                        Where the biggest dollars went.
+                      </p>
+                    </div>
+                  </div>
+                  {merchantsQuery.isLoading && (
+                    <p className="text-muted-foreground text-sm">Loading merchants…</p>
+                  )}
+                  {merchantsQuery.isError && (
+                    <p className="text-destructive text-sm">Could not load merchants.</p>
+                  )}
+                  {merchantsQuery.data && merchantsQuery.data.length > 0 ? (
+                    <>
+                      <div className="overflow-x-auto rounded-lg border border-border/60">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b bg-muted/40 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                              <th className="px-4 py-3 w-14"> </th>
+                              <th className="px-4 py-3">Merchant</th>
+                              <th className="px-4 py-3 text-right">Amount</th>
+                              <th className="px-4 py-3 text-right">Txns</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(merchantsExpanded
+                              ? merchantsQuery.data
+                              : merchantsQuery.data.slice(0, 5)
+                            ).map((m: MerchantSpend, i: number) => (
+                              <tr
+                                key={m.merchant_name}
+                                className="border-b border-border/50 last:border-0 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300"
+                                style={{ animationDelay: `${Math.min(i, 12) * 30}ms` }}
+                              >
+                                <td className="px-4 py-2">
+                                  <MerchantLogo url={m.logo_url} name={m.merchant_name} />
+                                </td>
+                                <td className="px-4 py-2 font-medium">{m.merchant_name}</td>
+                                <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">
+                                  {formatMoney(m.amount_cents)}
+                                </td>
+                                <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">
+                                  {m.transaction_count}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      {merchantsQuery.data.length > 5 ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-muted-foreground hover:text-foreground"
+                          onClick={() => setMerchantsExpanded((v) => !v)}
+                        >
+                          <ChevronRight
+                            className={cn(
+                              "size-3.5 transition-transform",
+                              merchantsExpanded && "rotate-90",
+                            )}
+                            aria-hidden
+                          />
+                          {merchantsExpanded
+                            ? `Show top 5`
+                            : `Show all ${merchantsQuery.data.length}`}
+                        </Button>
+                      ) : null}
+                    </>
+                  ) : merchantsQuery.data ? (
+                    <p className="text-muted-foreground text-sm py-4">
+                      No merchant data this month.
+                    </p>
+                  ) : null}
                 </div>
               </CardContent>
             </Card>
@@ -685,82 +765,12 @@ export default function Reports() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="merchants" className="reports-tab-content space-y-6">
-            <Card className="border-border/80 shadow-sm">
-              <CardHeader className="flex flex-row flex-wrap items-end justify-between gap-4">
-                <div>
-                  <CardTitle>Top merchants</CardTitle>
-                  <CardDescription>Where you spent the most this month.</CardDescription>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs font-medium text-muted-foreground">Month</span>
-                  <MonthYearPicker value={month} onChange={setMonth} />
-                </div>
-              </CardHeader>
-              <CardContent>
-                {merchantsQuery.isLoading && (
-                  <p className="text-muted-foreground text-sm">Loading merchants…</p>
-                )}
-                {merchantsQuery.isError && (
-                  <p className="text-destructive text-sm">Could not load merchants.</p>
-                )}
-                {merchantsQuery.data && (
-                  <div className="overflow-x-auto rounded-lg border border-border/60">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b bg-muted/40 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                          <th className="px-4 py-3 w-14"> </th>
-                          <th className="px-4 py-3">Merchant</th>
-                          <th className="px-4 py-3 text-right">Amount</th>
-                          <th className="px-4 py-3 text-right">Txns</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {merchantsQuery.data.map((m: MerchantSpend, i: number) => (
-                          <tr
-                            key={m.merchant_name}
-                            className="border-b border-border/50 last:border-0 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300"
-                            style={{ animationDelay: `${Math.min(i, 12) * 30}ms` }}
-                          >
-                            <td className="px-4 py-2">
-                              <MerchantLogo url={m.logo_url} name={m.merchant_name} />
-                            </td>
-                            <td className="px-4 py-2 font-medium">{m.merchant_name}</td>
-                            <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">
-                              {formatMoney(m.amount_cents)}
-                            </td>
-                            <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">
-                              {m.transaction_count}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-                {merchantsQuery.data?.length === 0 && (
-                  <p className="text-muted-foreground text-sm text-center py-8">No merchant data this month.</p>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="health" className="reports-tab-content space-y-6">
-            <Card className="hero-glow border-border/80 shadow-sm overflow-hidden">
-              <CardHeader>
-                <CardTitle>Financial health</CardTitle>
-                <CardDescription>Holistic score from debt, utilization, savings, and safety buffer.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-8">
-                {healthQuery.isLoading && (
-                  <p className="text-muted-foreground text-sm">Loading health score…</p>
-                )}
-                {healthQuery.isError && (
-                  <p className="text-destructive text-sm">Could not load financial health.</p>
-                )}
-                {health && <FinancialHealthPanel score={health} />}
-              </CardContent>
-            </Card>
+          <TabsContent value="history" className="reports-tab-content space-y-6">
+            <BudgetHistoryTab
+              data={budgetHistoryQuery.data}
+              isLoading={budgetHistoryQuery.isLoading}
+              isError={budgetHistoryQuery.isError}
+            />
           </TabsContent>
         </Tabs>
       </div>
@@ -789,80 +799,6 @@ function MetricTile({
     <div className={`rounded-xl border px-4 py-3 ${ring}`}>
       <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">{label}</p>
       <p className="text-lg font-semibold tabular-nums tracking-tight">{value}</p>
-    </div>
-  );
-}
-
-function FinancialHealthPanel({ score }: { score: FinancialHealthScore }) {
-  const ringPct = Math.min(100, Math.max(0, score.score));
-  return (
-    <div className="space-y-8">
-      <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center sm:justify-center sm:gap-10">
-        <div className="relative size-36">
-          <svg viewBox="0 0 100 100" className="size-full -rotate-90" aria-hidden>
-            <circle cx="50" cy="50" r="42" fill="none" className="stroke-muted" strokeWidth="10" />
-            <circle
-              cx="50"
-              cy="50"
-              r="42"
-              fill="none"
-              stroke={score.color}
-              strokeWidth="10"
-              strokeLinecap="round"
-              strokeDasharray={`${(ringPct / 100) * 264} 264`}
-              className="transition-all duration-500"
-            />
-          </svg>
-          <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-3xl font-bold tabular-nums">{score.score}</span>
-            <span className="text-xs text-muted-foreground">/ 100</span>
-          </div>
-        </div>
-        <div className="text-center sm:text-left space-y-1">
-          <p className="text-lg font-semibold" style={{ color: score.color }}>
-            {score.label}
-          </p>
-          <p className="text-muted-foreground text-sm max-w-md leading-relaxed">{score.advice}</p>
-        </div>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <HealthMetric label="Debt-to-income" value={formatRatioPercent(score.debt_to_income)} />
-        <HealthMetric label="Credit utilization" value={formatRatioPercent(score.credit_utilization)} />
-        <HealthMetric label="Savings rate" value={formatRatioPercent(score.savings_rate)} />
-        <HealthMetric
-          label="Emergency fund"
-          value={
-            score.emergency_fund_months != null
-              ? `${score.emergency_fund_months.toFixed(1)} mo`
-              : "—"
-          }
-        />
-        <HealthMetric
-          label="Overdue accounts"
-          value={score.has_overdue ? "Yes — action needed" : "None"}
-          highlight={score.has_overdue}
-        />
-      </div>
-    </div>
-  );
-}
-
-function HealthMetric({
-  label,
-  value,
-  highlight,
-}: {
-  label: string;
-  value: string;
-  highlight?: boolean;
-}) {
-  return (
-    <div
-      className={`rounded-lg border px-4 py-3 ${highlight ? "border-destructive/40 bg-destructive/5" : "border-border/60 bg-muted/20"}`}
-    >
-      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
-      <p className={`mt-1 font-semibold tabular-nums ${highlight ? "text-destructive" : ""}`}>{value}</p>
     </div>
   );
 }
