@@ -19,9 +19,7 @@ from fastapi import APIRouter, HTTPException, Request
 from web.audit import record as audit_record
 from web.db import get_pool
 from web.plaid.internal_transfer import (
-    match_family_account_transfers,
     normalize_names,
-    rescan_internal_transfers,
 )
 
 from .models import (

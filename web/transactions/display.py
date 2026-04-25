@@ -104,7 +104,7 @@ _TRAILING_PUNCT_RE = re.compile(r"[\s:\-#*]+$")
 _ACRONYMS = {
     "IRS", "USPS", "ATM", "POS", "CD", "DD", "USA", "USD", "DMV", "NYC",
     "LLC", "INC", "CO", "AT&T", "AMEX", "PNC", "BMO", "TD", "FCU", "DBA",
-    "NSF", "ACH", "EFT", "PIN", "ID", "TV", "AC", "DC", "SF", "LA", "DC",
+    "NSF", "ACH", "EFT", "PIN", "ID", "TV", "AC", "DC", "SF", "LA",
     "EU", "UK", "VA", "MA", "PA", "NJ", "CA", "TX", "FL", "IL", "OH",
 }
 

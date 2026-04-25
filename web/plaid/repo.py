@@ -12,8 +12,6 @@ This module replaces the V1 implementation that used expenses + finance_* tables
 """
 import json
 import logging
-import os
-from datetime import date
 from typing import Any, Dict, List, Optional
 
 import asyncpg
@@ -455,7 +453,6 @@ class PlaidRepository:
             from web.plaid.internal_transfer import (
                 classify_internal_transfer,
                 get_configured_names,
-                match_family_account_transfers,
             )
             internal_names = await get_configured_names(conn)
 
