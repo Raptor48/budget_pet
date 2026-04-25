@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { format } from "date-fns";
 import { ArrowLeftRight, CreditCard, EyeOff, Loader2, Trash2 } from "lucide-react";
 
@@ -39,11 +40,14 @@ function MobileMerchantAvatar({ tx }: { tx: Transaction }) {
   return (
     <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted text-[10px] font-semibold text-muted-foreground">
       {showImg ? (
-        <img
+        <Image
           src={tx.logo_url!}
           alt=""
+          width={36}
+          height={36}
           className="size-full object-cover"
           onError={() => setFailed(true)}
+          unoptimized
         />
       ) : (
         <span className="leading-none">{initialsFromName(name)}</span>

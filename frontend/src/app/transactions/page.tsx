@@ -10,6 +10,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
+import Image from "next/image";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, formatDistanceToNow, isValid } from "date-fns";
@@ -222,11 +223,14 @@ function MerchantAvatar({ tx }: { tx: Transaction }) {
       )}
     >
       {showImg ? (
-        <img
+        <Image
           src={tx.logo_url!}
           alt=""
+          width={40}
+          height={40}
           className="size-full object-cover"
           onError={() => setFailed(true)}
+          unoptimized
         />
       ) : (
         <span className="leading-none drop-shadow-sm">{initialsFromName(name)}</span>
@@ -2285,7 +2289,14 @@ function CategoryBadgeInline({
   return (
     <Badge variant="secondary" className="max-w-full gap-1.5 py-1 pr-2 pl-1 font-normal">
       {iconUrl ? (
-        <img src={iconUrl} alt="" className="size-5 shrink-0 rounded object-contain" />
+        <Image
+          src={iconUrl}
+          alt=""
+          width={20}
+          height={20}
+          className="size-5 shrink-0 rounded object-contain"
+          unoptimized
+        />
       ) : null}
       <span className="truncate">{catLabel}</span>
     </Badge>
