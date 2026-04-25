@@ -394,6 +394,38 @@ export interface BudgetProgress {
   actual_cents: number;
   remaining_cents: number;
   percent_used: number;
+  /**
+   * Signed delta of last month's (budget − actual) for the same category:
+   * positive = saved (under-spent), negative = over-spent. `null` when no
+   * budget existed for the previous month. Surfaced as a "saved last
+   * month" badge — informational only, never folded into current totals.
+   */
+  previous_month_diff_cents: number | null;
+}
+
+export interface BudgetCopyResult {
+  from_month: string;
+  to_month: string;
+  copied: number;
+  skipped_existing: number;
+}
+
+export interface BudgetHistoryMonth {
+  month: string;
+  budget_cents: number;
+  actual_cents: number;
+  /** spent / budget. `null` when no budget for that month → render neutral cell. */
+  ratio: number | null;
+}
+
+export interface BudgetHistoryRow {
+  category_id: number;
+  category_name: string;
+  category_color: string;
+  parent_id: number | null;
+  months: BudgetHistoryMonth[];
+  months_with_budget: number;
+  months_under_or_at: number;
 }
 
 // ---------------------------------------------------------------------------
