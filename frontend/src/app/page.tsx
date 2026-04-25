@@ -9,6 +9,7 @@ import { AppLayout } from "@/components/layout/app-layout";
 import { CategoryDonutWidget } from "@/components/charts/category-donut-chart";
 import { FinancialHealthCompactCard } from "@/components/reports/financial-health-hero-card";
 import { PlaidAttentionPlate } from "@/components/layout/plaid-attention-banner";
+import { TodaysActionsSection } from "@/components/dashboard/todays-actions";
 import {
   Card,
   CardContent,
@@ -533,6 +534,17 @@ function DashboardContent() {
           );
         })()}
       </div>
+
+      {/* Today's actions — aggregates already-loaded signals (plaid attention,
+          budgets over their cap, bills due in 7d, warn-severity insights)
+          into a scannable action grid. Auto-hides when the household is in
+          the clear, so it never adds noise on a quiet day. */}
+      <TodaysActionsSection
+        plaidItems={plaidItems}
+        budgets={budgetRows}
+        forecast={forecastSorted}
+        insightCards={insights?.cards ?? []}
+      />
 
       {/* Row 2 — Spending pie (2/3) + Budget compact (1/3) */}
       <div className="grid gap-6 lg:grid-cols-3">
