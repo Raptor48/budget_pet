@@ -136,8 +136,15 @@ From Plaid `/transactions/recurring/get`, plus **manual** rows created via `POST
 ### plaid_items (connection metadata)
 | Column | Type | Notes |
 |---|---|---|
+| item_id | TEXT PK | Plaid's stable item identifier |
+| access_token | TEXT NULL | **Legacy plain-text column.** Kept for one release as a safety-net during the encryption rollout; new writes set this to NULL. Will be dropped in a follow-up once the encrypted path is verified in production. |
+| access_token_encrypted | BYTEA NULL | Fernet ciphertext of the Plaid access token. Encrypted via `web.plaid.crypto` using `PLAID_ENCRYPTION_KEY`. Repo decrypts transparently — callers always see plaintext on `item["access_token"]`. NULL on rows that pre-date the rollout (encrypted on the next startup once the key is set). See [`docs/plaid.md`](plaid.md#access-token-encryption-at-rest). |
+| user_id | INTEGER FK | Owner; ON DELETE SET NULL |
 | item_login_required | BOOLEAN | Set from Plaid `ITEM_LOGIN_REQUIRED` webhook; cleared after successful sync |
 | sync_updates_pending | BOOLEAN | Set from `SYNC_UPDATES_AVAILABLE`; cleared after successful sync |
+| cursor | TEXT | Plaid `transactions/sync` pagination cursor |
+| connected_at, last_synced_at | TIMESTAMPTZ | |
+| institution_name, institution_logo, institution_color | TEXT | UI display |
 
 ### plaid_webhook_events
 | Column | Type | Notes |
