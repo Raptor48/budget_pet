@@ -3,7 +3,6 @@ Pure-Python calculation helpers for reports.
 No database calls — all inputs are plain Python dicts/lists.
 """
 from datetime import date, timedelta
-from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from dateutil.relativedelta import relativedelta

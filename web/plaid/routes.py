@@ -6,6 +6,7 @@ import logging
 from typing import List
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 
 import os
 
@@ -272,12 +273,8 @@ async def reset_cursor(item_id: str, request: Request):
     return {"message": "Cursor reset. Next sync will re-import all transactions."}
 
 
-@router.post("/sync", response_model=List[SyncResult])
-async def sync_now(request: Request):
-    """Manually trigger synchronization for all connected items."""
-    from .scheduler import sync_all_items
-    results = await sync_all_items(audit_source="manual")
-
+async def _audit_manual_plaid_sync(request: Request, results: List[dict]) -> None:
+    """Single audit row for a manual multi-item sync (JSON or NDJSON endpoint)."""
     txn_total = sum(int(r.get("transactions_added") or 0) for r in results)
     balances_total = sum(int(r.get("balances_updated") or 0) for r in results)
     errors = [r for r in results if r.get("status") != "ok"]
@@ -295,7 +292,47 @@ async def sync_now(request: Request):
             ],
         },
     )
+
+
+@router.post("/sync", response_model=List[SyncResult])
+async def sync_now(request: Request):
+    """Manually trigger synchronization for all connected items."""
+    from .scheduler import sync_all_items
+
+    results = await sync_all_items(audit_source="manual")
+    await _audit_manual_plaid_sync(request, results)
     return results
+
+
+@router.post("/sync/stream")
+async def sync_now_stream(request: Request):
+    """Stream sync progress as NDJSON (one line per item when it completes).
+
+    Each line is ``{"index": 1-based, "total": N, "result": { ... SyncResult }}``.
+    The final audit row matches ``POST /api/plaid/sync`` once all items finish.
+    """
+    from .scheduler import iter_sync_all_items
+
+    async def ndjson_body():
+        repo = get_plaid_repo()
+        total = len(await repo.get_items())
+        results: List[dict] = []
+        async for result in iter_sync_all_items(audit_source="manual"):
+            results.append(result)
+            yield json.dumps(
+                {"index": len(results), "total": total, "result": result},
+                default=str,
+            ) + "\n"
+        await _audit_manual_plaid_sync(request, results)
+
+    return StreamingResponse(
+        ndjson_body(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/sync/log", response_model=List[PlaidSyncLogEntry])

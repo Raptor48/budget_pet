@@ -439,6 +439,23 @@ top three streams by absolute percentage.
 | development | plaid | Real bank accounts, up to 100 items |
 | production | plaid | Production (requires Plaid approval) |
 
+## Access token encryption at rest
+
+`plaid_items.access_token_encrypted` (BYTEA) holds a Fernet ciphertext
+of each Plaid access token. The legacy `access_token TEXT` column is
+kept (NULL after backfill) so a deploy that ships the schema before
+`PLAID_ENCRYPTION_KEY` is configured on Railway still boots cleanly.
+
+- `web/plaid/crypto.py` is the only place that touches keys; the repo
+  decorates DB rows transparently — callers keep using
+  `item["access_token"]` as plaintext.
+- Backfill runs once per boot from `PlaidRepository.init_tables` and is
+  idempotent (only encrypts rows where the encrypted column is NULL).
+- Operational rules: generate the key once with
+  `Fernet.generate_key()`, store it in your password manager, **never
+  rotate it**. A lost key means every linked institution must be
+  re-linked from the UI.
+
 ## Sandbox Testing
 
 - Use "First Platypus Bank" institution in sandbox
@@ -502,10 +519,12 @@ trade-off via a confirmation dialog that pre-fetches row counts from
 
 Budget Pet exposes **`POST /api/plaid/webhook`** on the FastAPI service (public HTTPS URL in production).
 
-1. **Dashboard:** In the [Plaid Dashboard](https://dashboard.plaid.com/) → Developers → Webhooks, register the same URL you deploy (e.g. `https://<your-fastapi-host>/api/plaid/webhook`).
-2. **Verification:** Payloads are verified with Plaid’s **JWT** in the `Plaid-Verification` header. The signing key is loaded with **`/webhook_verification_key/get`** (per [webhook verification](https://plaid.com/docs/api/webhooks/webhook-verification/)), not a static JWKS URL. For local tunneling without valid JWT, set **`PLAID_SKIP_WEBHOOK_VERIFY=true`** (never in production).
-3. **Handled codes (minimum):** `ITEM_LOGIN_REQUIRED` (sets `plaid_items.item_login_required`), `SYNC_UPDATES_AVAILABLE` (debounced per-item sync; duplicate `webhook_event_id` rows are ignored for idempotency).
-4. **Operations:** After deploy, watch **Railway → FastAPI → Logs** for webhook 4xx/5xx; repeated 5xx may cause Plaid retries — fix verification or handler before leaving broken for long.
+1. **How Plaid gets the URL (matches [Plaid — Configuring webhooks](https://plaid.com/docs/api/webhooks/#configuring-webhooks)):** Item-style webhooks are **registered on the Item when Link runs** — `web/plaid/client.py` passes your public **`PLAID_WEBHOOK_URL`** into the **`webhook`** field of **`/link/token/create`** for both new links and update mode. You do **not** need a separate Dashboard “global webhook” for that path. (Plaid documents Dashboard webhooks mainly for products that do not always use Link, e.g. Identity Verification.)
+2. **Changing URL or toggling webhooks off:** When `PLAID_WEBHOOK_URL` or the in-app **webhooks enabled** flag changes, the app pushes the new target to existing Items via **`/item/webhook/update`** (`web/plaid/webhook_config.py` — see `docs/api.md` / `PATCH /api/settings/app`).
+3. **Verification:** Payloads are verified with Plaid’s **JWT** in the `Plaid-Verification` header. The signing key is loaded with **`/webhook_verification_key/get`** (per [webhook verification](https://plaid.com/docs/api/webhooks/webhook-verification/)), not a static JWKS URL. For local tunneling without valid JWT, set **`PLAID_SKIP_WEBHOOK_VERIFY=true`** (never in production).
+4. **Handled codes (minimum):** `ITEM_LOGIN_REQUIRED` (sets `plaid_items.item_login_required`), `SYNC_UPDATES_AVAILABLE` (debounced per-item sync; duplicate `webhook_event_id` rows are ignored for idempotency).
+5. **Sync vs webhooks:** The Settings UI shows **Fix connection** / **Update login** when `item_login_required` is true. That flag is set from webhooks above **and** when a manual or scheduled sync receives a Plaid error that requires Link update mode (`web/plaid/scheduler.py` + `web/plaid/reauth_errors.py`). If webhooks never reach the app (wrong `PLAID_WEBHOOK_URL`, JWT verification failing, or **Settings → App → webhooks disabled** returning `{"status":"disabled"}`), a failed sync can still surface the button after the next **Sync now**.
+6. **Operations:** After deploy, watch **Railway → FastAPI → Logs** for webhook 4xx/5xx; repeated 5xx may cause Plaid retries — fix verification or handler before leaving broken for long.
 
 Related env:
 

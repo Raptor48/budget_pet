@@ -35,12 +35,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Literal, Optional, Sequence, Set
+from typing import Any, Dict, Literal, Optional, Sequence, Set
 
 import asyncpg
 
 from web.plaid.internal_transfer import (
-    _TRANSFER_PFC_PRIMARIES,
     classify_internal_transfer,
     get_configured_names,
 )

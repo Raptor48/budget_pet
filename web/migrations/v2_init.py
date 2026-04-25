@@ -505,11 +505,19 @@ async def _migrate_v21_addons(conn) -> None:
         for col in (
             "ALTER TABLE plaid_items ADD COLUMN IF NOT EXISTS item_login_required BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE plaid_items ADD COLUMN IF NOT EXISTS sync_updates_pending BOOLEAN NOT NULL DEFAULT FALSE",
+            # Encryption-at-rest for Plaid access_tokens (see web/plaid/crypto.py).
+            # Plain access_token is kept (NULL after backfill) for graceful rollout
+            # before PLAID_ENCRYPTION_KEY is configured on Railway.
+            "ALTER TABLE plaid_items ADD COLUMN IF NOT EXISTS access_token_encrypted BYTEA",
+            "ALTER TABLE plaid_items ALTER COLUMN access_token DROP NOT NULL",
         ):
             try:
                 await _ddl(conn, col)
             except Exception:
-                pass
+                # IF NOT EXISTS should make this idempotent. A failure here
+                # signals a real schema mismatch (e.g. column exists with a
+                # different type) — log so it's not silently swallowed.
+                logger.warning("plaid_items column upgrade failed: %s", col, exc_info=True)
 
     await _ddl(conn,
         """
@@ -579,7 +587,7 @@ async def _migrate_categories_parent_id(conn) -> None:
     Invariant: depth ≤ 2. Primary rows have parent_id IS NULL; detail rows
     reference their primary parent.
     """
-    from web.categories.repo import PFC_PRIMARY_LABELS, _pretty_name
+    from web.categories.pfc_display import PFC_PRIMARY_LABELS
 
     async with conn.transaction():
         await _ddl(
@@ -651,10 +659,6 @@ async def _migrate_categories_parent_id(conn) -> None:
               AND (c.parent_id IS DISTINCT FROM p.id)
             """,
         )
-
-    # Silence unused-import warning; helper is kept importable from this module.
-    del _pretty_name
-
 
 async def _migrate_recurring_price_change_signed(conn) -> None:
     """

@@ -86,6 +86,75 @@ class TestRecurringPriceChange:
         assert any(isinstance(a, float) and abs(a - 0.10) < 0.001 for a in args)
 
 
+def _minimal_stream_row(**overrides):
+    base = {
+        "plaid_stream_id": "p",
+        "account_id": 1,
+        "direction": "outflow",
+        "description": "X",
+        "merchant_name": None,
+        "average_amount_cents": 1000,
+        "last_amount_cents": 1000,
+        "currency": "USD",
+        "pfc_primary": None,
+        "pfc_detailed": None,
+        "first_date": None,
+        "is_active": True,
+        "status": "MATURE",
+        "category_id": None,
+        "user_label": None,
+        "price_change_pct": None,
+        "last_synced_at": None,
+        "stream_source": "plaid",
+        "account_name": "Acct",
+        "account_mask": "1111",
+        "owner_username": "u1",
+        "category_parent_id": None,
+        "primary_category_id": None,
+        "primary_category_name": None,
+        "primary_category_color": None,
+    }
+    base.update(overrides)
+    return base
+
+
+class TestListStreamsSortedByNextPayment:
+    """``list_streams`` orders by soonest ``next_occurrence(last_date, frequency)``."""
+
+    @pytest.mark.asyncio
+    async def test_sorts_by_next_payment_not_db_order(self):
+        from web.recurring.repo import RecurringRepository
+
+        conn = AsyncMock()
+        pool = make_mock_pool(conn)
+        # DB returns id order 10, 20, 30 — expected next dates: weekly Apr 18→Apr 25,
+        # monthly Apr 1→May 1, monthly Apr 10→May 10 → sorted 20, 30, 10.
+        conn.fetch.return_value = [
+            _minimal_stream_row(
+                id=10,
+                last_date=date(2026, 4, 10),
+                frequency="MONTHLY",
+                description="A",
+            ),
+            _minimal_stream_row(
+                id=20,
+                last_date=date(2026, 4, 18),
+                frequency="WEEKLY",
+                description="B",
+            ),
+            _minimal_stream_row(
+                id=30,
+                last_date=date(2026, 4, 1),
+                frequency="MONTHLY",
+                description="C",
+            ),
+        ]
+        with patch("web.recurring.repo.get_pool", AsyncMock(return_value=pool)):
+            rows = await RecurringRepository().list_streams()
+
+        assert [r["id"] for r in rows] == [20, 30, 10]
+
+
 class TestListStreamsEnrichment:
     """`list_streams` must JOIN accounts/users/categories and populate the
     enrichment fields the UI depends on (AccountChip, primary Category column,
@@ -142,6 +211,55 @@ class TestListStreamsEnrichment:
         assert r["primary_category_color"] == "#9333ea"
         assert r["display_title"] == "Netflix"
         assert "category_parent_id" not in r
+
+    @pytest.mark.asyncio
+    async def test_fills_primary_category_name_from_pfc_when_unresolved(self):
+        """Same PFC→label rules as ``CategoriesRepository`` when no category JOIN name."""
+        from web.recurring.repo import RecurringRepository
+
+        conn = AsyncMock()
+        pool = make_mock_pool(conn)
+        conn.fetch.return_value = [
+            _minimal_stream_row(
+                id=1,
+                description="DoorDash",
+                frequency="MONTHLY",
+                last_date=date(2026, 4, 1),
+                pfc_primary="FOOD_AND_DRINK",
+                pfc_detailed="FOOD_AND_DRINK_RESTAURANTS",
+                primary_category_name=None,
+                primary_category_id=None,
+                primary_category_color=None,
+            ),
+        ]
+        with patch("web.recurring.repo.get_pool", AsyncMock(return_value=pool)):
+            rows = await RecurringRepository().list_streams()
+
+        assert len(rows) == 1
+        assert rows[0]["primary_category_name"] == "Food & Drink: Restaurants"
+
+    @pytest.mark.asyncio
+    async def test_keeps_resolved_primary_category_name_from_join(self):
+        from web.recurring.repo import RecurringRepository
+
+        conn = AsyncMock()
+        pool = make_mock_pool(conn)
+        conn.fetch.return_value = [
+            _minimal_stream_row(
+                id=2,
+                frequency="MONTHLY",
+                last_date=date(2026, 4, 1),
+                pfc_primary="FOOD_AND_DRINK",
+                pfc_detailed="FOOD_AND_DRINK_RESTAURANTS",
+                primary_category_id=99,
+                primary_category_name="Custom Groceries",
+                primary_category_color="#00aa00",
+            ),
+        ]
+        with patch("web.recurring.repo.get_pool", AsyncMock(return_value=pool)):
+            rows = await RecurringRepository().list_streams()
+
+        assert rows[0]["primary_category_name"] == "Custom Groceries"
 
 
 class TestUpsertSignedPriceChangePct:

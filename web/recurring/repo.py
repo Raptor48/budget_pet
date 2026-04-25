@@ -5,16 +5,53 @@ price change detection (threshold 10%), and user label updates.
 """
 import logging
 import uuid
-from decimal import Decimal
+from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 
 from web.accounts.repo import AccountsRepository
+from web.categories.pfc_display import format_plaid_category_for_display
 from web.db import get_pool
 from web.transactions.display import normalize_transaction_title
 
 logger = logging.getLogger(__name__)
 
 PRICE_CHANGE_THRESHOLD = 0.10  # 10%
+
+
+def _coerce_last_date(value: Any) -> Optional[date]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return None
+        try:
+            return date.fromisoformat(s[:10])
+        except ValueError:
+            return None
+    return None
+
+
+def _sort_streams_by_next_payment(rows: List[Dict[str, Any]]) -> None:
+    """In-place: soonest next payment first (``next_occurrence`` rules); unknown last."""
+    # Local import avoids import cycle: reports.routes imports this repo.
+    from web.reports.calculations import next_occurrence
+
+    def sort_key(row: Dict[str, Any]) -> tuple:
+        last_d = _coerce_last_date(row.get("last_date"))
+        freq = (row.get("frequency") or "").strip()
+        if not last_d or not freq:
+            return (1, date.max, row.get("id") or 0)
+        nxt = next_occurrence(last_d, freq)
+        if nxt is None:
+            return (1, date.max, row.get("id") or 0)
+        return (0, nxt, row.get("id") or 0)
+
+    rows.sort(key=sort_key)
 
 
 class RecurringRepository:
@@ -35,10 +72,13 @@ class RecurringRepository:
         `account_name`, `account_mask`, `owner_username`,
         `primary_category_{id,name,color}`, and `display_title`.
 
-        When ``viewer_user_id`` is set, streams whose underlying account is
-        owned by a *different* user are filtered out so private spend
-        metadata does not leak cross-user. Streams on shared accounts
-        (``accounts.user_id IS NULL``) remain visible to everyone.
+        When ``viewer_user_id`` is set (e.g. Insights), streams whose underlying
+        account is owned by a *different* user are filtered out. Shared accounts
+        (``accounts.user_id IS NULL``) remain visible. ``GET /api/recurring``
+        passes ``viewer_user_id=None`` for a single household-wide list.
+
+        Results are sorted by computed next payment date (``next_occurrence``),
+        soonest first; rows without a computable next date sort last.
         """
         pool = await self._pool()
         conditions: List[str] = []
@@ -73,7 +113,6 @@ class RecurringRepository:
                 LEFT JOIN categories c ON c.id = rs.category_id
                 LEFT JOIN categories pc ON pc.id = c.parent_id
                 {where}
-                ORDER BY rs.last_amount_cents DESC NULLS LAST
                 """,
                 *params,
             )
@@ -89,7 +128,15 @@ class RecurringRepository:
                     "user_label": d.get("user_label"),
                 }
             )
+            if not (d.get("primary_category_name") or "").strip():
+                fb = format_plaid_category_for_display(
+                    d.get("pfc_detailed"),
+                    d.get("pfc_primary"),
+                )
+                if fb:
+                    d["primary_category_name"] = fb
             enriched.append(d)
+        _sort_streams_by_next_payment(enriched)
         return enriched
 
     async def get_stream(self, stream_id: int) -> Optional[Dict[str, Any]]:
@@ -131,11 +178,12 @@ class RecurringRepository:
                   AND rs.average_amount_cents != 0
                   AND ABS(rs.last_amount_cents - rs.average_amount_cents)::float / ABS(rs.average_amount_cents) > $1
                   {viewer_clause}
-                ORDER BY ABS(rs.last_amount_cents - rs.average_amount_cents) DESC
                 """,
                 *params,
             )
-        return [dict(r) for r in rows]
+        out = [dict(r) for r in rows]
+        _sort_streams_by_next_payment(out)
+        return out
 
     async def create_manual_stream(self, user_id: int, data: Dict[str, Any]) -> Dict[str, Any]:
         """Insert a user-defined recurring stream (same table as Plaid; never overwritten by sync)."""

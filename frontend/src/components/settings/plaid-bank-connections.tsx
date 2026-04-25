@@ -21,6 +21,7 @@ import {
   Building2, RefreshCw, Trash2, CheckCircle, AlertCircle, Clock, RotateCcw, Loader2,
 } from "lucide-react";
 import { plaidApi } from "@/lib/api";
+import { Progress } from "@/components/ui/progress";
 import { TRANSACTIONS_DATE_RANGE_QUERY_KEY } from "@/lib/hooks/use-transactions-date-range";
 import type { PlaidItem, PlaidSyncResult } from "@/types/v2";
 import { AutosyncPanel } from "./autosync-card";
@@ -32,11 +33,15 @@ function ConnectBankButton({
   onSuccess,
   itemId,
   label = "Connect Bank",
+  buttonVariant = "default",
+  buttonSize = "default",
 }: {
   onSuccess: () => void;
   /** When set, Plaid Link opens in update mode for this item. */
   itemId?: string;
   label?: string;
+  buttonVariant?: "default" | "destructive" | "outline" | "secondary" | "ghost" | "link";
+  buttonSize?: "default" | "sm" | "lg" | "icon";
 }) {
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -84,7 +89,14 @@ function ConnectBankButton({
 
   return (
     <div className="flex flex-col items-start gap-1">
-      <Button type="button" onClick={handleConnect} disabled={loading} className="gap-2">
+      <Button
+        type="button"
+        variant={buttonVariant}
+        size={buttonSize}
+        onClick={handleConnect}
+        disabled={loading}
+        className="gap-2"
+      >
         <Building2 className="h-4 w-4" />
         {loading ? "Connecting..." : label}
       </Button>
@@ -139,11 +151,18 @@ function DangerConfirmDialog({
 // ---------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------
+type SyncUiProgress = {
+  index: number;
+  total: number;
+  bankLabel: string | null;
+};
+
 export function PlaidBankConnections() {
   const queryClient = useQueryClient();
 
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [resetTarget, setResetTarget] = useState<string | null>(null);
+  const [syncUiProgress, setSyncUiProgress] = useState<SyncUiProgress | null>(null);
 
   const { data: items = [], isLoading: itemsLoading } = useQuery<PlaidItem[]>({
     queryKey: ["plaid-items"],
@@ -156,7 +175,20 @@ export function PlaidBankConnections() {
   });
 
   const syncMutation = useMutation<PlaidSyncResult[]>({
-    mutationFn: plaidApi.sync,
+    mutationFn: async () => {
+      const snapshot = items;
+      const total = snapshot.length;
+      setSyncUiProgress({ index: 0, total, bankLabel: null });
+      return plaidApi.syncStream((ev) => {
+        setSyncUiProgress({
+          index: ev.index,
+          total: ev.total,
+          bankLabel:
+            snapshot.find((i) => i.item_id === ev.result.item_id)?.institution_name ??
+            "Bank",
+        });
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["plaid-items"] });
       queryClient.invalidateQueries({ queryKey: ["plaid-sync-log"] });
@@ -164,6 +196,7 @@ export function PlaidBankConnections() {
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
       queryClient.invalidateQueries({ queryKey: TRANSACTIONS_DATE_RANGE_QUERY_KEY });
     },
+    onSettled: () => setSyncUiProgress(null),
   });
 
   const deleteMutation = useMutation({
@@ -196,7 +229,7 @@ export function PlaidBankConnections() {
   const lastSync = syncLog[0] as (typeof syncLog)[0] | undefined;
 
   return (
-    <Card>
+    <Card id="settings-bank-connections">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Building2 className="h-5 w-5" />
@@ -257,16 +290,16 @@ export function PlaidBankConnections() {
                     </p>
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center justify-end gap-1 ml-3">
-                    {item.item_login_required ? (
-                      <ConnectBankButton
-                        itemId={item.item_id}
-                        label="Fix connection"
-                        onSuccess={() => {
-                          queryClient.invalidateQueries({ queryKey: ["plaid-items"] });
-                          queryClient.invalidateQueries({ queryKey: ["plaid-sync-log"] });
-                        }}
-                      />
-                    ) : null}
+                    <ConnectBankButton
+                      itemId={item.item_id}
+                      label={item.item_login_required ? "Fix connection" : "Update login"}
+                      buttonVariant={item.item_login_required ? "default" : "outline"}
+                      buttonSize="sm"
+                      onSuccess={() => {
+                        queryClient.invalidateQueries({ queryKey: ["plaid-items"] });
+                        queryClient.invalidateQueries({ queryKey: ["plaid-sync-log"] });
+                      }}
+                    />
                     {/* Reset cursor — danger */}
                     <Button
                       size="sm"
@@ -297,13 +330,7 @@ export function PlaidBankConnections() {
           )}
         </div>
 
-        {/* Autosync schedule + webhook toggle — tightly coupled with the
-            manual sync below, so we render them together inside the same
-            card. Hidden when no banks are connected because neither setting
-            has any effect yet. */}
-        {items.length > 0 ? <AutosyncPanel /> : null}
-
-        {/* Manual sync — always below the bank list */}
+        {/* Manual sync — directly under bank list */}
         <div className="rounded-lg border border-border/60 bg-muted/20 px-4 py-3">
           <div className="flex items-start justify-between gap-4">
             <div className="space-y-0.5">
@@ -354,24 +381,52 @@ export function PlaidBankConnections() {
             </Button>
           </div>
 
+          {syncMutation.isPending && syncUiProgress && syncUiProgress.total > 0 ? (
+            <div className="mt-3 space-y-2">
+              <Progress
+                value={Math.min(100, (syncUiProgress.index / syncUiProgress.total) * 100)}
+                className="h-2"
+              />
+              <p className="text-xs text-muted-foreground">
+                {syncUiProgress.index === 0
+                  ? `Starting sync (${syncUiProgress.total} ${syncUiProgress.total === 1 ? "bank" : "banks"})…`
+                  : `Finished ${syncUiProgress.index} of ${syncUiProgress.total} · ${syncUiProgress.bankLabel ?? "Bank"}`}
+              </p>
+            </div>
+          ) : null}
+
           {/* Sync results */}
           {syncMutation.data && (
             <div className="mt-3 space-y-1">
-              {syncMutation.data.map((r) => (
+              {syncMutation.data.map((r) => {
+                const bankLabel =
+                  items.find((i) => i.item_id === r.item_id)?.institution_name ?? r.item_id;
+                return (
                 <Alert key={r.item_id} variant={r.status === "ok" ? "default" : "destructive"}>
                   {r.status === "ok"
                     ? <CheckCircle className="h-4 w-4" />
                     : <AlertCircle className="h-4 w-4" />}
                   <AlertDescription>
                     {r.status === "ok"
-                      ? `Synced: +${r.transactions_added} transactions, ${r.balances_updated} balances updated`
-                      : `Error: ${r.error_msg}`}
+                      ? `${bankLabel}: +${r.transactions_added} transactions, ${r.balances_updated} balances updated`
+                      : (
+                          <>
+                            <span className="font-medium">{bankLabel}</span>
+                            <span className="text-muted-foreground"> ({r.item_id})</span>
+                            {": "}
+                            {r.error_msg}
+                          </>
+                        )}
                   </AlertDescription>
                 </Alert>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
+
+        {/* Autosync schedule + webhook toggle — after Sync Now. Hidden when no banks. */}
+        {items.length > 0 ? <AutosyncPanel /> : null}
       </CardContent>
 
       {/* Danger dialogs */}

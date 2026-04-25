@@ -13,7 +13,30 @@ import {
 import { usePathname, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, isValid } from "date-fns";
-import { ArrowLeftRight, Columns2, CreditCard, Download, EyeOff, Eye, Loader2, Settings, Store, Trash2, Wifi, CircleDot } from "lucide-react";
+import {
+  ArrowLeftRight,
+  Calendar,
+  ChevronDown,
+  CircleDot,
+  Clock,
+  Columns2,
+  CreditCard,
+  Download,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  Info,
+  Loader2,
+  MapPin,
+  Settings,
+  StickyNote,
+  Store,
+  Tag as TagIcon,
+  Trash2,
+  Users,
+  Wifi,
+  type LucideIcon,
+} from "lucide-react";
 
 import { AddCashTransactionDialog } from "@/app/transactions/_components/add-cash-transaction-dialog";
 import { CreateRuleFromTransactionButton } from "@/app/transactions/_components/create-rule-from-transaction-button";
@@ -44,7 +67,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -60,7 +82,6 @@ import { formatAccountPickerLabel } from "@/lib/account-picker-label";
 import { getAuthHeaders } from "@/lib/auth";
 import {
   accountsApi,
-  ApiError,
   categoriesApi,
   membersApi,
   tagsApi,
@@ -397,11 +418,39 @@ function CategorySelectItems({ categories }: { categories: Category[] }) {
   );
 }
 
-function DetailRow({ label, children }: { label: ReactNode; children: ReactNode }) {
+function MetaChip({
+  icon: Icon,
+  label,
+  children,
+}: {
+  icon: LucideIcon;
+  label: string;
+  children: ReactNode;
+}) {
   return (
-    <div className="grid gap-0.5 sm:grid-cols-[7.5rem_1fr] sm:gap-x-3">
-      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 text-sm text-foreground">{children}</dd>
+    <span
+      className="inline-flex min-w-0 max-w-full items-center gap-1.5 text-sm text-foreground"
+      title={label}
+    >
+      <Icon className="size-3.5 shrink-0 text-muted-foreground" aria-label={label} />
+      <span className="min-w-0 break-words">{children}</span>
+    </span>
+  );
+}
+
+function MoreRow({
+  icon: Icon,
+  label,
+  children,
+}: {
+  icon: LucideIcon;
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex items-start gap-2">
+      <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-label={label} />
+      <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
 }
@@ -441,6 +490,7 @@ function TransactionDetailsDialog({
 }) {
   const [editNote, setEditNote] = useState("");
   const [editCategoryId, setEditCategoryId] = useState(ALL);
+  const [showMore, setShowMore] = useState(false);
 
   const {
     data: transaction,
@@ -457,6 +507,7 @@ function TransactionDetailsDialog({
     if (!transaction) return;
     setEditNote(transaction.user_note ?? "");
     setEditCategoryId(transaction.category_id == null ? ALL : String(transaction.category_id));
+    setShowMore(false);
   }, [transaction]);
 
   const handleSave = async () => {
@@ -476,10 +527,40 @@ function TransactionDetailsDialog({
   const counterparties = transaction ? normalizeCounterparties(transaction.counterparties) : [];
   const bankName = transaction ? (transaction.name ?? "").trim() : "";
   const merchantLabel = transaction ? (transaction.merchant_name ?? "").trim() : "";
+  const showBankDesc = bankName && bankName !== merchantLabel;
+
+  const authorizedDateText =
+    transaction?.authorized_date && transaction.authorized_date !== transaction.date
+      ? formatAuthorizedDateOnly(String(transaction.authorized_date))
+      : null;
+  const authorizedDateTimeText = transaction ? formatDateTimeShort(transaction.authorized_datetime) : null;
+  const postedDateTimeText = transaction ? formatDateTimeShort(transaction.datetime) : null;
+  const websiteText =
+    transaction && typeof transaction.website === "string" && transaction.website.trim()
+      ? transaction.website.trim()
+      : null;
+
+  const hasMoreDetails = Boolean(
+    authorizedDateText ||
+      authorizedDateTimeText ||
+      postedDateTimeText ||
+      websiteText ||
+      counterparties.length > 0 ||
+      metaRows.length > 0,
+  );
+
+  const isPlaidSource =
+    transaction?.source === "plaid" || transaction?.source === "plaid_sandbox";
+
+  const classOverrideLabel = transaction
+    ? transaction.manual_class_override
+      ? transaction.manual_class_override.replace("_", " ")
+      : `Auto · ${transaction.transaction_class.replace("_", " ")}`
+    : "";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[min(90vh,calc(100dvh-1.5rem))] w-[min(520px,calc(100vw-1.5rem))] flex-col gap-0 overflow-hidden p-0">
+      <DialogContent className="flex max-h-[min(90vh,calc(100dvh-1.5rem))] w-[min(440px,calc(100vw-1.5rem))] flex-col gap-0 overflow-hidden p-0">
         <div className="shrink-0 border-b border-border px-5 py-4">
           <DialogHeader className="space-y-0 text-left">
             <DialogTitle className="text-base font-semibold">Transaction details</DialogTitle>
@@ -497,9 +578,9 @@ function TransactionDetailsDialog({
                 >
                   {displayName(transaction)}
                 </p>
-                {bankName && bankName !== merchantLabel ? (
-                  <p className="text-xs text-muted-foreground" title={bankName}>
-                    Bank description: {bankName}
+                {showBankDesc ? (
+                  <p className="break-words text-xs text-muted-foreground" title={bankName}>
+                    {bankName}
                   </p>
                 ) : null}
                 <div className="flex flex-wrap items-center gap-2 pt-0.5">
@@ -529,157 +610,185 @@ function TransactionDetailsDialog({
         ) : null}
 
         {transaction && !isLoading && !isError ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          <dl className="space-y-3">
-            <DetailRow label="Account">
-              <div className="flex flex-wrap items-center gap-2">
-                {channelIcon(transaction.payment_channel)}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="border-b border-border px-5 py-3">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <MetaChip icon={Calendar} label="Posted date">
+                  {displayDate(transaction)}
+                </MetaChip>
+                {transaction.payment_channel ? (
+                  <span
+                    className="inline-flex items-center gap-1.5 text-sm text-foreground"
+                    title={`Channel: ${transaction.payment_channel}`}
+                  >
+                    {channelIcon(transaction.payment_channel)}
+                    <span>{transaction.payment_channel}</span>
+                  </span>
+                ) : null}
+                {locText ? (
+                  <MetaChip icon={MapPin} label="Location">
+                    <span className="break-words">
+                      {locText}
+                      {loc?.country ? ` · ${loc.country}` : ""}
+                    </span>
+                    {loc?.lat != null && loc?.lon != null ? (
+                      <>
+                        {" · "}
+                        <a
+                          href={`https://www.google.com/maps?q=${loc.lat},${loc.lon}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary text-xs underline-offset-4 hover:underline"
+                        >
+                          Map
+                        </a>
+                      </>
+                    ) : null}
+                  </MetaChip>
+                ) : null}
                 <AccountChip tx={transaction} />
               </div>
-            </DetailRow>
-            <DetailRow label="Posted date">{displayDate(transaction)}</DetailRow>
-            {transaction.authorized_date && transaction.authorized_date !== transaction.date ? (
-              <DetailRow label="Authorized">
-                {formatAuthorizedDateOnly(String(transaction.authorized_date))}
-              </DetailRow>
-            ) : null}
-            {formatDateTimeShort(transaction.authorized_datetime) ? (
-              <DetailRow label="Authorized (time)">{formatDateTimeShort(transaction.authorized_datetime)}</DetailRow>
-            ) : null}
-            {formatDateTimeShort(transaction.datetime) ? (
-              <DetailRow label="Posted (time)">{formatDateTimeShort(transaction.datetime)}</DetailRow>
-            ) : null}
-            <DetailRow label="Channel">{transaction.payment_channel ?? "—"}</DetailRow>
-            {(transaction.pfc_detailed || transaction.pfc_primary) && (
-              <DetailRow
-                label={
-                  <span className="inline-flex items-center gap-1">
-                    <span>Category</span>
-                    {transaction.pfc_confidence ? (
-                      <TooltipProvider delayDuration={250}>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span
-                              tabIndex={0}
-                              className="-m-0.5 inline-flex shrink-0 cursor-default rounded border border-border/60 bg-muted/40 px-1 py-0.5 font-mono text-[10px] tabular-nums leading-none text-muted-foreground transition-colors hover:border-border hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/40 focus-visible:outline-none"
-                              aria-label="Plaid category confidence"
-                            >
-                              {pfcConfidencePercentLabel(transaction.pfc_confidence)}
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent
-                            side="top"
-                            className="max-w-[min(280px,calc(100vw-2rem))] border-border/80 bg-popover px-3 py-2 text-xs font-normal leading-snug text-popover-foreground shadow-md"
-                          >
-                            {(() => {
-                              const { title, body } = pfcConfidenceTooltipBody(transaction.pfc_confidence);
-                              return (
-                                <>
-                                  <span className="block font-medium text-foreground">{title}</span>
-                                  <span className="mt-1 block text-muted-foreground">{body}</span>
-                                  <span className="mt-1.5 block font-mono text-[10px] text-muted-foreground/80">
-                                    {transaction.pfc_confidence}
-                                  </span>
-                                </>
-                              );
-                            })()}
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    ) : null}
+
+              {transaction.pfc_detailed || transaction.pfc_primary ? (
+                <div className="mt-3 flex items-start gap-2">
+                  <TagIcon
+                    className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                    aria-label="Category"
+                  />
+                  <span className="min-w-0 flex-1 break-words text-sm text-foreground">
+                    {[transaction.pfc_primary, transaction.pfc_detailed].filter(Boolean).join(" · ")}
                   </span>
-                }
-              >
-                <span className="break-words">
-                  {[transaction.pfc_primary, transaction.pfc_detailed].filter(Boolean).join(" · ")}
-                </span>
-              </DetailRow>
-            )}
-            {typeof transaction.website === "string" && transaction.website.trim() ? (
-              <DetailRow label="Website">
-                <a
-                  href={safeWebsiteHref(transaction.website.trim())}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary underline-offset-4 hover:underline"
-                >
-                  {transaction.website}
-                </a>
-              </DetailRow>
-            ) : null}
-            {locText ? (
-              <DetailRow label="Location">
-                <div className="space-y-1">
-                  <p className="break-words">{locText}</p>
-                  {loc?.country ? <p className="text-xs text-muted-foreground">{loc.country}</p> : null}
-                  {loc?.lat != null && loc?.lon != null ? (
-                    <a
-                      href={`https://www.google.com/maps?q=${loc.lat},${loc.lon}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-primary text-xs underline-offset-4 hover:underline"
-                    >
-                      Open in Maps
-                    </a>
+                  {transaction.pfc_confidence ? (
+                    <TooltipProvider delayDuration={250}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            tabIndex={0}
+                            className="inline-flex shrink-0 cursor-default rounded border border-border/60 bg-muted/40 px-1 py-0.5 font-mono text-[10px] tabular-nums leading-none text-muted-foreground transition-colors hover:border-border hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                            aria-label="Plaid category confidence"
+                          >
+                            {pfcConfidencePercentLabel(transaction.pfc_confidence)}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent
+                          side="top"
+                          className="max-w-[min(280px,calc(100vw-2rem))] border-border/80 bg-popover px-3 py-2 text-xs font-normal leading-snug text-popover-foreground shadow-md"
+                        >
+                          {(() => {
+                            const { title, body } = pfcConfidenceTooltipBody(transaction.pfc_confidence);
+                            return (
+                              <>
+                                <span className="block font-medium text-foreground">{title}</span>
+                                <span className="mt-1 block text-muted-foreground">{body}</span>
+                                <span className="mt-1.5 block font-mono text-[10px] text-muted-foreground/80">
+                                  {transaction.pfc_confidence}
+                                </span>
+                              </>
+                            );
+                          })()}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   ) : null}
                 </div>
-              </DetailRow>
-            ) : null}
-            {metaRows.length > 0 ? (
-              <DetailRow label="Payment details">
-                <ul className="space-y-1">
-                  {metaRows.map((r) => (
-                    <li key={r.label} className="break-words text-sm">
-                      <span className="text-muted-foreground">{r.label}: </span>
-                      {r.value}
-                    </li>
-                  ))}
-                </ul>
-              </DetailRow>
-            ) : null}
-            {counterparties.length > 0 ? (
-              <DetailRow label="Counterparties">
-                <ul className="space-y-2">
-                  {counterparties.map((c, i) => (
-                    <li key={i} className="rounded-md border border-border/60 bg-muted/40 px-2 py-1.5 text-sm">
-                      <span className="font-medium">{c.name || "Unknown"}</span>
-                      <span className="text-muted-foreground"> · {c.type}</span>
-                      {c.website ? (
-                        <span className="mt-0.5 block">
-                          <a
-                            href={safeWebsiteHref(c.website)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-primary text-xs underline-offset-4 hover:underline"
-                          >
-                            {c.website}
-                          </a>
-                        </span>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              </DetailRow>
-            ) : null}
-            <DetailRow label="Source">{transaction.source}</DetailRow>
-            {transaction.plaid_transaction_id ? (
-              <DetailRow label="Plaid ID">
-                <code className="break-all rounded bg-muted px-1.5 py-0.5 text-[11px]">
-                  {transaction.plaid_transaction_id}
-                </code>
-              </DetailRow>
-            ) : null}
-          </dl>
+              ) : null}
+            </div>
 
-          <Separator className="my-5" />
+            {hasMoreDetails ? (
+              <div className="border-b border-border">
+                <button
+                  type="button"
+                  onClick={() => setShowMore((v) => !v)}
+                  aria-expanded={showMore}
+                  className="flex w-full items-center gap-1 px-5 py-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <ChevronDown
+                    className={cn("size-3 transition-transform", showMore && "rotate-180")}
+                    aria-hidden
+                  />
+                  {showMore ? "Hide details" : "More details"}
+                </button>
+                {showMore ? (
+                  <div className="space-y-2 px-5 pb-3 text-sm">
+                    {authorizedDateText ? (
+                      <MoreRow icon={Clock} label="Authorized date">
+                        <span className="text-muted-foreground">Authorized </span>
+                        {authorizedDateText}
+                      </MoreRow>
+                    ) : null}
+                    {authorizedDateTimeText ? (
+                      <MoreRow icon={Clock} label="Authorized time">
+                        {authorizedDateTimeText}
+                      </MoreRow>
+                    ) : null}
+                    {postedDateTimeText ? (
+                      <MoreRow icon={Clock} label="Posted time">
+                        <span className="text-muted-foreground">Posted </span>
+                        {postedDateTimeText}
+                      </MoreRow>
+                    ) : null}
+                    {websiteText ? (
+                      <MoreRow icon={ExternalLink} label="Website">
+                        <a
+                          href={safeWebsiteHref(websiteText)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="break-words text-primary underline-offset-4 hover:underline"
+                        >
+                          {websiteText}
+                        </a>
+                      </MoreRow>
+                    ) : null}
+                    {counterparties.length > 0 ? (
+                      <MoreRow icon={Users} label="Counterparties">
+                        <ul className="space-y-1">
+                          {counterparties.map((c, i) => (
+                            <li key={i} className="break-words">
+                              <span className="font-medium">{c.name || "Unknown"}</span>
+                              <span className="text-muted-foreground"> · {c.type}</span>
+                              {c.website ? (
+                                <>
+                                  {" · "}
+                                  <a
+                                    href={safeWebsiteHref(c.website)}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-primary text-xs underline-offset-4 hover:underline"
+                                  >
+                                    {c.website}
+                                  </a>
+                                </>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ul>
+                      </MoreRow>
+                    ) : null}
+                    {metaRows.length > 0 ? (
+                      <MoreRow icon={Info} label="Payment details">
+                        <ul className="space-y-0.5">
+                          {metaRows.map((r) => (
+                            <li key={r.label} className="break-words">
+                              <span className="text-muted-foreground">{r.label}: </span>
+                              {r.value}
+                            </li>
+                          ))}
+                        </ul>
+                      </MoreRow>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
-          <div className="space-y-4">
-            <h3 className="text-sm font-semibold">Your edits</h3>
-            <div className="grid gap-4">
-              <div className="grid gap-2">
-                <Label>Category</Label>
+            <div className="space-y-3 px-5 py-4">
+              <div className="flex items-center gap-2">
+                <TagIcon
+                  className="size-4 shrink-0 text-muted-foreground"
+                  aria-label="Your category"
+                />
                 <Select value={editCategoryId} onValueChange={setEditCategoryId}>
-                  <SelectTrigger>
+                  <SelectTrigger className="flex-1">
                     <SelectValue placeholder="Category" />
                   </SelectTrigger>
                   <SelectContent>
@@ -687,142 +796,151 @@ function TransactionDetailsDialog({
                     <CategorySelectItems categories={categories} />
                   </SelectContent>
                 </Select>
-                {transaction.source === "plaid" || transaction.source === "plaid_sandbox" ? (
-                  <div className="pt-1">
-                    <CreateRuleFromTransactionButton
-                      transaction={transaction}
-                      category={
-                        editCategoryId === ALL
-                          ? null
-                          : (categories.find((c) => String(c.id) === editCategoryId) ?? null)
-                      }
-                    />
-                  </div>
-                ) : null}
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="txn-detail-note">Note</Label>
+              {isPlaidSource ? (
+                <div className="pl-6">
+                  <CreateRuleFromTransactionButton
+                    transaction={transaction}
+                    category={
+                      editCategoryId === ALL
+                        ? null
+                        : (categories.find((c) => String(c.id) === editCategoryId) ?? null)
+                    }
+                  />
+                </div>
+              ) : null}
+              <div className="flex items-center gap-2">
+                <StickyNote
+                  className="size-4 shrink-0 text-muted-foreground"
+                  aria-label="Note"
+                />
                 <Input
                   id="txn-detail-note"
-                  placeholder="Your note"
+                  placeholder="Add a note"
                   value={editNote}
                   onChange={(e) => setEditNote(e.target.value)}
+                  className="flex-1"
                 />
               </div>
             </div>
           </div>
-        </div>
         ) : null}
 
         <DialogFooter className="shrink-0 flex-col gap-2 border-t border-border px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
             {transaction && !isLoading && !isError && onTogglePrivate ? (
-              <div className="flex flex-col gap-1">
-                <Button
-                  type="button"
-                  variant={transaction.is_private ? "secondary" : "outline"}
-                  className="gap-1.5"
-                  disabled={isTogglingPrivate || isSaving}
-                  onClick={() => onTogglePrivate(transaction.id, !transaction.is_private)}
-                  title={transaction.is_private ? "Make visible to others" : "Hide from others"}
-                >
-                  {isTogglingPrivate ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : transaction.is_private ? (
-                    <EyeOff className="size-4" />
-                  ) : (
-                    <Eye className="size-4" />
-                  )}
-                  {transaction.is_private ? "Hidden" : "Make private"}
-                </Button>
-                <p className="text-[11px] text-muted-foreground">
-                  {transaction.is_private
-                    ? "Hidden from other family members."
-                    : "Hide the amount from other family members (e.g. a gift)."}
-                </p>
-              </div>
+              <TooltipProvider delayDuration={250}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant={transaction.is_private ? "secondary" : "outline"}
+                      size="icon"
+                      disabled={isTogglingPrivate || isSaving}
+                      onClick={() => onTogglePrivate(transaction.id, !transaction.is_private)}
+                      aria-label={
+                        transaction.is_private
+                          ? "Unhide from family members"
+                          : "Hide from family members"
+                      }
+                    >
+                      {isTogglingPrivate ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : transaction.is_private ? (
+                        <EyeOff className="size-4" />
+                      ) : (
+                        <Eye className="size-4" />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-[240px] text-xs">
+                    {transaction.is_private
+                      ? "Hidden from other family members. Click to unhide."
+                      : "Hide the amount from other family members (e.g. a gift)."}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             ) : null}
             {transaction && !isLoading && !isError && onSetClassOverride ? (
-              <div className="flex flex-col gap-1">
-                <Label htmlFor="txn-class-override" className="text-xs">
-                  Classify as
-                </Label>
-                <Select
-                  value={
-                    transaction.manual_class_override ?? "auto"
+              <Select
+                value={transaction.manual_class_override ?? "auto"}
+                onValueChange={(value) => {
+                  const next: TransactionClass | null =
+                    value === "auto" ? null : (value as TransactionClass);
+                  onSetClassOverride(transaction.id, next);
+                }}
+                disabled={isSettingClassOverride || isSaving}
+              >
+                <SelectTrigger
+                  id="txn-class-override"
+                  className="h-9 w-auto min-w-[9rem] gap-1.5 text-xs"
+                  aria-label="Classify as"
+                  title={
+                    transaction.manual_class_override != null
+                      ? `Pinned as ${classOverrideLabel} — auto-classifier skips this row.`
+                      : "Auto-classified. Pick a class to override (e.g. mark a family Zelle as Internal transfer)."
                   }
-                  onValueChange={(value) => {
-                    const next: TransactionClass | null =
-                      value === "auto" ? null : (value as TransactionClass);
-                    onSetClassOverride(transaction.id, next);
-                  }}
-                  disabled={isSettingClassOverride || isSaving}
                 >
-                  <SelectTrigger id="txn-class-override" className="gap-1.5">
-                    {isSettingClassOverride ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      <ArrowLeftRight className="size-4" />
-                    )}
-                    <SelectValue placeholder="Auto" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="auto">
-                      Auto ({transaction.transaction_class.replace("_", " ")})
-                    </SelectItem>
-                    <SelectItem value="income">Income</SelectItem>
-                    <SelectItem value="expense">Expense</SelectItem>
-                    <SelectItem value="internal_transfer">
-                      Internal transfer
-                    </SelectItem>
-                    <SelectItem value="uncategorized">Uncategorized</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-[11px] text-muted-foreground">
-                  {transaction.manual_class_override != null
-                    ? `Pinned as ${transaction.manual_class_override.replace("_", " ")} — the auto-classifier will leave this row alone.`
-                    : "Auto-classified. Pick a class to override the classifier (e.g. mark a family Zelle as Internal transfer)."}
-                </p>
-              </div>
+                  {isSettingClassOverride ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <ArrowLeftRight className="size-3.5" />
+                  )}
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">
+                    Auto ({transaction.transaction_class.replace("_", " ")})
+                  </SelectItem>
+                  <SelectItem value="income">Income</SelectItem>
+                  <SelectItem value="expense">Expense</SelectItem>
+                  <SelectItem value="internal_transfer">Internal transfer</SelectItem>
+                  <SelectItem value="uncategorized">Uncategorized</SelectItem>
+                </SelectContent>
+              </Select>
             ) : null}
             {transaction && !isLoading && !isError && transaction.source === "cash" && onDeleteCash ? (
-              <Button
-                type="button"
-                variant="destructive"
-                className="gap-1.5"
-                disabled={isDeletingCash || isSaving}
-                onClick={async () => {
-                  const ok = await confirm({
-                    title: "Delete cash transaction?",
-                    description:
-                      "This cannot be undone. Your Cash wallet balance will be adjusted.",
-                    destructive: true,
-                    confirmLabel: "Delete",
-                  });
-                  if (!ok) return;
-                  try {
-                    await onDeleteCash(transaction.id);
-                    onOpenChange(false);
-                  } catch {
-                    /* mutation onError surfaces the error via toast */
-                  }
-                }}
-              >
-                {isDeletingCash ? (
-                  <>
-                    <Loader2 className="size-4 animate-spin" />
-                    Deleting…
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="size-4" />
-                    Delete
-                  </>
-                )}
-              </Button>
+              <TooltipProvider delayDuration={250}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="icon"
+                      disabled={isDeletingCash || isSaving}
+                      onClick={async () => {
+                        const ok = await confirm({
+                          title: "Delete cash transaction?",
+                          description:
+                            "This cannot be undone. Your Cash wallet balance will be adjusted.",
+                          destructive: true,
+                          confirmLabel: "Delete",
+                        });
+                        if (!ok) return;
+                        try {
+                          await onDeleteCash(transaction.id);
+                          onOpenChange(false);
+                        } catch {
+                          /* mutation onError surfaces the error via toast */
+                        }
+                      }}
+                      aria-label="Delete cash transaction"
+                    >
+                      {isDeletingCash ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="size-4" />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="text-xs">
+                    Delete cash transaction
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             ) : null}
           </div>
-          <div className="flex w-full flex-wrap justify-end gap-2 sm:w-auto">
+          <div className="flex w-full justify-end gap-2 sm:w-auto">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Close
             </Button>
@@ -834,7 +952,7 @@ function TransactionDetailsDialog({
                     Saving…
                   </>
                 ) : (
-                  "Save changes"
+                  "Save"
                 )}
               </Button>
             ) : null}
@@ -2085,12 +2203,12 @@ function SplitBreakdown({
 }) {
   return (
     <div className="flex flex-col gap-0.5">
-      {splits.map((s, i) => {
+      {splits.map((s) => {
         const cat = s.category_id != null ? categoryById.get(s.category_id) : undefined;
         const catName = cat?.name ?? "Uncategorized";
         return (
           <div
-            key={i}
+            key={s.id}
             className="flex min-w-0 items-center gap-1.5 rounded-md bg-muted/60 px-2 py-0.5 text-xs"
           >
             <Columns2 className="size-3 shrink-0 text-muted-foreground/70" />

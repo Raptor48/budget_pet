@@ -2,7 +2,7 @@
 Pydantic models for Plaid integration — V2.
 """
 from datetime import datetime
-from typing import List, Optional
+from typing import Optional
 
 from pydantic import BaseModel
 

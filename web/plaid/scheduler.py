@@ -17,12 +17,41 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional
+import os
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 _JOB_ID = "plaid_daily_sync"
 _scheduler = None  # set by start_scheduler()
+
+
+def _plaid_sdk_timeout() -> float:
+    """Per-call timeout for Plaid SDK requests (seconds).
+
+    Plaid SDK is synchronous and blocks a thread. Without a timeout, a
+    hung Plaid response would freeze the whole daily sync. Override via
+    the ``PLAID_SDK_TIMEOUT`` env var on Railway if needed (default 90s).
+    """
+    try:
+        return float(os.getenv("PLAID_SDK_TIMEOUT", "90"))
+    except (TypeError, ValueError):
+        return 90.0
+
+
+async def _plaid_call(fn: Callable[..., Any], *args: Any) -> Any:
+    """Run a sync Plaid SDK call in a thread with a hard timeout.
+
+    Raises :class:`asyncio.TimeoutError` if the call exceeds
+    :func:`_plaid_sdk_timeout`. Callers' broad ``except Exception``
+    handlers will catch it and surface it via ``log_sync(status='error')``.
+    """
+    timeout = _plaid_sdk_timeout()
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(fn, *args), timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.error("Plaid SDK call %s timed out after %.0fs", fn.__name__, timeout)
+        raise
 
 
 # Plaid environment → source tag stored on transactions
@@ -34,16 +63,12 @@ _PLAID_ENV_SOURCE = {
 
 
 def _get_source() -> str:
-    import os
-
     env = os.getenv("PLAID_ENV", "sandbox").lower()
     return _PLAID_ENV_SOURCE.get(env, "plaid")
 
 
 def _investments_enabled() -> bool:
     """Check PLAID_ENABLE_INVESTMENTS env flag (default true for backward compat)."""
-    import os
-
     val = os.getenv("PLAID_ENABLE_INVESTMENTS", "true").strip().lower()
     return val in ("1", "true", "yes")
 
@@ -61,7 +86,6 @@ async def _sync_item_payload(
     run (``scheduler`` / ``webhook`` / ``manual``). They are separate
     because Plaid env tagging and who-did-it attribution are independent.
     """
-    import asyncio
     from .repo import get_plaid_repo
     from .client import (
         get_transactions_sync,
@@ -77,6 +101,8 @@ async def _sync_item_payload(
     from web.investments.repo import InvestmentsRepository
     from web.reports.repo import ReportsRepository
 
+    from .reauth_errors import plaid_error_requires_item_reauth
+
     repo = get_plaid_repo()
     item_id = item["item_id"]
     access_token = item["access_token"]
@@ -89,14 +115,15 @@ async def _sync_item_payload(
     error_msg = None
 
     try:
-        # All Plaid SDK calls are synchronous (blocking HTTP). Run them in a thread
-        # pool so they don't block the asyncio event loop.
-        txn_data = await asyncio.to_thread(get_transactions_sync, access_token, cursor)
+        # All Plaid SDK calls are synchronous (blocking HTTP). _plaid_call runs
+        # them in a thread pool with a hard timeout so a hung Plaid response
+        # cannot freeze the asyncio event loop or block the daily sync.
+        txn_data = await _plaid_call(get_transactions_sync, access_token, cursor)
         added = txn_data["added"]
         modified = txn_data["modified"]
         removed = txn_data["removed"]
 
-        raw_accounts = await asyncio.to_thread(get_account_balances, access_token)
+        raw_accounts = await _plaid_call(get_account_balances, access_token)
         accounts_repo = AccountsRepository()
         await accounts_repo.provision_from_plaid(raw_accounts, item_id)
 
@@ -117,20 +144,20 @@ async def _sync_item_payload(
 
         await repo.update_cursor(item_id, txn_data["next_cursor"])
 
-        liabilities = await asyncio.to_thread(get_liabilities, access_token)
+        liabilities = await _plaid_call(get_liabilities, access_token)
         await repo.sync_liabilities_to_accounts(liabilities)
         try:
             await detect_and_record_missing(item_id=item_id, source=audit_source)
         except Exception as exc:  # defensive: detection must never break sync
             logger.warning("missing-fields detection failed for %s: %s", item_id, exc)
 
-        recurring_data = await asyncio.to_thread(get_recurring_transactions, access_token)
+        recurring_data = await _plaid_call(get_recurring_transactions, access_token)
         rec_repo = RecurringRepository()
         await rec_repo.upsert_streams(recurring_data["outflow_streams"], "outflow", account_id_map)
         await rec_repo.upsert_streams(recurring_data["inflow_streams"], "inflow", account_id_map)
 
         if _investments_enabled():
-            inv_data = await asyncio.to_thread(get_investment_holdings, access_token)
+            inv_data = await _plaid_call(get_investment_holdings, access_token)
             if inv_data["holdings"]:
                 inv_repo = InvestmentsRepository()
                 await inv_repo.upsert_securities(inv_data["securities"])
@@ -154,6 +181,11 @@ async def _sync_item_payload(
         status = "error"
         error_msg = str(exc)
         logger.error("Plaid sync failed for item %s: %s", item_id, exc, exc_info=True)
+        if plaid_error_requires_item_reauth(exc):
+            await repo.set_item_login_required(item_id, True)
+            logger.warning(
+                "Marked item %s as item_login_required after re-auth Plaid error", item_id
+            )
 
     await repo.log_sync(
         item_id,
@@ -213,6 +245,17 @@ def schedule_debounced_sync_item(item_id: str, delay_sec: float = 12.0) -> None:
     _debounce_tasks[item_id] = loop.create_task(_job())
 
 
+async def iter_sync_all_items(*, audit_source: str = "manual"):
+    """Yield one result dict per Plaid item (same payloads as ``sync_all_items``)."""
+    from .repo import get_plaid_repo
+
+    repo = get_plaid_repo()
+    items = await repo.get_items()
+    source = _get_source()
+    for item in items:
+        yield await _sync_item_payload(item, source, audit_source=audit_source)
+
+
 async def sync_all_items(*, audit_source: str = "manual") -> List[dict]:
     """
     Sync all connected Plaid items.
@@ -221,17 +264,7 @@ async def sync_all_items(*, audit_source: str = "manual") -> List[dict]:
     ``audit_source`` flags who drove this run for the audit log — the
     scheduler passes ``scheduler``, manual endpoints pass ``manual``.
     """
-    from .repo import get_plaid_repo
-
-    repo = get_plaid_repo()
-    items = await repo.get_items()
-    source = _get_source()
-    results: List[dict] = []
-    for item in items:
-        results.append(
-            await _sync_item_payload(item, source, audit_source=audit_source)
-        )
-    return results
+    return [r async for r in iter_sync_all_items(audit_source=audit_source)]
 
 
 # ---------------------------------------------------------------------------
