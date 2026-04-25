@@ -11,6 +11,8 @@ import type {
   AutosyncConfig,
   AutosyncConfigUpdate,
   Budget,
+  BudgetCopyResult,
+  BudgetHistoryRow,
   BudgetProgress,
   CashFlowMonth,
   Category,
@@ -336,6 +338,17 @@ export const budgetsApi = {
 
   delete: (id: number): Promise<void> =>
     apiRequest(`/api/budgets/${id}`, { method: 'DELETE' }),
+
+  /** Bulk-copy every budget from one month to another. Idempotent. */
+  copy: (fromMonth: string, toMonth: string): Promise<BudgetCopyResult> =>
+    apiRequest(
+      `/api/budgets/copy?from=${encodeURIComponent(fromMonth)}&to=${encodeURIComponent(toMonth)}`,
+      { method: 'POST' },
+    ),
+
+  /** Heatmap data for Reports → Budget History. */
+  getHistory: (months = 12): Promise<BudgetHistoryRow[]> =>
+    apiRequest(`/api/budgets/history?months=${months}`),
 };
 
 // ---------------------------------------------------------------------------

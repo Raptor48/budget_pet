@@ -25,10 +25,19 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { budgetsApi, categoriesApi, ApiError } from "@/lib/api";
-import { confirm } from "@/lib/notify";
+import { confirm, notify } from "@/lib/notify";
 import { cn, formatCurrency } from "@/lib/utils";
 import type { BudgetProgress, Category } from "@/types/v2";
-import { ChevronLeft, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  CopyPlus,
+  Loader2,
+  Pencil,
+  Plus,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 
 type BudgetRow = BudgetProgress & { budgetId: number };
 
@@ -74,6 +83,17 @@ export function BudgetsView() {
   const listQuery = useQuery({
     queryKey: ["budgets", "list", month],
     queryFn: () => budgetsApi.list(month),
+  });
+
+  // Previous-month budgets — used for the "Copy from {prev}" affordance and
+  // to know how many categories the user could rehydrate with one click.
+  const prevMonth = useMemo(
+    () => format(subMonths(parseMonthYm(month), 1), "yyyy-MM"),
+    [month],
+  );
+  const prevListQuery = useQuery({
+    queryKey: ["budgets", "list", prevMonth],
+    queryFn: () => budgetsApi.list(prevMonth),
   });
 
   const categoriesQuery = useQuery({
@@ -250,6 +270,34 @@ export function BudgetsView() {
     onSuccess: () => invalidateBudgets(),
   });
 
+  // Bulk-copy every budget from prevMonth into the current month. Idempotent:
+  // categories already budgeted in the current month aren't touched, so the
+  // user can hit it twice or after partial manual edits without breaking
+  // anything.
+  const copyFromPrevMutation = useMutation({
+    mutationFn: () => budgetsApi.copy(prevMonth, month),
+    onSuccess: (result) => {
+      invalidateBudgets();
+      const noun = result.copied === 1 ? "budget" : "budgets";
+      if (result.copied > 0) {
+        notify.success(`Copied ${result.copied} ${noun} from ${prevMonth}.`);
+      } else {
+        notify.info("Nothing to copy — every category already has a budget.");
+      }
+    },
+    onError: (err) =>
+      notify.error(err instanceof Error ? err.message : "Could not copy budgets."),
+  });
+
+  // How many of last month's categories haven't been budgeted yet this month —
+  // drives the "Copy N from prev" affordance. Zero means there's nothing the
+  // copy button could meaningfully do, so we hide it.
+  const missingFromPrev = useMemo(() => {
+    const prev = prevListQuery.data ?? [];
+    const current = new Set((listQuery.data ?? []).map((b) => b.category_id));
+    return prev.filter((b) => !current.has(b.category_id)).length;
+  }, [prevListQuery.data, listQuery.data]);
+
   const bumpMonth = (delta: number) => {
     const base = parseMonthYm(month);
     const next = delta > 0 ? addMonths(base, delta) : subMonths(base, -delta);
@@ -317,6 +365,32 @@ export function BudgetsView() {
         </div>
       </div>
 
+      {/* Mid-month "fill the rest" affordance. Hidden when nothing's missing or
+          when the page is empty — the empty-state Card has its own primary CTA. */}
+      {!loading && rows.length > 0 && missingFromPrev > 0 ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-border/70 bg-muted/30 px-3 py-2 text-sm text-muted-foreground motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300">
+          <span className="flex-1">
+            {missingFromPrev} {missingFromPrev === 1 ? "category was" : "categories were"} budgeted
+            in {format(parseMonthYm(prevMonth), "MMM yyyy")} but not this month.
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => copyFromPrevMutation.mutate()}
+            disabled={copyFromPrevMutation.isPending}
+            className="gap-1.5"
+          >
+            {copyFromPrevMutation.isPending ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <CopyPlus className="size-3.5" />
+            )}
+            Copy {missingFromPrev}
+          </Button>
+        </div>
+      ) : null}
+
       {listError ? (
         <p className="text-destructive text-sm" role="alert">
           {listError}
@@ -346,11 +420,40 @@ export function BudgetsView() {
       {loading ? (
         <p className="text-muted-foreground text-sm">Loading…</p>
       ) : rows.length === 0 ? (
-        <Card>
+        <Card className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300">
           <CardHeader>
-            <CardTitle>No budgets</CardTitle>
-            <CardDescription>Add a budget for this month to track spending.</CardDescription>
+            <CardTitle>No budgets yet</CardTitle>
+            <CardDescription>
+              Add a budget for this month to track spending
+              {missingFromPrev > 0
+                ? ` — or copy ${missingFromPrev} ${
+                    missingFromPrev === 1 ? "budget" : "budgets"
+                  } you set last month in one click.`
+                : "."}
+            </CardDescription>
           </CardHeader>
+          {missingFromPrev > 0 ? (
+            <CardFooter className="gap-2 border-t pt-4">
+              <Button
+                type="button"
+                onClick={() => copyFromPrevMutation.mutate()}
+                disabled={copyFromPrevMutation.isPending}
+                className="gap-2"
+              >
+                {copyFromPrevMutation.isPending ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <CopyPlus className="size-4" />
+                )}
+                Copy {missingFromPrev} {missingFromPrev === 1 ? "budget" : "budgets"} from{" "}
+                {format(parseMonthYm(prevMonth), "MMM yyyy")}
+              </Button>
+              <Button type="button" variant="outline" onClick={openAdd}>
+                <Plus className="size-4" />
+                Add manually
+              </Button>
+            </CardFooter>
+          ) : null}
         </Card>
       ) : (
         <div className="space-y-6">
@@ -610,8 +713,17 @@ function BudgetCard({
       : tone === "yellow"
         ? "[&>div]:bg-amber-500"
         : "[&>div]:bg-emerald-600";
+  // Dopamine badge: positive diff = saved last month (emerald + sparkle),
+  // negative = ran over (muted gray, no shame). Null = no prior budget,
+  // hide entirely.
+  const prevDiff = row.previous_month_diff_cents;
   return (
-    <Card className={cn("overflow-hidden", variant === "parent" && "border-primary/20")}> 
+    <Card
+      className={cn(
+        "overflow-hidden transition-shadow motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300 hover:shadow-md",
+        variant === "parent" && "border-primary/20",
+      )}
+    >
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2">
@@ -634,6 +746,20 @@ function BudgetCard({
         <CardDescription className="tabular-nums">
           Budget {formatCurrency(row.budget_cents)} · Spent {formatCurrency(row.actual_cents)}
         </CardDescription>
+        {prevDiff != null ? (
+          prevDiff > 0 ? (
+            <p className="flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+              <Sparkles className="size-3" aria-hidden />
+              Saved {formatCurrency(prevDiff)} last month
+            </p>
+          ) : prevDiff < 0 ? (
+            <p className="text-xs text-muted-foreground">
+              Spent {formatCurrency(-prevDiff)} over last month
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">Hit the budget exactly last month</p>
+          )
+        ) : null}
         {subtitle ? (
           <p className="text-xs text-muted-foreground/80">{subtitle}</p>
         ) : null}
