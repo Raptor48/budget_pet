@@ -5,7 +5,6 @@ import { Sidebar } from "./sidebar";
 import { Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { PlaidAttentionBanner } from "@/components/layout/plaid-attention-banner";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -64,6 +63,29 @@ export function AppLayout({ children }: AppLayoutProps) {
       return next;
     });
   }, []);
+
+  // Cmd/Ctrl+B toggles the sidebar — common across editors and chat apps.
+  // Skipped while a text input has focus so we don't steal browser-native
+  // bold (which most rich-text editors map to the same combo).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key.toLowerCase() !== "b") return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (
+        tag === "input" ||
+        tag === "textarea" ||
+        target?.isContentEditable
+      ) {
+        return;
+      }
+      e.preventDefault();
+      toggleCollapsed();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [toggleCollapsed]);
 
   const closeMobile = useCallback(() => setMobileOpen(false), []);
 
@@ -150,7 +172,6 @@ export function AppLayout({ children }: AppLayoutProps) {
           {/* Scroll sentinel for the parallax-blur header effect. */}
           <div ref={sentinelRef} aria-hidden className="h-px w-full" />
           <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
-            <PlaidAttentionBanner />
             {children}
           </div>
         </main>
