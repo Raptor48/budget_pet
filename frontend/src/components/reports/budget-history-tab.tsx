@@ -16,7 +16,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { ArrowUpRight, ChevronDown, Sparkles, AlertCircle } from "lucide-react";
+import { AlertCircle, ArrowUpRight, ChevronDown, HelpCircle, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { BudgetHistoryRow } from "@/types/v2";
 
@@ -124,13 +124,20 @@ function HeatmapCell({
           style={{ animationDelay: `${delayMs}ms` }}
         />
       </TooltipTrigger>
-      <TooltipContent side="top" className="text-xs">
-        <p className="font-medium">{monthIso}</p>
+      <TooltipContent
+        side="top"
+        sideOffset={6}
+        className="border border-border/80 bg-popover px-3 py-2 text-popover-foreground shadow-md"
+      >
+        <p className="text-sm font-semibold leading-none">{monthIso}</p>
         {ratio == null ? (
-          <p className="text-muted-foreground">No budget set</p>
+          <p className="mt-1.5 text-xs text-muted-foreground">No budget set</p>
         ) : (
-          <p className="text-muted-foreground tabular-nums">
-            {formatMoney(actualCents)} / {formatMoney(budgetCents)} · {Math.round(ratio * 100)}%
+          <p className="mt-1.5 text-xs text-muted-foreground tabular-nums leading-snug">
+            <span className="font-medium text-foreground">{formatMoney(actualCents)}</span>
+            {" / "}
+            {formatMoney(budgetCents)}
+            <span className="ml-1 font-medium text-foreground">· {Math.round(ratio * 100)}%</span>
           </p>
         )}
       </TooltipContent>
@@ -290,7 +297,30 @@ export function BudgetHistoryTab({
                         );
                       })}
                       <th className="text-right text-xs font-medium uppercase tracking-wide text-muted-foreground pb-2 pl-3">
-                        Hit rate
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span
+                              tabIndex={0}
+                              className="inline-flex cursor-help items-center gap-1 outline-none focus-visible:ring-2 focus-visible:ring-ring/40 rounded"
+                            >
+                              Hit rate
+                              <HelpCircle className="size-3 opacity-60" aria-hidden />
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent
+                            side="top"
+                            sideOffset={6}
+                            className="max-w-[260px] border border-border/80 bg-popover px-3 py-2 text-popover-foreground shadow-md"
+                          >
+                            <p className="text-sm font-semibold leading-none">Hit rate</p>
+                            <p className="mt-1.5 text-xs text-muted-foreground leading-snug">
+                              Months you stayed at or under budget, divided by months
+                              with a budget set. <span className="font-medium text-foreground">100%</span> means
+                              you nailed every month; <span className="font-medium text-foreground">0%</span> means
+                              you went over every time.
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
                       </th>
                     </tr>
                   </thead>
