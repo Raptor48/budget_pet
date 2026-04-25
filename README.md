@@ -1,4 +1,4 @@
-# Budget Pet (V2)
+# Budget Pet
 
 Family budget app: **FastAPI** backend, **Next.js** frontend, **PostgreSQL** (asyncpg) on Railway. **Plaid** is the source of truth for linked banks, transactions, categories (PFC), recurring streams, liabilities, and investments.
 
@@ -6,12 +6,15 @@ Family budget app: **FastAPI** backend, **Next.js** frontend, **PostgreSQL** (as
 
 Authoritative specs live in [`docs/`](docs/README.md):
 
-- [`docs/architecture.md`](docs/architecture.md) — modules and data flow  
-- [`docs/api.md`](docs/api.md) — HTTP API  
-- [`docs/data-model.md`](docs/data-model.md) — tables and invariants  
-- [`docs/plaid.md`](docs/plaid.md) — Plaid products and sync  
+- [`docs/architecture.md`](docs/architecture.md) — modules, data flow, Railway envs, encryption-at-rest
+- [`docs/api.md`](docs/api.md) — HTTP API
+- [`docs/data-model.md`](docs/data-model.md) — tables and invariants
+- [`docs/plaid.md`](docs/plaid.md) — Plaid products, sync, access-token encryption
+- [`docs/reports-math.md`](docs/reports-math.md) — income/expense classification rules
+- [`docs/insights-math.md`](docs/insights-math.md) — insights feed math
 
 Legacy V1 docs: [`docs/archive/v1/`](docs/archive/v1/README.md) (reference only).
+Working with this codebase via Claude / agents: see [`CLAUDE.md`](CLAUDE.md).
 
 ## Stack
 
@@ -53,12 +56,18 @@ Plaid and domain logic should be covered in `tests/v2/` only.
 
 ## Railway checklist (short)
 
-- Set Postgres and point `DATABASE_URL` at the API service.  
-- Set `ADMIN_LOGIN`, `ADMIN_PASSWORD`, session-related vars per [`docs/architecture.md`](docs/architecture.md).  
-- Configure `NEXT_PUBLIC_API_URL` for the Next.js service.  
-- Plaid: set `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV`; register webhook URL if using webhooks (see [`docs/plaid.md`](docs/plaid.md)).  
-- Optional: `CORS_ORIGINS` — comma-separated origins for browser API access (cookies + credentials).
+The project (`protective-clarity` on Railway) hosts two environments:
+
+| Environment | Branch | Purpose |
+|---|---|---|
+| `production` | `main` | Real Plaid, real users; auto-deploys on merge |
+| `demo` | `demo` | Plaid sandbox + reviewer login `demo` / `demo_pass` |
+
+Per service:
+
+- **FastAPI**: `DATABASE_URL=${{Postgres-DB.DATABASE_URL}}` (templated — required so `POSTGRES_PASSWORD` rotations propagate). Set `ADMIN_LOGIN`, `ADMIN_PASSWORD`, session-related vars per [`docs/architecture.md`](docs/architecture.md). Plaid: `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV`. Encryption: `PLAID_ENCRYPTION_KEY` (generate once with `Fernet.generate_key()`, never rotate — see [`docs/plaid.md#access-token-encryption-at-rest`](docs/plaid.md#access-token-encryption-at-rest)). Optional: `PLAID_SDK_TIMEOUT` (default 90s), `PLAID_WEBHOOK_URL`.
+- **Next.js**: `NEXT_PUBLIC_API_URL` pointed at the FastAPI public URL. `CORS_ORIGINS` on FastAPI must include this origin (cookies + credentials).
 
 ## Out of scope in this README
 
-Telegram bot (`bot.py`, `services/`) may still target older APIs; migrate in a separate effort.
+Telegram bot (`bot.py`, `services/`) is **deprecated** — kept in the tree for reference but excluded from `ruff` and not touched by recent work. Don't extend it; migrate the remaining functionality into the FastAPI surface if needed.
