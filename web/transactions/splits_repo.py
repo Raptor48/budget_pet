@@ -5,7 +5,7 @@ Invariant: SUM(splits.amount_cents) == parent.amount_cents.
 This invariant is enforced in set_splits().
 """
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from web.db import get_pool
 

@@ -152,8 +152,8 @@ class BudgetsRepository:
         if viewer_user_id is not None:
             params.append(viewer_user_id)
             private_ex = (
-                f"AND (NOT t.is_private OR EXISTS ("
-                f"SELECT 1 FROM accounts _pa WHERE _pa.id = t.account_id AND _pa.user_id = $2))"
+                "AND (NOT t.is_private OR EXISTS ("
+                "SELECT 1 FROM accounts _pa WHERE _pa.id = t.account_id AND _pa.user_id = $2))"
             )
         async with pool.acquire() as conn:
             rows = await conn.fetch(

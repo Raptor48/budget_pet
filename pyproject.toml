@@ -1,0 +1,58 @@
+# Budget Pet — Python tooling configuration.
+#
+# Runtime deps live in requirements.txt (production) and requirements-dev.txt
+# (tests + local tooling). This file only configures ruff / pytest so the
+# Docker image does not need a packaging build step.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [
+    ".venv",
+    "venv",
+    "build",
+    "dist",
+    ".next",
+    "frontend",
+    ".claude",
+    # Deprecated Telegram bot — not part of the V2 surface, do not lint.
+    "bot.py",
+    "services",
+]
+
+[tool.ruff.lint]
+# Conservative starter set: real bugs and import hygiene only. Style
+# nitpicks (N, ANN, etc.) and pyupgrade (UP) are intentionally off so
+# existing code is not flagged for cosmetic-only issues. Tighten over
+# time — UP is a separate, sweeping migration (~1k autofixes).
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes (undefined names, unused imports)
+    "W",   # pycodestyle warnings
+    "I",   # isort (import order)
+    "B",   # flake8-bugbear (likely bugs)
+]
+ignore = [
+    "E501",  # line length — handled by formatter, don't double-flag
+    "B008",  # function call in default args — common in FastAPI Depends()
+    "B904",  # `raise ... from err` inside except — large existing codebase, defer
+    "I001",  # import sorting — defer to a separate isort sweep
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests and migrations import a lot for fixtures; relax unused-import.
+"tests/**/*.py" = ["F401", "F811"]
+"web/migrations/**/*.py" = ["E402"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+filterwarnings = [
+    "ignore::DeprecationWarning:asyncpg.*",
+    "ignore::DeprecationWarning:apscheduler.*",
+]

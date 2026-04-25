@@ -6,7 +6,6 @@ price change detection (threshold 10%), and user label updates.
 import logging
 import uuid
 from datetime import date, datetime
-from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from web.accounts.repo import AccountsRepository
