@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
 import { CategoryDonutWidget } from "@/components/charts/category-donut-chart";
-import { FinancialHealthHeroCard } from "@/components/reports/financial-health-hero-card";
+import { FinancialHealthCompactCard } from "@/components/reports/financial-health-hero-card";
 import {
   Card,
   CardContent,
@@ -199,40 +199,42 @@ function DashboardContent() {
         <p className="text-muted-foreground text-sm">Overview for {spendMonth}</p>
       </div>
 
-      {/* Row 1 — 3 KPI cards: Net Worth · Cash Flow · Insights.
-          Financial Health used to live here as a thin tile; it's now hosted
-          as a dedicated hero card below this row. */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {/* Row 1 — 4 KPI cards in a single line: Net Worth · Cash Flow · Health · Insights.
+          Each card aims for the same visual weight (~150px tall): a headline number,
+          one secondary line of context, and at most one accent. */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Net worth</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-1">
             {netWorthQuery.isLoading ? (
               <SectionSkeleton className="h-16 w-full" />
             ) : netWorthQuery.isError ? (
               <p className="text-destructive text-sm">Could not load net worth.</p>
             ) : netWorth ? (
               <>
-                <p className="text-2xl font-bold tabular-nums">
+                <p
+                  className={cn(
+                    "text-2xl font-bold tabular-nums",
+                    netWorth.net_worth_cents < 0 && "text-rose-600 dark:text-rose-400",
+                  )}
+                >
                   {formatUsd(netWorth.net_worth_cents)}
                 </p>
-                <dl className="space-y-1 text-xs">
-                  <div className="flex justify-between gap-2">
-                    <dt className="text-muted-foreground">Cash & bank</dt>
-                    <dd className="tabular-nums font-medium">{formatUsd(netWorth.liquid_cents)}</dd>
-                  </div>
-                  {netWorth.investment_cents > 0 && (
-                    <div className="flex justify-between gap-2">
-                      <dt className="text-muted-foreground">Investments</dt>
-                      <dd className="tabular-nums font-medium">{formatUsd(netWorth.investment_cents)}</dd>
-                    </div>
-                  )}
-                  <div className="flex justify-between gap-2">
-                    <dt className="text-muted-foreground">Debt</dt>
-                    <dd className="tabular-nums font-medium">{formatUsd(netWorth.debt_cents)}</dd>
-                  </div>
-                </dl>
+                <p className="text-muted-foreground text-xs leading-snug">
+                  Liquid <span className="tabular-nums font-medium text-foreground">{formatUsd(netWorth.liquid_cents)}</span>
+                  {netWorth.investment_cents > 0 ? (
+                    <>
+                      {" · "}Invest{" "}
+                      <span className="tabular-nums font-medium text-foreground">
+                        {formatUsd(netWorth.investment_cents)}
+                      </span>
+                    </>
+                  ) : null}
+                  {" · "}Debt{" "}
+                  <span className="tabular-nums font-medium text-foreground">{formatUsd(netWorth.debt_cents)}</span>
+                </p>
               </>
             ) : null}
           </CardContent>
@@ -242,44 +244,43 @@ function DashboardContent() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Cash flow this month</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2">
+          <CardContent className="space-y-1">
             {cashFlowQuery.isLoading ? (
               <SectionSkeleton className="h-16 w-full" />
             ) : cashFlowQuery.isError ? (
               <p className="text-destructive text-sm">Could not load cash flow.</p>
             ) : cashFlow ? (
               <>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Income</span>
+                <p
+                  className={cn(
+                    "text-2xl font-bold tabular-nums",
+                    cashFlow.net_cents >= 0
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-rose-600 dark:text-rose-400",
+                  )}
+                >
+                  {formatUsd(cashFlow.net_cents)}
+                </p>
+                <p className="text-muted-foreground text-xs leading-snug">
+                  Income{" "}
                   <span className="tabular-nums font-medium text-emerald-600 dark:text-emerald-400">
                     {formatUsd(cashFlow.income_cents)}
                   </span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Expenses</span>
+                  {" · "}Expenses{" "}
                   <span className="tabular-nums font-medium text-rose-600 dark:text-rose-400">
                     {formatUsd(cashFlow.expenses_cents)}
                   </span>
-                </div>
-                <div className="border-t pt-2">
-                  <div className="flex justify-between text-sm font-semibold">
-                    <span>Net</span>
-                    <span
-                      className={cn(
-                        "tabular-nums",
-                        cashFlow.net_cents >= 0
-                          ? "text-emerald-600 dark:text-emerald-400"
-                          : "text-rose-600 dark:text-rose-400",
-                      )}
-                    >
-                      {formatUsd(cashFlow.net_cents)}
-                    </span>
-                  </div>
-                </div>
+                </p>
               </>
             ) : null}
           </CardContent>
         </Card>
+
+        <FinancialHealthCompactCard
+          score={health}
+          isLoading={healthQuery.isLoading}
+          isError={healthQuery.isError}
+        />
 
         <Link href="/insights" className="group block outline-none">
           <Card
@@ -319,15 +320,6 @@ function DashboardContent() {
           </Card>
         </Link>
       </div>
-
-      {/* Row 1.5 — Financial Health hero. Lives on the Dashboard now (used to
-          be a separate Reports tab). Always visible because it's the most
-          actionable single number we surface. */}
-      <FinancialHealthHeroCard
-        score={health}
-        isLoading={healthQuery.isLoading}
-        isError={healthQuery.isError}
-      />
 
       {/* Row 2 — Spending pie (2/3) + Budget compact (1/3) */}
       <div className="grid gap-6 lg:grid-cols-3">
