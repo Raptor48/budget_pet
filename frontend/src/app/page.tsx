@@ -3,7 +3,8 @@
 import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { formatDistanceToNow } from "date-fns";
 import { AppLayout } from "@/components/layout/app-layout";
 import { CategoryDonutWidget } from "@/components/charts/category-donut-chart";
 import { FinancialHealthCompactCard } from "@/components/reports/financial-health-hero-card";
@@ -19,11 +20,13 @@ import { Badge } from "@/components/ui/badge";
 import {
   budgetsApi,
   insightsApi,
+  plaidApi,
   recurringApi,
   reportsApi,
   transactionsApi,
 } from "@/lib/api";
-import { MonthYearPicker } from "@/components/ui/month-year-picker";
+import { notify } from "@/lib/notify";
+import { Loader2, RefreshCw, TrendingDown, TrendingUp } from "lucide-react";
 import { PlaidTxnAmount } from "@/components/ui/plaid-txn-amount";
 import type { ForecastEntry, Transaction } from "@/types/v2";
 import { cn } from "@/lib/utils";
@@ -82,6 +85,63 @@ function SectionSkeleton({ className }: { className?: string }) {
   );
 }
 
+/**
+ * Tiny "↑/↓ $X vs Mar" line under the KPI headline number.
+ *
+ * Sign convention: positive `cents` means "this month is bigger than last
+ * month" — the caller decides whether that's good (cash flow improved) or
+ * bad (net worth dropped). `goodWhenPositive` flips the color so the same
+ * helper works for income-flavored and balance-flavored numbers.
+ *
+ * Hidden when `cents == null` (e.g. no prior data yet) so we don't render
+ * a "+0 vs prev" line that's worse than nothing.
+ */
+function DeltaLine({
+  cents,
+  monthShort,
+  goodWhenPositive,
+}: {
+  cents: number | null;
+  monthShort: string;
+  goodWhenPositive: boolean;
+}) {
+  if (cents == null) return null;
+  const isPositive = cents > 0;
+  const isNegative = cents < 0;
+  const Icon = isNegative ? TrendingDown : TrendingUp;
+  const isGood =
+    (isPositive && goodWhenPositive) || (isNegative && !goodWhenPositive);
+  const isBad =
+    (isPositive && !goodWhenPositive) || (isNegative && goodWhenPositive);
+  const tone = isGood
+    ? "text-emerald-600 dark:text-emerald-400"
+    : isBad
+      ? "text-rose-600 dark:text-rose-400"
+      : "text-muted-foreground";
+  const sign = cents >= 0 ? "+" : "−";
+  const abs = Math.abs(cents);
+  return (
+    <p
+      className={cn(
+        "flex items-center gap-1 text-[11px] font-medium leading-none",
+        tone,
+      )}
+    >
+      {cents !== 0 ? <Icon className="size-3" aria-hidden /> : null}
+      <span className="tabular-nums">
+        {sign}
+        {new Intl.NumberFormat("en-US", {
+          style: "currency",
+          currency: "USD",
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 0,
+        }).format(abs / 100)}
+      </span>
+      <span className="text-muted-foreground/80 font-normal">vs {monthShort}</span>
+    </p>
+  );
+}
+
 function MerchantAvatar({ tx }: { tx: Transaction }) {
   const name = getDisplayName(tx);
   const [failed, setFailed] = useState(false);
@@ -114,11 +174,22 @@ function MerchantAvatar({ tx }: { tx: Transaction }) {
 
 function DashboardContent() {
   const month = currentMonthIso();
-  const [spendMonth, setSpendMonth] = useState(month);
+  // Previous month YYYY-MM, used for the MoM-delta context lines on the
+  // Cash Flow + Net Worth KPI cards.
+  const prevMonth = (() => {
+    const [y, m] = month.split("-").map(Number);
+    if (!y || !m) return month;
+    const py = m === 1 ? y - 1 : y;
+    const pm = m === 1 ? 12 : m - 1;
+    return `${py.toString().padStart(4, "0")}-${pm.toString().padStart(2, "0")}`;
+  })();
+
   const [forecastExpanded, setForecastExpanded] = useState(false);
   const [priceChangesExpanded, setPriceChangesExpanded] = useState(false);
   const [txExpanded, setTxExpanded] = useState(false);
   const [budgetExpanded, setBudgetExpanded] = useState(false);
+
+  const queryClient = useQueryClient();
 
   const netWorthQuery = useQuery({
     queryKey: ["reports", "net-worth"],
@@ -126,9 +197,24 @@ function DashboardContent() {
     staleTime: 60_000,
   });
 
+  // Last 2 net-worth snapshots → for the "vs last month" delta. Cheap, the
+  // reports tab already pulls 12 of these; the cache layer dedupes.
+  const netWorthHistoryQuery = useQuery({
+    queryKey: ["reports", "net-worth-history", 2],
+    queryFn: () => reportsApi.getNetWorthHistory(2),
+    staleTime: 60_000,
+  });
+
   const cashFlowQuery = useQuery({
     queryKey: ["reports", "cash-flow", month],
     queryFn: () => reportsApi.getCashFlow(month),
+    staleTime: 60_000,
+  });
+
+  // Previous-month cash flow → MoM delta. Same endpoint, prior month key.
+  const cashFlowPrevQuery = useQuery({
+    queryKey: ["reports", "cash-flow", prevMonth],
+    queryFn: () => reportsApi.getCashFlow(prevMonth),
     staleTime: 60_000,
   });
 
@@ -162,9 +248,11 @@ function DashboardContent() {
     staleTime: 30_000,
   });
 
+  // Spending breakdown — always current month on the Dashboard. Reports has
+  // a month picker for the rest; the Dashboard's contract is "right now".
   const byCategoryQuery = useQuery({
-    queryKey: ["reports", "by-category", spendMonth, "primary"],
-    queryFn: () => reportsApi.getByCategory(spendMonth, { rollup: "primary" }),
+    queryKey: ["reports", "by-category", month, "primary"],
+    queryFn: () => reportsApi.getByCategory(month, { rollup: "primary" }),
     staleTime: 60_000,
   });
 
@@ -174,9 +262,68 @@ function DashboardContent() {
     staleTime: 120_000,
   });
 
+  // Plaid items power the "last synced" timestamp + the Sync now button.
+  // Same query the sidebar uses for the Settings dot — react-query dedupes.
+  const plaidItemsQuery = useQuery({
+    queryKey: ["plaid-items"],
+    queryFn: plaidApi.listItems,
+    staleTime: 60_000,
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: () => plaidApi.sync(),
+    onSuccess: () => {
+      // Pull every data surface the sync just touched — net worth, cash
+      // flow (current + prev), budgets, transactions, recurring, plaid
+      // items themselves. Coarse invalidations are fine on the Dashboard.
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
+      queryClient.invalidateQueries({ queryKey: ["budgets"] });
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["recurring"] });
+      queryClient.invalidateQueries({ queryKey: ["plaid-items"] });
+      notify.success("Sync complete.");
+    },
+    onError: (err) =>
+      notify.error(err instanceof Error ? err.message : "Sync failed."),
+  });
+
   const netWorth = netWorthQuery.data;
   const cashFlow = cashFlowQuery.data;
+  const cashFlowPrev = cashFlowPrevQuery.data;
   const health = healthQuery.data;
+  const plaidItems = plaidItemsQuery.data ?? [];
+
+  // Pull the most recent successful sync across every connected item; UI
+  // shows "Last synced N ago" in the breadcrumb. Falls back to "—" before
+  // first sync.
+  const lastSyncedAt = plaidItems
+    .map((i) => i.last_synced_at)
+    .filter((d): d is string => Boolean(d))
+    .sort()
+    .pop();
+  const lastSyncedRelative = lastSyncedAt
+    ? formatDistanceToNow(new Date(lastSyncedAt), { addSuffix: true })
+    : null;
+
+  // MoM deltas — surfaced only when we have a prior data point to compare
+  // against; otherwise the line is hidden so we don't render "+0 vs Mar"
+  // when there literally is no Mar.
+  const cashFlowNetDelta =
+    cashFlow != null && cashFlowPrev != null
+      ? cashFlow.net_cents - cashFlowPrev.net_cents
+      : null;
+  const netWorthHistory = netWorthHistoryQuery.data ?? [];
+  const netWorthDelta =
+    netWorth != null && netWorthHistory.length >= 2
+      ? netWorth.net_worth_cents -
+        netWorthHistory[netWorthHistory.length - 2].net_worth_cents
+      : null;
+
+  const prevMonthShort = (() => {
+    const [y, m] = prevMonth.split("-").map(Number);
+    if (!y || !m) return prevMonth;
+    return new Date(y, m - 1, 15).toLocaleDateString("en-US", { month: "short" });
+  })();
   const budgetRows = budgetProgressQuery.data ?? [];
   const topBudgets = topBudgetProgress(budgetRows, 5);
   const forecastSorted = sortForecastUpcoming(forecastQuery.data ?? []);
@@ -205,12 +352,41 @@ function DashboardContent() {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Slim breadcrumb-style header: just the month label as a single line.
-          Sidebar already tells the user they're on the Dashboard, so the
-          "Dashboard" H1 was wasted vertical real estate. */}
-      <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300">
-        Overview · <span className="text-foreground">{currentMonthLabel}</span>
-      </p>
+      {/* Slim breadcrumb-style header: month label on the left, last-sync
+          timestamp + Sync now button on the right. Sidebar already tells
+          the user they're on the Dashboard, so the H1+subtitle stack from
+          before was wasted vertical. */}
+      <div className="flex flex-wrap items-center justify-between gap-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300">
+        <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+          Overview · <span className="text-foreground">{currentMonthLabel}</span>
+        </p>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          {lastSyncedRelative ? (
+            <span className="leading-none">
+              Last synced{" "}
+              <span className="font-medium text-foreground">{lastSyncedRelative}</span>
+            </span>
+          ) : (
+            <span className="leading-none italic">Not synced yet</span>
+          )}
+          <button
+            type="button"
+            onClick={() => syncMutation.mutate()}
+            disabled={syncMutation.isPending}
+            aria-label="Sync now"
+            className="inline-flex h-7 items-center gap-1 rounded-md border border-border/60 bg-card px-2 text-xs font-medium text-foreground transition-colors hover:border-border hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {syncMutation.isPending ? (
+              <Loader2 className="size-3 animate-spin" aria-hidden />
+            ) : (
+              <RefreshCw className="size-3" aria-hidden />
+            )}
+            <span className="hidden sm:inline">
+              {syncMutation.isPending ? "Syncing…" : "Sync now"}
+            </span>
+          </button>
+        </div>
+      </div>
 
       {/* Inline plate replaces the global full-width banner from before.
           Auto-hides when nothing's wrong, so it doesn't add noise. */}
@@ -239,7 +415,12 @@ function DashboardContent() {
                 >
                   {formatUsd(netWorth.net_worth_cents)}
                 </p>
-                <p className="text-muted-foreground text-xs leading-snug">
+                <DeltaLine
+                  cents={netWorthDelta}
+                  monthShort={prevMonthShort}
+                  goodWhenPositive
+                />
+                <p className="text-muted-foreground text-xs leading-snug pt-0.5">
                   Liquid <span className="tabular-nums font-medium text-foreground">{formatUsd(netWorth.liquid_cents)}</span>
                   {netWorth.investment_cents > 0 ? (
                     <>
@@ -278,7 +459,12 @@ function DashboardContent() {
                 >
                   {formatUsd(cashFlow.net_cents)}
                 </p>
-                <p className="text-muted-foreground text-xs leading-snug">
+                <DeltaLine
+                  cents={cashFlowNetDelta}
+                  monthShort={prevMonthShort}
+                  goodWhenPositive
+                />
+                <p className="text-muted-foreground text-xs leading-snug pt-0.5">
                   Income{" "}
                   <span className="tabular-nums font-medium text-emerald-600 dark:text-emerald-400">
                     {formatUsd(cashFlow.income_cents)}
@@ -364,7 +550,6 @@ function DashboardContent() {
               </CardTitle>
               <CardDescription>Month total (split-aware, primary categories)</CardDescription>
             </div>
-            <MonthYearPicker value={spendMonth} onChange={setSpendMonth} />
           </CardHeader>
           <CardContent>
             {byCategoryQuery.isLoading ? (
