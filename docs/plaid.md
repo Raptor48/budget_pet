@@ -439,6 +439,23 @@ top three streams by absolute percentage.
 | development | plaid | Real bank accounts, up to 100 items |
 | production | plaid | Production (requires Plaid approval) |
 
+## Access token encryption at rest
+
+`plaid_items.access_token_encrypted` (BYTEA) holds a Fernet ciphertext
+of each Plaid access token. The legacy `access_token TEXT` column is
+kept (NULL after backfill) so a deploy that ships the schema before
+`PLAID_ENCRYPTION_KEY` is configured on Railway still boots cleanly.
+
+- `web/plaid/crypto.py` is the only place that touches keys; the repo
+  decorates DB rows transparently — callers keep using
+  `item["access_token"]` as plaintext.
+- Backfill runs once per boot from `PlaidRepository.init_tables` and is
+  idempotent (only encrypts rows where the encrypted column is NULL).
+- Operational rules: generate the key once with
+  `Fernet.generate_key()`, store it in your password manager, **never
+  rotate it**. A lost key means every linked institution must be
+  re-linked from the UI.
+
 ## Sandbox Testing
 
 - Use "First Platypus Bank" institution in sandbox

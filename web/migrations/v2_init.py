@@ -505,6 +505,11 @@ async def _migrate_v21_addons(conn) -> None:
         for col in (
             "ALTER TABLE plaid_items ADD COLUMN IF NOT EXISTS item_login_required BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE plaid_items ADD COLUMN IF NOT EXISTS sync_updates_pending BOOLEAN NOT NULL DEFAULT FALSE",
+            # Encryption-at-rest for Plaid access_tokens (see web/plaid/crypto.py).
+            # Plain access_token is kept (NULL after backfill) for graceful rollout
+            # before PLAID_ENCRYPTION_KEY is configured on Railway.
+            "ALTER TABLE plaid_items ADD COLUMN IF NOT EXISTS access_token_encrypted BYTEA",
+            "ALTER TABLE plaid_items ALTER COLUMN access_token DROP NOT NULL",
         ):
             try:
                 await _ddl(conn, col)
