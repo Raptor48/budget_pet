@@ -322,7 +322,6 @@ export default function Reports() {
     resetCategoryHighlight();
     // We intentionally don't strip `category` from the URL — keeping it
     // means the state survives a refresh / back navigation.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     tab,
     paramCategoryId,

@@ -82,7 +82,6 @@ import { formatAccountPickerLabel } from "@/lib/account-picker-label";
 import { getAuthHeaders } from "@/lib/auth";
 import {
   accountsApi,
-  ApiError,
   categoriesApi,
   membersApi,
   tagsApi,
@@ -2204,12 +2203,12 @@ function SplitBreakdown({
 }) {
   return (
     <div className="flex flex-col gap-0.5">
-      {splits.map((s, i) => {
+      {splits.map((s) => {
         const cat = s.category_id != null ? categoryById.get(s.category_id) : undefined;
         const catName = cat?.name ?? "Uncategorized";
         return (
           <div
-            key={i}
+            key={s.id}
             className="flex min-w-0 items-center gap-1.5 rounded-md bg-muted/60 px-2 py-0.5 text-xs"
           >
             <Columns2 className="size-3 shrink-0 text-muted-foreground/70" />
