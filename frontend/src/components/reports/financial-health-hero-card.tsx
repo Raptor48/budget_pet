@@ -1,6 +1,7 @@
 "use client";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import type { FinancialHealthScore } from "@/types/v2";
 
 function formatRatioPercent(value: number | null | undefined): string {
@@ -35,9 +36,96 @@ function HealthMetric({
 }
 
 /**
- * Hero-sized health-score card. Used on the Dashboard as the headline KPI; the
- * Reports tab no longer hosts a dedicated tab for financial health — this is
- * its single canonical home.
+ * Compact KPI-row variant. Designed to sit alongside Net Worth, Cash Flow,
+ * and Insights in a single 4-column row on desktop without dwarfing them.
+ *
+ * Layout: a small score donut on the left, big number + status label
+ * stacked next to it, and a single-line truncated advice underneath.
+ * Drops the 5-metric tile grid that the hero variant ships — overview
+ * surface, not details. The actionable bits the metrics drove (high
+ * utilization, low savings rate) re-surface as Insights cards through
+ * the existing feed.
+ */
+export function FinancialHealthCompactCard({
+  score,
+  isLoading,
+  isError,
+}: {
+  score: FinancialHealthScore | null | undefined;
+  isLoading?: boolean;
+  isError?: boolean;
+}) {
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium text-muted-foreground">
+          Financial health
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="pb-4">
+        {isLoading ? (
+          <div className="h-16 w-full animate-pulse rounded bg-muted" aria-hidden />
+        ) : isError ? (
+          <p className="text-destructive text-sm">Could not load health score.</p>
+        ) : score ? (
+          <FinancialHealthCompactBody score={score} />
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function FinancialHealthCompactBody({ score }: { score: FinancialHealthScore }) {
+  const ringPct = Math.min(100, Math.max(0, score.score));
+  const dasharray = `${(ringPct / 100) * 264} 264`;
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-3">
+        <div
+          className="relative size-14 shrink-0 motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-500"
+          aria-hidden
+        >
+          <svg viewBox="0 0 100 100" className="size-full -rotate-90">
+            <circle cx="50" cy="50" r="42" fill="none" className="stroke-muted" strokeWidth="12" />
+            <circle
+              cx="50"
+              cy="50"
+              r="42"
+              fill="none"
+              stroke={score.color}
+              strokeWidth="12"
+              strokeLinecap="round"
+              strokeDasharray={dasharray}
+              className="transition-all duration-700"
+            />
+          </svg>
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-1.5 leading-none">
+            <span className="text-2xl font-bold tabular-nums">{score.score}</span>
+            <span className="text-xs text-muted-foreground">/ 100</span>
+          </div>
+          <p
+            className={cn("mt-1 text-sm font-semibold leading-tight")}
+            style={{ color: score.color }}
+          >
+            {score.label}
+          </p>
+        </div>
+      </div>
+      {score.advice ? (
+        <p className="text-muted-foreground text-xs leading-snug line-clamp-2">
+          {score.advice}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Hero-sized health-score card. Used on standalone Health pages or when this
+ * is the headline KPI of the screen. The Dashboard now opts for the compact
+ * variant above to keep the at-a-glance row balanced.
  *
  * Animations match the Cash Flow Reports tab: cards fade-in + slide-up, donut
  * dasharray tweens between scores, and metric tiles stagger in.
