@@ -12,8 +12,9 @@ import {
 } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { format, isValid } from "date-fns";
+import { format, formatDistanceToNow, isValid } from "date-fns";
 import {
+  AlertTriangle,
   ArrowLeftRight,
   Calendar,
   ChevronDown,
@@ -25,6 +26,7 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
+  FileText,
   Info,
   Loader2,
   MapPin,
@@ -141,10 +143,10 @@ function displayDate(tx: Transaction): string {
 function channelIcon(paymentChannel: string | null) {
   const c = (paymentChannel || "").toLowerCase();
   if (c === "online") {
-    return <Wifi className="size-4 shrink-0 text-sky-600 dark:text-sky-400" aria-label="Online" />;
+    return <Wifi className="size-4 shrink-0 text-muted-foreground" aria-label="Online" />;
   }
   if (c.includes("store") || c === "in store") {
-    return <Store className="size-4 shrink-0 text-amber-700 dark:text-amber-500" aria-label="In store" />;
+    return <Store className="size-4 shrink-0 text-muted-foreground" aria-label="In store" />;
   }
   return <CircleDot className="size-4 shrink-0 text-muted-foreground" aria-label="Other channel" />;
 }
@@ -172,13 +174,45 @@ function AccountChip({ tx }: { tx: Transaction }) {
   );
 }
 
+// 8 vivid gradients used as a deterministic fallback when Plaid did not
+// enrich the merchant with a logo. Listed as full literal strings so
+// Tailwind's JIT actually generates the classes.
+const MERCHANT_GRADIENTS = [
+  "from-rose-500 to-pink-500",
+  "from-orange-500 to-amber-500",
+  "from-yellow-500 to-lime-500",
+  "from-emerald-500 to-teal-500",
+  "from-cyan-500 to-sky-500",
+  "from-blue-500 to-indigo-500",
+  "from-violet-500 to-fuchsia-500",
+  "from-fuchsia-500 to-rose-500",
+] as const;
+
+function pickMerchantGradient(seed: string): string {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  }
+  const idx = Math.abs(hash) % MERCHANT_GRADIENTS.length;
+  return MERCHANT_GRADIENTS[idx];
+}
+
 function MerchantAvatar({ tx }: { tx: Transaction }) {
   const [failed, setFailed] = useState(false);
   const name = displayName(tx);
   const showImg = Boolean(tx.logo_url) && !failed;
+  const seed = (tx.merchant_name || tx.name || name || "?").toLowerCase();
+  const gradient = pickMerchantGradient(seed);
 
   return (
-    <div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted text-xs font-semibold text-muted-foreground">
+    <div
+      className={cn(
+        "flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full text-sm font-semibold",
+        showImg
+          ? "border border-border bg-muted text-muted-foreground"
+          : `bg-gradient-to-br text-white shadow-sm ${gradient}`,
+      )}
+    >
       {showImg ? (
         <img
           src={tx.logo_url!}
@@ -187,7 +221,7 @@ function MerchantAvatar({ tx }: { tx: Transaction }) {
           onError={() => setFailed(true)}
         />
       ) : (
-        <span className="leading-none">{initialsFromName(name)}</span>
+        <span className="leading-none drop-shadow-sm">{initialsFromName(name)}</span>
       )}
     </div>
   );
@@ -491,6 +525,11 @@ function TransactionDetailsDialog({
   const [editNote, setEditNote] = useState("");
   const [editCategoryId, setEditCategoryId] = useState(ALL);
   const [showMore, setShowMore] = useState(false);
+  // Snapshot of the loaded values so we can disable Save until the user
+  // has actually changed something (avoids no-op POSTs and gives a visible
+  // signal that there is anything to save).
+  const [initialNote, setInitialNote] = useState("");
+  const [initialCategoryId, setInitialCategoryId] = useState(ALL);
 
   const {
     data: transaction,
@@ -505,10 +544,16 @@ function TransactionDetailsDialog({
 
   useEffect(() => {
     if (!transaction) return;
-    setEditNote(transaction.user_note ?? "");
-    setEditCategoryId(transaction.category_id == null ? ALL : String(transaction.category_id));
+    const note = transaction.user_note ?? "";
+    const cat = transaction.category_id == null ? ALL : String(transaction.category_id);
+    setEditNote(note);
+    setEditCategoryId(cat);
+    setInitialNote(note);
+    setInitialCategoryId(cat);
     setShowMore(false);
   }, [transaction]);
+
+  const isDirty = editNote !== initialNote || editCategoryId !== initialCategoryId;
 
   const handleSave = async () => {
     try {
@@ -527,7 +572,28 @@ function TransactionDetailsDialog({
   const counterparties = transaction ? normalizeCounterparties(transaction.counterparties) : [];
   const bankName = transaction ? (transaction.name ?? "").trim() : "";
   const merchantLabel = transaction ? (transaction.merchant_name ?? "").trim() : "";
-  const showBankDesc = bankName && bankName !== merchantLabel;
+  const showBankDesc = Boolean(bankName) && bankName !== merchantLabel;
+
+  const pfcLabel = transaction
+    ? [transaction.pfc_primary, transaction.pfc_detailed].filter(Boolean).join(" · ")
+    : "";
+
+  // Plaid publishes exact thresholds only for VERY_HIGH (>98) and HIGH (>90).
+  // We treat LOW and UNKNOWN as "low confidence worth surfacing", and only
+  // when the user has not picked a category yet — otherwise their override
+  // is what counts and the warning is noise.
+  const pfcConfKey = (transaction?.pfc_confidence ?? "").toUpperCase().replace(/\s+/g, "_");
+  const isLowConfidence =
+    Boolean(transaction) &&
+    editCategoryId === ALL &&
+    (pfcConfKey === "LOW" || pfcConfKey === "UNKNOWN" || pfcConfKey === "");
+
+  // Pick up the assigned category color so we can paint a thin accent on the
+  // header — keeps a single, *meaningful* spot of color in the modal instead
+  // of the previous channel-icon orange/blue splatter.
+  const categoryAccent = transaction
+    ? categories.find((c) => c.id === transaction.category_id)?.color
+    : null;
 
   const authorizedDateText =
     transaction?.authorized_date && transaction.authorized_date !== transaction.date
@@ -546,11 +612,27 @@ function TransactionDetailsDialog({
       postedDateTimeText ||
       websiteText ||
       counterparties.length > 0 ||
-      metaRows.length > 0,
+      metaRows.length > 0 ||
+      pfcLabel ||
+      showBankDesc,
   );
 
   const isPlaidSource =
     transaction?.source === "plaid" || transaction?.source === "plaid_sandbox";
+
+  const syncedAgo = transaction
+    ? (() => {
+        const ts = transaction.updated_at || transaction.created_at;
+        if (!ts) return null;
+        const d = new Date(ts);
+        if (!isValid(d)) return null;
+        try {
+          return formatDistanceToNow(d, { addSuffix: true });
+        } catch {
+          return null;
+        }
+      })()
+    : null;
 
   const classOverrideLabel = transaction
     ? transaction.manual_class_override
@@ -561,7 +643,10 @@ function TransactionDetailsDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[min(90vh,calc(100dvh-1.5rem))] w-[min(440px,calc(100vw-1.5rem))] flex-col gap-0 overflow-hidden p-0">
-        <div className="shrink-0 border-b border-border px-5 py-4">
+        <div
+          className="shrink-0 border-b border-l-[3px] border-border px-5 py-4 transition-colors"
+          style={categoryAccent ? { borderLeftColor: categoryAccent } : undefined}
+        >
           <DialogHeader className="space-y-0 text-left">
             <DialogTitle className="text-base font-semibold">Transaction details</DialogTitle>
             <DialogDescription className="sr-only">
@@ -578,11 +663,6 @@ function TransactionDetailsDialog({
                 >
                   {displayName(transaction)}
                 </p>
-                {showBankDesc ? (
-                  <p className="break-words text-xs text-muted-foreground" title={bankName}>
-                    {bankName}
-                  </p>
-                ) : null}
                 <div className="flex flex-wrap items-center gap-2 pt-0.5">
                   <PlaidTxnAmount cents={Number(transaction.amount_cents) || 0} size="base" tone="flow" />
                   {transaction.is_pending ? (
@@ -648,50 +728,6 @@ function TransactionDetailsDialog({
                 ) : null}
                 <AccountChip tx={transaction} />
               </div>
-
-              {transaction.pfc_detailed || transaction.pfc_primary ? (
-                <div className="mt-3 flex items-start gap-2">
-                  <TagIcon
-                    className="mt-0.5 size-4 shrink-0 text-muted-foreground"
-                    aria-label="Category"
-                  />
-                  <span className="min-w-0 flex-1 break-words text-sm text-foreground">
-                    {[transaction.pfc_primary, transaction.pfc_detailed].filter(Boolean).join(" · ")}
-                  </span>
-                  {transaction.pfc_confidence ? (
-                    <TooltipProvider delayDuration={250}>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span
-                            tabIndex={0}
-                            className="inline-flex shrink-0 cursor-default rounded border border-border/60 bg-muted/40 px-1 py-0.5 font-mono text-[10px] tabular-nums leading-none text-muted-foreground transition-colors hover:border-border hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                            aria-label="Plaid category confidence"
-                          >
-                            {pfcConfidencePercentLabel(transaction.pfc_confidence)}
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent
-                          side="top"
-                          className="max-w-[min(280px,calc(100vw-2rem))] border-border/80 bg-popover px-3 py-2 text-xs font-normal leading-snug text-popover-foreground shadow-md"
-                        >
-                          {(() => {
-                            const { title, body } = pfcConfidenceTooltipBody(transaction.pfc_confidence);
-                            return (
-                              <>
-                                <span className="block font-medium text-foreground">{title}</span>
-                                <span className="mt-1 block text-muted-foreground">{body}</span>
-                                <span className="mt-1.5 block font-mono text-[10px] text-muted-foreground/80">
-                                  {transaction.pfc_confidence}
-                                </span>
-                              </>
-                            );
-                          })()}
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  ) : null}
-                </div>
-              ) : null}
             </div>
 
             {hasMoreDetails ? (
@@ -776,6 +812,28 @@ function TransactionDetailsDialog({
                         </ul>
                       </MoreRow>
                     ) : null}
+                    {showBankDesc ? (
+                      <MoreRow icon={FileText} label="Bank descriptor">
+                        <span className="break-words font-mono text-xs text-muted-foreground">
+                          {bankName}
+                        </span>
+                      </MoreRow>
+                    ) : null}
+                    {pfcLabel ? (
+                      <MoreRow icon={TagIcon} label="Plaid category">
+                        <span className="break-words font-mono text-xs text-muted-foreground">
+                          {pfcLabel}
+                        </span>
+                        {transaction.pfc_confidence ? (
+                          <span
+                            className="ml-2 font-mono text-[10px] uppercase tracking-wide text-muted-foreground/70"
+                            title={pfcConfidenceTooltipBody(transaction.pfc_confidence).body}
+                          >
+                            {pfcConfidencePercentLabel(transaction.pfc_confidence)}
+                          </span>
+                        ) : null}
+                      </MoreRow>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -797,6 +855,12 @@ function TransactionDetailsDialog({
                   </SelectContent>
                 </Select>
               </div>
+              {isLowConfidence ? (
+                <p className="flex items-start gap-1.5 pl-6 text-xs text-amber-700 dark:text-amber-400">
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                  <span>Plaid wasn&rsquo;t confident about this category — please double-check.</span>
+                </p>
+              ) : null}
               {isPlaidSource ? (
                 <div className="pl-6">
                   <CreateRuleFromTransactionButton
@@ -823,6 +887,11 @@ function TransactionDetailsDialog({
                 />
               </div>
             </div>
+            {syncedAgo ? (
+              <p className="px-5 pb-3 text-[10px] text-muted-foreground/70">
+                {isPlaidSource ? "Synced from Plaid" : "Created"} · {syncedAgo}
+              </p>
+            ) : null}
           </div>
         ) : null}
 
@@ -945,7 +1014,13 @@ function TransactionDetailsDialog({
               Close
             </Button>
             {transaction && !isLoading && !isError ? (
-              <Button type="button" onClick={handleSave} disabled={isSaving || isDeletingCash}>
+              <Button
+                type="button"
+                onClick={handleSave}
+                disabled={isSaving || isDeletingCash || !isDirty}
+                variant={isDirty ? "default" : "secondary"}
+                title={isDirty ? undefined : "No changes to save"}
+              >
                 {isSaving ? (
                   <>
                     <Loader2 className="size-4 animate-spin" />
