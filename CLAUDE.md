@@ -171,18 +171,14 @@ railway ssh                           # interactive shell into a linked service
 2. **Bump Next.js** to 15.5.x (or current) to clear the remaining 1 high
    + 1 moderate npm-audit advisory. Run `npm run build` + manual smoke
    test before shipping.
-3. **Replace `<img>` with `next/image`** in
-   `frontend/src/app/transactions/page.tsx:183`,
-   `:2189`, and `transaction-mobile-card.tsx:42`. Needs
-   `images.remotePatterns` in `next.config.js` for Plaid logo CDN.
-4. **Refactor mega-file** `frontend/src/app/transactions/page.tsx`
+3. **Refactor mega-file** `frontend/src/app/transactions/page.tsx`
    (~2200 LOC) into `_components/` per concern.
-5. **Consolidate `formatMoney`** — `Intl.NumberFormat` is duplicated in
+4. **Consolidate `formatMoney`** — `Intl.NumberFormat` is duplicated in
    ~12 places; the canonical helper is in
    `frontend/src/components/accounts/helpers.ts`.
-6. **CI**: add `.github/workflows/ci.yml` that runs `ruff check`,
+5. **CI**: add `.github/workflows/ci.yml` that runs `ruff check`,
    `pytest`, `tsc --noEmit`, `npm run lint`, `npm run build` on PRs.
-7. **Optional `git filter-repo`** to strip the leaked `.env` from history
+6. **Optional `git filter-repo`** to strip the leaked `.env` from history
    (already-rotated secrets, not a security blocker — purely cosmetic).
 
 ## Recent context (2026-04-25)
@@ -201,6 +197,38 @@ Big security + hygiene cleanup landed via [PR #5](https://github.com/Raptor48/bu
 - Branch hygiene: deleted `V2.1`, `V2.2`, `v2.0`; renamed `V2.2 → V2.3`;
   kept `main`, `V2.3`, `demo`.
 
-Audit reports in this session flagged several other items (broad
+## Transaction details redesign pass (V2.3 working branch)
+
+Landed on `V2.3` after PR #5; visible to reviewers when merged via PRs
+into `main`. Notable changes touching `frontend/src/app/transactions/`:
+
+- Modal: dedup'd PFC chip, moved Plaid category + bank descriptor into
+  the **More details** disclosure, replaced the always-visible confidence
+  pill with a single amber warning that fires only when Plaid confidence
+  is `LOW`/`UNKNOWN` *and* the row is still uncategorized. Save button is
+  now disabled-until-dirty (snapshot of initial note + category) and
+  flips variant when there are real changes.
+- Channel-icon palette muted; the only spot of color in the modal is a
+  **left-border accent painted with the assigned `category.color`** so
+  the meaningful classification is what the eye lands on.
+- `MerchantAvatar` fallback: 8-color **deterministic gradient** keyed off
+  `merchant_entity_id || displayName(tx)` (with non-alphanumerics
+  stripped) so two rows of the same merchant always pick the same color.
+  Plaid logos still win when present.
+- Footer line: `Synced from Plaid · {N} ago` (or `Created · …` for cash /
+  manual rows) using `transaction.updated_at` via `formatDistanceToNow`.
+- Detail dialog uses `placeholderData` from the `["transactions", …]`
+  query cache, so the modal renders **instantly** with the row already
+  in view; the freshness GET runs in the background. Hides Railway
+  cold-start latency without staleness — list invalidations on mutations
+  keep the cache honest.
+- `<img>` → `next/image` for every Plaid icon (merchant + PFC),
+  `images.remotePatterns` allowlists `plaid-merchant-logos.plaid.com`
+  and `plaid-category-icons.plaid.com`. Tagged `unoptimized` because
+  Plaid icons are 100×100 PNGs from a global CDN — the optimizer would
+  only add a hop. Institution logos (account-tile, flip-card) remain
+  `<img>` on purpose: they're stored as base64 data URLs in the DB.
+
+Audit reports in earlier sessions flagged several other items (broad
 `except Exception`, two-pattern repository DI, no Alembic migrations) —
 all real but deliberately deferred. Pick one if you have a slow day.
