@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -148,14 +149,14 @@ function MerchantLogo({ url, name }: { url: string | null; name: string }) {
     );
   }
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
+    <Image
       src={url}
       alt=""
       width={36}
       height={36}
       className="size-9 shrink-0 rounded-lg object-cover bg-muted"
       onError={() => setFailed(true)}
+      unoptimized
     />
   );
 }

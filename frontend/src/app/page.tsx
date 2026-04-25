@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -87,14 +88,14 @@ function MerchantAvatar({ tx }: { tx: Transaction }) {
 
   if (logo && !failed) {
     return (
-      // eslint-disable-next-line @next/next/no-img-element -- remote Plaid logos; dynamic URLs
-      <img
+      <Image
         src={logo}
         alt=""
         width={40}
         height={40}
         className="size-10 shrink-0 rounded-full object-cover"
         onError={() => setFailed(true)}
+        unoptimized
       />
     );
   }
