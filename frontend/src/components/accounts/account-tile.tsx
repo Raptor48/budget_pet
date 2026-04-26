@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import {
+  ChevronRight,
   CreditCard as CreditCardIcon,
   Landmark,
   PiggyBank,
@@ -137,8 +139,15 @@ export function AccountTile({
   const name = account.official_name || account.name;
   const logoSize = compact ? 28 : 36;
 
-  return (
-    <div className="relative overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm transition-shadow hover:shadow-md">
+  // Bank-style rows are clickable: jump to Transactions filtered to this
+  // account. Cash wallets are excluded from this — they have their own
+  // edit/delete affordances and the global tx filter doesn't add value
+  // for the manual ledger.
+  const linkable = !account.is_cash_wallet;
+  const href = linkable ? `/transactions?account_id=${account.id}` : null;
+
+  const inner = (
+    <>
       {/* Left accent bar */}
       <div
         className="absolute inset-y-0 left-0 w-1 rounded-l-xl"
@@ -181,23 +190,48 @@ export function AccountTile({
           </div>
           {!compact && <AccountTileSecondaryInfo account={account} />}
         </div>
-        <div className="shrink-0 text-right">
-          <p
-            className={
-              compact
-                ? "text-[13px] font-bold tabular-nums"
-                : "font-bold tabular-nums"
-            }
-          >
-            {formatMoney(account.current_balance_cents, account.currency)}
-          </p>
-          {account.owner_username && !compact && (
-            <p className="text-[10px] text-muted-foreground">
-              {account.owner_username}
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="text-right">
+            <p
+              className={
+                compact
+                  ? "text-[13px] font-bold tabular-nums"
+                  : "font-bold tabular-nums"
+              }
+            >
+              {formatMoney(account.current_balance_cents, account.currency)}
             </p>
-          )}
+            {account.owner_username && !compact && (
+              <p className="text-[10px] text-muted-foreground">
+                {account.owner_username}
+              </p>
+            )}
+          </div>
+          {linkable ? (
+            <ChevronRight
+              className="size-4 shrink-0 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground"
+              aria-hidden
+            />
+          ) : null}
         </div>
       </div>
+    </>
+  );
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        aria-label={`Open transactions for ${name}`}
+        className="group relative block overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm transition-[box-shadow,transform,border-color] hover:-translate-y-0.5 hover:border-border hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+      >
+        {inner}
+      </Link>
+    );
+  }
+  return (
+    <div className="relative overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm transition-shadow hover:shadow-md">
+      {inner}
     </div>
   );
 }
