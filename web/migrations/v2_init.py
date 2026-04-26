@@ -689,6 +689,36 @@ async def _migrate_recurring_price_change_signed(conn) -> None:
     )
 
 
+async def _migrate_merchant_aliases(conn) -> None:
+    """V2.3: per-merchant display rename (Plaid alias).
+
+    Family-global lookup table keyed by ``merchant_key`` (same algorithm as
+    ``merchant_category_rules``, see ``web/merchant_rules/keys.py``). Read paths
+    LEFT JOIN this table and ``COALESCE(alias.display_name, t.display_title)``
+    so the alias overrides the auto-normalized merchant title in **display
+    only** — categorization, merchant_key matching, math, and Plaid sync are
+    untouched. Idempotent.
+
+    Two example rows for context:
+
+        merchant_key                    | display_name
+        --------------------------------+-------------
+        eid:6mnxz3jp3wp4j4yze4kx4vl9p   | Rent
+        name:nyflower                   | Rent
+    """
+    await _ddl(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS merchant_aliases (
+            merchant_key  TEXT PRIMARY KEY,
+            display_name  TEXT NOT NULL CHECK (length(trim(display_name)) > 0),
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+    )
+
+
 async def _migrate_recurring_user_status(conn) -> None:
     """V2.3: user-managed lifecycle for recurring streams.
 
@@ -1054,6 +1084,7 @@ async def run_v2_migrations(pool) -> None:
         await _migrate_categories_is_income(conn)
         await _migrate_recurring_price_change_signed(conn)
         await _migrate_recurring_user_status(conn)
+        await _migrate_merchant_aliases(conn)
         await _migrate_transactions_display_title_backfill(conn)
         await _migrate_transactions_transaction_class(conn)
         await _migrate_insights_persistence(conn)

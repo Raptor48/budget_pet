@@ -61,6 +61,10 @@ class RecurringStreamOut(BaseModel):
     primary_category_name: Optional[str] = None
     primary_category_color: Optional[str] = None
     display_title: Optional[str] = None
+    # User-chosen rename for the underlying merchant; layered onto
+    # display_title at read time. Keyed by the merchant_name path because
+    # Plaid's recurring endpoint does not surface merchant_entity_id.
+    merchant_alias: Optional[str] = None
 
     class Config:
         from_attributes = True

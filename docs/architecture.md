@@ -56,6 +56,7 @@ web/
 ├── budgets/             — /api/budgets + progress calculation
 ├── investments/         — /api/investments/holdings
 ├── reports/             — /api/reports/* (cash flow, net worth, forecast, health)
+├── merchant_rules/      — /api/merchant-rules (categorization) + /api/merchant-aliases (display rename)
 ├── app_settings/        — /api/settings/app (autosync schedule); singleton app_settings table
 └── audit/               — /api/audit feed + non-throwing `record()` helper (audit_log table)
 ```

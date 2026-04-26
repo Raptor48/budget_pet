@@ -36,6 +36,7 @@ import type {
   TransactionFilters,
   TransactionSplit,
   ManualCashTransactionCreate,
+  MerchantAlias,
   MerchantRule,
   MerchantRuleApplyResult,
   MerchantRulePreviewResult,
@@ -191,6 +192,40 @@ export const merchantRulesApi = {
 
   applyExisting: (ruleId: number): Promise<MerchantRuleApplyResult> =>
     apiRequest(`/api/merchant-rules/${ruleId}/apply-existing`, { method: 'POST' }),
+};
+
+// ---------------------------------------------------------------------------
+// Merchant aliases (display rename — separate from category rules)
+// ---------------------------------------------------------------------------
+
+export const merchantAliasesApi = {
+  list: (): Promise<MerchantAlias[]> => apiRequest('/api/merchant-aliases'),
+
+  upsert: (data: {
+    display_name: string;
+    merchant_entity_id?: string | null;
+    merchant_name?: string | null;
+    /** Fallback for transactions without a Plaid merchant (ACH / checks). */
+    merchant_label?: string | null;
+  }): Promise<MerchantAlias> =>
+    apiRequest('/api/merchant-aliases', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  /** Delete by merchant_entity_id + merchant_name (clears both eid: and name:
+   * twin rows the upsert wrote). Pass merchant_key directly to delete a
+   * single key. */
+  delete: (data: {
+    merchant_key?: string | null;
+    merchant_entity_id?: string | null;
+    merchant_name?: string | null;
+    merchant_label?: string | null;
+  }): Promise<void> =>
+    apiRequest('/api/merchant-aliases/delete', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };
 
 // ---------------------------------------------------------------------------

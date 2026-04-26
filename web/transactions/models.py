@@ -88,7 +88,11 @@ class TransactionOut(BaseModel):
     # Joined from users via accounts.user_id
     owner_username: Optional[str] = None
     # Derived display title — short, human-friendly. See web/transactions/display.py.
+    # When ``merchant_alias`` is set, the repo overrides this field with the
+    # alias on read; the original auto-normalized value stays in the DB.
     display_title: Optional[str] = None
+    # User-chosen rename for this merchant. NULL when no alias exists.
+    merchant_alias: Optional[str] = None
 
     class Config:
         from_attributes = True
