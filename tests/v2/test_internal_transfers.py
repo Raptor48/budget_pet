@@ -311,13 +311,12 @@ class TestMatchFamilyAccountTransfers:
     async def test_sql_contains_pair_matching_rules(self):
         conn = AsyncMock()
         conn.fetch = AsyncMock(return_value=[])
-        pool = make_mock_pool(conn)
+        # The matcher is designed to run inside an existing connection
+        # (used by both import_transactions and the rescan route), so we
+        # call it directly with `conn` and never need a pool here.
         with patch("web.plaid.internal_transfer.asyncpg"):
             pass
 
-        # Call directly with the mock connection rather than a pool since the
-        # matcher is designed to run inside an existing connection (used
-        # by both import_transactions and the rescan route).
         await match_family_account_transfers(conn, horizon_days=30)
 
         assert conn.fetch.await_count == 1, "matcher runs exactly one SQL statement"

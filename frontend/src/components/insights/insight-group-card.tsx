@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { BellOff, EyeOff, Sparkles, Undo2 } from "lucide-react";
+import { useState } from "react";
+import { BellOff, ChevronDown, ChevronUp, EyeOff, Sparkles, Undo2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,11 @@ import {
 import type { InsightCard as InsightCardModel } from "@/lib/api";
 import type { InsightGroup } from "@/lib/insights-grouping";
 import { cn } from "@/lib/utils";
+
+/** Number of items shown in a grouped card before the user expands.
+ * Keeps the card height in line with single-card neighbours so the 2-col
+ * grid doesn't get a giant cell next to a small one. */
+const COLLAPSED_ITEM_LIMIT = 3;
 
 export interface InsightActionHandlers {
   onSnooze: (card: InsightCardModel, days: number) => void;
@@ -156,12 +162,23 @@ function InsightItemActions({
  * Multi-item group: one card-sized block that lists every underlying
  * alert. Items keep their own snooze/dismiss affordances so the existing
  * "1 alert = 1 dismissable unit" contract is preserved.
+ *
+ * The card respects the page's 2-column grid (no `col-span-2`); when the
+ * group has more than ``COLLAPSED_ITEM_LIMIT`` items the extras are
+ * hidden behind a "Show all N" toggle so a 5-alert group does not become
+ * twice the height of its neighbour.
  */
 function GroupedCard({ group, handlers }: InsightGroupCardProps) {
+  const [expanded, setExpanded] = useState(false);
+  const overflow = Math.max(0, group.cards.length - COLLAPSED_ITEM_LIMIT);
+  const visibleCards = expanded
+    ? group.cards
+    : group.cards.slice(0, COLLAPSED_ITEM_LIMIT);
+
   return (
     <Card
       className={cn(
-        "overflow-hidden transition-shadow duration-300 hover:shadow-md md:col-span-2",
+        "overflow-hidden transition-shadow duration-300 hover:shadow-md",
         severityStyles(group.severity),
         group.allHidden && "opacity-60",
       )}
@@ -194,13 +211,13 @@ function GroupedCard({ group, handlers }: InsightGroupCardProps) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-0 divide-y divide-border/60 p-0">
-        {group.cards.map((card) => {
+        {visibleCards.map((card) => {
           const hidden = isHidden(card);
           return (
             <div
               key={card.dedupe_key}
               className={cn(
-                "space-y-2 px-6 py-3 first:pt-4 last:pb-4",
+                "space-y-2 px-6 py-3 first:pt-4",
                 hidden && "opacity-60",
               )}
             >
@@ -234,6 +251,25 @@ function GroupedCard({ group, handlers }: InsightGroupCardProps) {
             </div>
           );
         })}
+        {overflow > 0 ? (
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="text-muted-foreground hover:bg-muted/40 hover:text-foreground flex w-full items-center justify-center gap-1 px-6 py-2.5 text-xs transition-colors"
+          >
+            {expanded ? (
+              <>
+                <ChevronUp className="size-3.5" />
+                Show less
+              </>
+            ) : (
+              <>
+                <ChevronDown className="size-3.5" />
+                Show {overflow} more
+              </>
+            )}
+          </button>
+        ) : null}
       </CardContent>
     </Card>
   );

@@ -170,6 +170,15 @@ the privacy model from §3 is preserved. Every mutation
 (`dismiss`/`snooze`/`unhide`/`mark-viewed`) invalidates the viewer's
 cache entry.
 
+**Plaid sync invalidation.** `iter_sync_all_items` calls
+`invalidate_cache(None)` in its `finally` block (see
+`web/plaid/scheduler.py::_invalidate_insights_cache_post_sync`), so a
+manual or scheduled Plaid sync drops every viewer's cache as soon as it
+finishes — the next `GET /api/insights/feed` recomputes against the
+freshly-imported transactions instead of serving a stale snapshot for
+up to the TTL window. Failure to flush (e.g. import error inside the
+insights module) is logged but never aborts the sync.
+
 ### Configurable thresholds
 
 Defaults live in [`web/insights/config.py`](../web/insights/config.py)
