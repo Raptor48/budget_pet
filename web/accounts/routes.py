@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Query, Request  # noqa: F401
 
 from web.accounts.cash_wallet import is_designated_cash_wallet
 
-from .models import AccountCreate, AccountOut, AccountUpdate
+from .models import AccountCreate, AccountOut, AccountUpdate, CashWalletCreate
 from .repo import AccountsRepository
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
@@ -21,12 +21,42 @@ async def list_accounts(active_only: bool = Query(True)):
 
 @router.get("/cash-wallet", response_model=AccountOut)
 async def get_cash_wallet(request: Request):
-    """Lazily create the per-user manual Cash wallet (no Plaid link)."""
+    """Lazily create the per-user manual Cash wallet (no Plaid link).
+
+    Kept for legacy callers. New flows should call POST /cash-wallet to
+    create with a custom name and seed balance.
+    """
     user = getattr(request.state, "user", None) or {}
     uid = user.get("id")
     if uid is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
     return await _repo().ensure_cash_wallet(int(uid))
+
+
+@router.post("/cash-wallet", response_model=AccountOut, status_code=201)
+async def create_cash_wallet(body: CashWalletCreate, request: Request):
+    """Create a custom-named manual cash wallet.
+
+    The owner defaults to the requesting user; non-owner accounts on the
+    family can only set themselves as the wallet's owner. Owner-role users
+    may assign the wallet to any member.
+    """
+    user = getattr(request.state, "user", None) or {}
+    uid = user.get("id")
+    if uid is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    requester_id = int(uid)
+    target_owner = body.owner_user_id if body.owner_user_id is not None else requester_id
+    if target_owner != requester_id and not user.get("is_owner"):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the household owner can create a cash wallet for another member",
+        )
+    return await _repo().create_cash_wallet(
+        name=body.name.strip(),
+        initial_balance_cents=body.initial_balance_cents,
+        user_id=target_owner,
+    )
 
 
 @router.post("", response_model=AccountOut, status_code=201)

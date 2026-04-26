@@ -81,6 +81,48 @@ class AccountsRepository:
             return None
         return _decorate(dict(row))
 
+    async def create_cash_wallet(
+        self,
+        *,
+        name: str,
+        initial_balance_cents: int,
+        user_id: int,
+    ) -> Dict[str, Any]:
+        """Insert a custom-named manual cash wallet for ``user_id``.
+
+        Distinct from ``ensure_cash_wallet`` (which only creates a single
+        default-named "Cash" row): this is what backs the explicit
+        "Add cash wallet" UI, lets users name the wallet ("Travel
+        envelope", "Wedding fund"), and seed an initial balance.
+        """
+        pool = await self._pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO accounts (
+                    plaid_account_id, plaid_item_id, name, official_name, mask,
+                    type, subtype, current_balance_cents, available_balance_cents,
+                    credit_limit_cents, currency, holder_category, user_id, is_active
+                ) VALUES (
+                    NULL, NULL, $1, NULL, NULL,
+                    $2, $3, $4, NULL, NULL, 'USD', NULL, $5, TRUE
+                )
+                RETURNING id
+                """,
+                name,
+                CASH_WALLET_TYPE,
+                CASH_WALLET_SUBTYPE,
+                int(initial_balance_cents),
+                user_id,
+            )
+            inserted = await conn.fetchrow(
+                self._SELECT_WITH_BRANDING + "WHERE a.id = $1",
+                row["id"],
+            )
+        d = _decorate(dict(inserted))
+        d["is_cash_wallet"] = True
+        return d
+
     async def ensure_cash_wallet(self, user_id: int) -> Dict[str, Any]:
         """
         One manual depository 'Cash' account per user (no plaid_account_id).

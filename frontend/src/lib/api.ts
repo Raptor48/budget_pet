@@ -104,6 +104,17 @@ export const accountsApi = {
 
   cashWallet: (): Promise<Account> => apiRequest("/api/accounts/cash-wallet"),
 
+  /** Create a custom-named manual cash wallet. */
+  createCashWallet: (data: {
+    name: string;
+    initial_balance_cents: number;
+    owner_user_id?: number | null;
+  }): Promise<Account> =>
+    apiRequest("/api/accounts/cash-wallet", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
   update: (id: number, data: Partial<Account>): Promise<Account> =>
     apiRequest(`/api/accounts/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
 
