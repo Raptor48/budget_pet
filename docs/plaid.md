@@ -431,6 +431,36 @@ The insights feed (`web/insights/feed.py`) emits separate `price_changes_warn`
 (severity `warn`) and `price_changes_good` (severity `info`) cards with the
 top three streams by absolute percentage.
 
+## Recurring is read-only
+
+Plaid's `/transactions/recurring/get` only **detects** streams — it cannot
+pause or cancel third-party subscriptions. Plaid's only `/transfer/cancel`
+endpoint applies to ACH transfers Plaid itself originated, not to merchant
+subscriptions. Cancelling a Netflix or Adobe subscription always requires
+the user to cancel with the merchant directly (or via their bank).
+
+To still let users keep the Recurring page tidy, we layer a **local
+lifecycle** on top of the synced data via four columns on `recurring_streams`
+(see [`docs/data-model.md#recurring_streams`](data-model.md#recurring_streams)):
+
+| Column | Purpose |
+|---|---|
+| `user_status` | `active` / `paused` / `cancelled`. Default visibility hides `cancelled`. KPI sums and Insights skip non-`active`. |
+| `paused_until` | Optional auto-resume date for `paused`. NULL = pause indefinitely. |
+| `cancelled_at` | Audit timestamp; written when `user_status` flips to `cancelled`. |
+| `price_change_snoozed_until` | Suppress price-change badge / Insight card until this date. |
+
+The Plaid upsert ON CONFLICT clause in `RecurringRepository.upsert_streams`
+**deliberately omits all four columns** so the daily sync never overwrites
+the user's choice. Manual rows (`stream_source = 'manual'`) remain fully
+protected by the existing `WHERE recurring_streams.stream_source IS DISTINCT
+FROM 'manual'` guard.
+
+If Plaid ever ships a real subscription-cancellation product (or we
+integrate a third-party like Rocket Money), the bulk endpoint contract
+(`POST /api/recurring/bulk` with `action: 'cancel'`) is already shaped so
+we can add a real cancellation step before flipping the local flag.
+
 ## Environments
 
 | PLAID_ENV | Source Tag | Description |

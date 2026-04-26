@@ -120,7 +120,9 @@ User-defined tags for custom classification (e.g., "alcohol", "business").
 ### recurring_streams
 From Plaid `/transactions/recurring/get`, plus **manual** rows created via `POST /api/recurring`. Plaid upsert skips rows where `stream_source = 'manual'`.
 
-**`GET /api/recurring`** and **`GET /api/recurring/price-changes`** return the full household list for any authenticated member (no per-account `viewer_user_id` filter). Rows are sorted by computed next payment date (`next_occurrence` rules), soonest first. Other callers (e.g. Insights) may still pass `viewer_user_id` into `RecurringRepository.list_streams` / `get_price_changes` to hide streams tied to another member’s personally owned account. List enrichment sets `primary_category_name` from the category hierarchy when `category_id` resolves; if the JOIN name is empty, it uses **`format_plaid_category_for_display`** in `web/categories/pfc_display.py` — the same PFC→label rules as auto-created `categories` rows (not raw `pfc_primary` strings).
+**`GET /api/recurring`** and **`GET /api/recurring/price-changes`** return the full household list for any authenticated member (no per-account `viewer_user_id` filter). `GET /api/recurring` accepts a repeatable `user_status` query parameter (`active` / `paused` / `cancelled`); the default is `active+paused` so cancelled streams stay archived but queryable on demand. Rows are sorted by computed next payment date (`next_occurrence` rules), soonest first. Other callers (e.g. Insights) may still pass `viewer_user_id` into `RecurringRepository.list_streams` / `get_price_changes` to hide streams tied to another member’s personally owned account. List enrichment sets `primary_category_name` from the category hierarchy when `category_id` resolves; if the JOIN name is empty, it uses **`format_plaid_category_for_display`** in `web/categories/pfc_display.py` — the same PFC→label rules as auto-created `categories` rows (not raw `pfc_primary` strings).
+
+**User-managed lifecycle.** Plaid's API is read-only — it can detect streams but cannot pause / cancel third-party subscriptions. The `user_status` / `paused_until` / `cancelled_at` / `price_change_snoozed_until` columns capture local intent only. The user is still responsible for cancelling with the merchant. The Plaid upsert ON CONFLICT clause **does not touch any of these columns**, so the user's choice survives every sync.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -130,8 +132,12 @@ From Plaid `/transactions/recurring/get`, plus **manual** rows created via `POST
 | average_amount_cents | BIGINT | |
 | last_amount_cents | BIGINT | |
 | price_change_pct | NUMERIC(6,2) | Computed on sync as a **signed** percentage: `(last - avg) / abs(avg) * 100`. Positive = last charge higher than the long-term average, negative = lower. Historical rows are backfilled by `_migrate_recurring_price_change_signed` (idempotent). |
-| status | TEXT | MATURE\|EARLY_DETECTION\|TOMBSTONED\|MANUAL (manual rows) |
+| status | TEXT | MATURE\|EARLY_DETECTION\|TOMBSTONED\|MANUAL (manual rows) — Plaid-side detection state |
 | stream_source | TEXT | `plaid` (default) \| `manual` — Plaid `ON CONFLICT` update does not overwrite `manual` |
+| user_status | TEXT NOT NULL DEFAULT 'active' | `active` \| `paused` \| `cancelled`. CHECK-constrained. Default visibility hides `cancelled` rows; KPI sums and Insights skip non-`active` rows. |
+| paused_until | DATE NULL | Optional auto-resume date for paused streams; NULL = pause indefinitely |
+| cancelled_at | TIMESTAMPTZ NULL | Stamped by `RecurringRepository.update_stream` / `bulk_apply` whenever `user_status` flips to `cancelled` |
+| price_change_snoozed_until | DATE NULL | When >= `CURRENT_DATE`, hides the price-change badge on this row and excludes it from the `price_changes_warn` / `_good` Insights cards |
 
 ### plaid_items (connection metadata)
 | Column | Type | Notes |

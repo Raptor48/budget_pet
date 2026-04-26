@@ -83,13 +83,16 @@ Matching SQL coalesces `NULLIF(merchant_name, '')` onto `transactions.display_ti
 
 ## Recurring Streams
 
+Plaid does not let third-party subscriptions be paused or cancelled via API — these endpoints only manage local lifecycle state used by KPIs and Insights. The user is still expected to cancel with the merchant directly. See [`docs/plaid.md#recurring-is-read-only`](plaid.md#recurring-is-read-only).
+
 | Method | Path | Description |
 |---|---|---|
-| GET | /api/recurring | List streams (`direction=inflow\|outflow`, `active_only`). Each row is enriched with `account_name`, `account_mask`, `owner_username` (joined from the owning account/user), `primary_category_id`/`primary_category_name`/`primary_category_color` (rolled up via `categories.parent_id`), and `display_title` (normalized description via `web/transactions/display.py::normalize_transaction_title`). |
-| GET | /api/recurring/price-changes | Streams whose last charge diverges from the long-term average by more than 10%. The `price_change_pct` field is **signed** (positive = more expensive, negative = cheaper); the UI interprets the sign against `direction` to show good-news / heads-up coloring. |
+| GET | /api/recurring | List streams. Filters: `direction=inflow\|outflow`, `active_only` (Plaid-side), and the repeatable `user_status` query parameter (`active` \| `paused` \| `cancelled`; default = `active+paused` so cancelled rows are archived but still queryable on demand). Each row is enriched with `account_name`, `account_mask`, `owner_username` (joined from the owning account/user), `primary_category_id`/`primary_category_name`/`primary_category_color` (rolled up via `categories.parent_id`), and `display_title` (normalized description via `web/transactions/display.py::normalize_transaction_title`). |
+| GET | /api/recurring/price-changes | Streams whose last charge diverges from the long-term average by more than 10%. The `price_change_pct` field is **signed** (positive = more expensive, negative = cheaper); the UI interprets the sign against `direction` to show good-news / heads-up coloring. Cancelled and snoozed streams (`price_change_snoozed_until >= CURRENT_DATE`) are filtered out at SQL level. |
 | GET | /api/recurring/{id} | Get stream |
-| PATCH | /api/recurring/{id} | Update user_label, category_id |
+| PATCH | /api/recurring/{id} | Update `user_label`, `category_id`, `user_status`, `paused_until`, `price_change_snoozed_until`. Side-effects: flipping `user_status` to `cancelled` stamps `cancelled_at = NOW()`; flipping back to `active` clears it. |
 | POST | /api/recurring | Create a **manual** recurring stream (same table as Plaid); `plaid_stream_id` is synthetic `manual:{uuid}`; excluded from Plaid upsert |
+| POST | /api/recurring/bulk | Apply one lifecycle action to many streams in a single round-trip. Body: `{ids: int[], action: 'cancel'\|'pause'\|'reactivate'\|'snooze_price_change', paused_until?: date, snooze_days?: int}`. Returns `{updated: int}`. `cancel` stamps `cancelled_at`; `pause` writes `paused_until`; `reactivate` clears both; `snooze_price_change` sets `price_change_snoozed_until = today + (snooze_days or 30)`. |
 
 ## Budgets
 
