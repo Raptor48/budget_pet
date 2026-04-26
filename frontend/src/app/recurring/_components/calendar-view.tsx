@@ -216,10 +216,36 @@ function DayCell({
   const visible = occurrences.slice(0, 2);
   const overflow = occurrences.length - visible.length;
 
+  // Mobile fallback: a 7-col grid on a phone leaves ~48 px per cell, so
+  // chip-with-text is unreadable. Below sm we collapse the day into a
+  // colored-dot strip + tap-to-popover; the desktop layout keeps the
+  // existing chips so power users still see merchant names at a glance.
+  const dayPopoverContent = occurrences.length > 0 ? (
+    <PopoverContent align="start" className="w-72 p-2">
+      <div className="text-muted-foreground mb-2 text-[11px] uppercase tracking-wide">
+        {format(day, "EEEE, MMM d")}
+        {dayTotalCents > 0 ? (
+          <span className="text-foreground ml-2 normal-case tracking-normal tabular-nums">
+            · {formatMoney(dayTotalCents)}
+          </span>
+        ) : null}
+      </div>
+      <div className="flex flex-col gap-1">
+        {occurrences.map((occ, i) => (
+          <DayPopoverRow
+            key={`${occ.stream.id}-${i}`}
+            occ={occ}
+            onClick={onJumpToRow}
+          />
+        ))}
+      </div>
+    </PopoverContent>
+  ) : null;
+
   return (
     <div
       className={cn(
-        "relative flex min-h-[88px] flex-col gap-1 rounded-md border p-1.5 text-xs",
+        "relative flex min-h-[58px] flex-col gap-1 rounded-md border p-1 text-xs sm:min-h-[88px] sm:p-1.5",
         "transition-colors",
         inMonth
           ? "bg-background hover:bg-muted/40"
@@ -227,7 +253,7 @@ function DayCell({
         isToday && "ring-1 ring-primary/60",
       )}
     >
-      <div className="flex items-baseline justify-between">
+      <div className="flex items-baseline justify-between gap-1">
         <span
           className={cn(
             "tabular-nums font-medium",
@@ -237,12 +263,41 @@ function DayCell({
           {format(day, "d")}
         </span>
         {dayTotalCents > 0 && inMonth ? (
-          <span className="text-muted-foreground tabular-nums text-[10px]">
+          <span className="text-muted-foreground hidden tabular-nums text-[10px] sm:inline">
             {formatMoney(dayTotalCents)}
           </span>
         ) : null}
       </div>
-      <div className="flex flex-1 flex-col gap-0.5">
+
+      {/* Mobile: dot strip + count badge, tap to open popover. */}
+      {occurrences.length > 0 ? (
+        <div className="sm:hidden">
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                type="button"
+                className="hover:bg-muted/40 flex w-full items-center gap-0.5 rounded-sm py-0.5"
+                aria-label={`${occurrences.length} payment${
+                  occurrences.length === 1 ? "" : "s"
+                } on ${format(day, "MMM d")}`}
+              >
+                {occurrences.slice(0, 4).map((occ, i) => (
+                  <DayDot key={`${occ.stream.id}-${i}`} occ={occ} />
+                ))}
+                {occurrences.length > 4 ? (
+                  <span className="text-muted-foreground text-[9px] tabular-nums">
+                    +{occurrences.length - 4}
+                  </span>
+                ) : null}
+              </button>
+            </PopoverTrigger>
+            {dayPopoverContent}
+          </Popover>
+        </div>
+      ) : null}
+
+      {/* Desktop: full text chips + "show more" popover. */}
+      <div className="hidden flex-1 flex-col gap-0.5 sm:flex">
         {visible.map((occ, i) => (
           <DayChip key={`${occ.stream.id}-${i}`} occ={occ} onClick={onJumpToRow} />
         ))}
@@ -256,25 +311,25 @@ function DayCell({
                 +{overflow} more
               </button>
             </PopoverTrigger>
-            <PopoverContent align="start" className="w-72 p-2">
-              <div className="text-muted-foreground mb-2 text-[11px] uppercase tracking-wide">
-                {format(day, "EEEE, MMM d")}
-              </div>
-              <div className="flex flex-col gap-1">
-                {occurrences.map((occ, i) => (
-                  <DayPopoverRow
-                    key={`${occ.stream.id}-${i}`}
-                    occ={occ}
-                    onClick={onJumpToRow}
-                  />
-                ))}
-              </div>
-            </PopoverContent>
+            {dayPopoverContent}
           </Popover>
         ) : null}
       </div>
     </div>
   );
+}
+
+/** Minimal colored dot used in the mobile-only day strip. */
+function DayDot({ occ }: { occ: Occurrence }) {
+  const { stream } = occ;
+  const isOutflow = stream.direction === "outflow";
+  const muted = effectiveUserStatus(stream) !== "active";
+  const tone = muted
+    ? "bg-muted-foreground/40"
+    : isOutflow
+      ? "bg-red-500"
+      : "bg-emerald-500";
+  return <span aria-hidden className={cn("size-1.5 rounded-full", tone)} />;
 }
 
 function DayChip({
