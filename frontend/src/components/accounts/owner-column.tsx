@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { UserRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Account, Member } from "@/types/v2";
+import { AccountDetailDialog } from "./account-detail-dialog";
 import { AccountTile } from "./account-tile";
 import { CashWalletSection } from "./cash-wallet-section";
 import { FlipCard } from "./flip-card";
@@ -141,6 +143,12 @@ export function OwnerColumn({
   currentUser: { is_owner: boolean } | null;
   isUnassigned?: boolean;
 }) {
+  // Account-detail dialog state lives on the owner column so the dialog
+  // is reused across every list section (banks, loans, investments) under
+  // this owner. Click any non-cash bank-style row → dialog opens with the
+  // account's recent activity + balances.
+  const [detailAccount, setDetailAccount] = useState<Account | null>(null);
+
   // Partition accounts by the same rules the legacy page used.
   const creditCards = accounts.filter((a) => a.type === "credit");
   const debitCards = accounts.filter(
@@ -200,7 +208,12 @@ export function OwnerColumn({
       {bankAccounts.length > 0 && (
         <ColumnSection title="Cash & Bank Accounts">
           {bankAccounts.map((account) => (
-            <AccountTile key={account.id} account={account} size="compact" />
+            <AccountTile
+              key={account.id}
+              account={account}
+              size="compact"
+              onSelect={setDetailAccount}
+            />
           ))}
         </ColumnSection>
       )}
@@ -208,7 +221,12 @@ export function OwnerColumn({
       {loans.length > 0 && (
         <ColumnSection title="Loans">
           {loans.map((account) => (
-            <AccountTile key={account.id} account={account} size="compact" />
+            <AccountTile
+              key={account.id}
+              account={account}
+              size="compact"
+              onSelect={setDetailAccount}
+            />
           ))}
         </ColumnSection>
       )}
@@ -216,7 +234,12 @@ export function OwnerColumn({
       {investments.length > 0 && (
         <ColumnSection title="Investments">
           {investments.map((account) => (
-            <AccountTile key={account.id} account={account} size="compact" />
+            <AccountTile
+              key={account.id}
+              account={account}
+              size="compact"
+              onSelect={setDetailAccount}
+            />
           ))}
         </ColumnSection>
       )}
@@ -224,7 +247,12 @@ export function OwnerColumn({
       {other.length > 0 && (
         <ColumnSection title="Other Accounts">
           {other.map((account) => (
-            <AccountTile key={account.id} account={account} size="compact" />
+            <AccountTile
+              key={account.id}
+              account={account}
+              size="compact"
+              onSelect={setDetailAccount}
+            />
           ))}
         </ColumnSection>
       )}
@@ -234,6 +262,15 @@ export function OwnerColumn({
           <CashWalletSection account={cashWallet} variant="compact" />
         </ColumnSection>
       )}
+
+      {/* Detail dialog shared across every section above. */}
+      <AccountDetailDialog
+        account={detailAccount}
+        open={detailAccount != null}
+        onOpenChange={(v) => {
+          if (!v) setDetailAccount(null);
+        }}
+      />
     </div>
   );
 }

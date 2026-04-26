@@ -60,6 +60,25 @@ interface FaceProps {
   size: "default" | "compact";
 }
 
+/**
+ * First letter (or two) of an institution name — used as a stylish fallback
+ * when Plaid hasn't given us a logo. "Chase" → "C", "Bank of America" → "BA".
+ * Returns "" if no usable name; the caller falls back to a type icon.
+ */
+function institutionInitials(name: string | null | undefined): string {
+  if (!name) return "";
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "";
+  if (parts.length === 1) return parts[0][0]?.toUpperCase() ?? "";
+  // For multi-word names, take the first letter of the first two
+  // *meaningful* words (skip short connectors like "of", "the", "and").
+  const skip = new Set(["of", "the", "and", "&"]);
+  const meaningful = parts.filter((p) => !skip.has(p.toLowerCase()));
+  const head = (meaningful[0]?.[0] ?? "").toUpperCase();
+  const tail = (meaningful[1]?.[0] ?? "").toUpperCase();
+  return (head + tail).slice(0, 2);
+}
+
 function InstitutionLogo({
   account,
   size = 36,
@@ -83,37 +102,49 @@ function InstitutionLogo({
       />
     );
   }
-  // No Plaid logo. Instead of awkward initials ("CC", "CO"), render a
-  // disc tinted with the institution's brand color (or the type accent
-  // when Plaid didn't give us a color either) plus a Lucide icon that
-  // signals the account type.
+  // No Plaid logo. Two-tier fallback:
+  //   1. If Plaid gave us institution_name → render its initials on a
+  //      brand-color disc (Chase → "C" on dark blue). Looks like a stylized
+  //      bank emblem, not a glitch.
+  //   2. Otherwise (cash wallet, manual account) → Lucide type icon.
+  // Both variants share the brand-color/type-accent disc treatment.
   const accentColor =
     account.institution_color ?? TYPE_COLORS[account.type] ?? TYPE_COLORS.other;
+  const initials = institutionInitials(account.institution_name);
   const Icon = accountTypeIcon(account.type);
-  if (variant === "light") {
-    return (
-      <div
-        className="flex items-center justify-center rounded-md"
-        style={{
+
+  const baseStyle =
+    variant === "light"
+      ? {
           width: size,
           height: size,
           backgroundColor: `${accentColor}22`,
           color: accentColor,
-        }}
-      >
-        <Icon style={{ width: size * 0.55, height: size * 0.55 }} aria-hidden />
+        }
+      : {
+          width: size,
+          height: size,
+          backgroundColor: `${accentColor}d9`, // ~85% alpha over gradient
+        };
+  const baseClass =
+    variant === "light"
+      ? "flex items-center justify-center rounded-md"
+      : "flex items-center justify-center rounded-md text-white shadow-sm ring-1 ring-white/15";
+
+  if (initials) {
+    return (
+      <div className={baseClass} style={baseStyle}>
+        <span
+          className="font-bold leading-none tracking-tight"
+          style={{ fontSize: size * (initials.length === 1 ? 0.5 : 0.42) }}
+        >
+          {initials}
+        </span>
       </div>
     );
   }
   return (
-    <div
-      className="flex items-center justify-center rounded-md text-white shadow-sm ring-1 ring-white/15"
-      style={{
-        width: size,
-        height: size,
-        backgroundColor: `${accentColor}d9`, // ~85% alpha — translucent over gradient
-      }}
-    >
+    <div className={baseClass} style={baseStyle}>
       <Icon style={{ width: size * 0.55, height: size * 0.55 }} aria-hidden />
     </div>
   );

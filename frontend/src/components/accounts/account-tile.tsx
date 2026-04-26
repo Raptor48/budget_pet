@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import {
   ChevronRight,
   CreditCard as CreditCardIcon,
@@ -28,6 +27,18 @@ function accountTypeIcon(type: string): LucideIcon {
   }
 }
 
+function institutionInitials(name: string | null | undefined): string {
+  if (!name) return "";
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "";
+  if (parts.length === 1) return parts[0][0]?.toUpperCase() ?? "";
+  const skip = new Set(["of", "the", "and", "&"]);
+  const meaningful = parts.filter((p) => !skip.has(p.toLowerCase()));
+  const head = (meaningful[0]?.[0] ?? "").toUpperCase();
+  const tail = (meaningful[1]?.[0] ?? "").toUpperCase();
+  return (head + tail).slice(0, 2);
+}
+
 // ---------------------------------------------------------------------------
 // Institution logo (light variant, duplicated lean copy of flip-card's)
 // ---------------------------------------------------------------------------
@@ -52,22 +63,36 @@ function InstitutionLogo({
       />
     );
   }
-  // No Plaid logo — show a tinted disc with the account-type icon. Same
-  // contract as the FlipCard placeholder so the two surfaces feel like
-  // the same visual language.
+  // No Plaid logo. Two-tier fallback (matches FlipCard contract):
+  //   1. institution_name → initials on brand-color disc
+  //   2. otherwise → Lucide type icon
   const accentColor =
     account.institution_color ?? TYPE_COLORS[account.type] ?? TYPE_COLORS.other;
+  const initials = institutionInitials(account.institution_name);
   const Icon = accountTypeIcon(account.type);
+  const baseStyle = {
+    width: size,
+    height: size,
+    backgroundColor: `${accentColor}22`,
+    color: accentColor,
+  };
+  if (initials) {
+    return (
+      <div
+        className="flex items-center justify-center rounded-md"
+        style={baseStyle}
+      >
+        <span
+          className="font-bold leading-none tracking-tight"
+          style={{ fontSize: size * (initials.length === 1 ? 0.5 : 0.42) }}
+        >
+          {initials}
+        </span>
+      </div>
+    );
+  }
   return (
-    <div
-      className="flex items-center justify-center rounded-md"
-      style={{
-        width: size,
-        height: size,
-        backgroundColor: `${accentColor}22`,
-        color: accentColor,
-      }}
-    >
+    <div className="flex items-center justify-center rounded-md" style={baseStyle}>
       <Icon style={{ width: size * 0.55, height: size * 0.55 }} aria-hidden />
     </div>
   );
@@ -129,9 +154,14 @@ function AccountTileSecondaryInfo({ account }: { account: Account }) {
 export function AccountTile({
   account,
   size = "default",
+  onSelect,
 }: {
   account: Account;
   size?: "default" | "compact";
+  /** When set, the tile becomes a button that opens an account detail
+   * dialog. Cash wallets pass nothing in here — they own their own
+   * edit/delete affordances elsewhere. */
+  onSelect?: (account: Account) => void;
 }) {
   const compact = size === "compact";
   const accentColor =
@@ -139,12 +169,7 @@ export function AccountTile({
   const name = account.official_name || account.name;
   const logoSize = compact ? 28 : 36;
 
-  // Bank-style rows are clickable: jump to Transactions filtered to this
-  // account. Cash wallets are excluded from this — they have their own
-  // edit/delete affordances and the global tx filter doesn't add value
-  // for the manual ledger.
-  const linkable = !account.is_cash_wallet;
-  const href = linkable ? `/transactions?account_id=${account.id}` : null;
+  const linkable = !account.is_cash_wallet && Boolean(onSelect);
 
   const inner = (
     <>
@@ -218,15 +243,16 @@ export function AccountTile({
     </>
   );
 
-  if (href) {
+  if (linkable && onSelect) {
     return (
-      <Link
-        href={href}
-        aria-label={`Open transactions for ${name}`}
-        className="group relative block overflow-hidden rounded-xl border border-border/60 bg-card shadow-sm transition-[box-shadow,transform,border-color] hover:-translate-y-0.5 hover:border-border hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+      <button
+        type="button"
+        onClick={() => onSelect(account)}
+        aria-label={`Open details for ${name}`}
+        className="group relative block w-full overflow-hidden rounded-xl border border-border/60 bg-card text-left shadow-sm transition-[box-shadow,transform,border-color] hover:-translate-y-0.5 hover:border-border hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
       >
         {inner}
-      </Link>
+      </button>
     );
   }
   return (
