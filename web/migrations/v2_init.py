@@ -118,26 +118,31 @@ CREATE TABLE IF NOT EXISTS transaction_tags (
 
 CREATE_RECURRING_STREAMS = """
 CREATE TABLE IF NOT EXISTS recurring_streams (
-    id                   SERIAL PRIMARY KEY,
-    plaid_stream_id      TEXT UNIQUE NOT NULL,
-    account_id           INTEGER REFERENCES accounts(id),
-    direction            TEXT NOT NULL,
-    description          TEXT NOT NULL,
-    merchant_name        TEXT,
-    frequency            TEXT,
-    average_amount_cents BIGINT,
-    last_amount_cents    BIGINT,
-    currency             TEXT DEFAULT 'USD',
-    pfc_primary          TEXT,
-    pfc_detailed         TEXT,
-    first_date           DATE,
-    last_date            DATE,
-    is_active            BOOLEAN DEFAULT TRUE,
-    status               TEXT,
-    category_id          INTEGER REFERENCES categories(id),
-    user_label           TEXT,
-    price_change_pct     NUMERIC(6,2),
-    last_synced_at       TIMESTAMPTZ DEFAULT NOW()
+    id                          SERIAL PRIMARY KEY,
+    plaid_stream_id             TEXT UNIQUE NOT NULL,
+    account_id                  INTEGER REFERENCES accounts(id),
+    direction                   TEXT NOT NULL,
+    description                 TEXT NOT NULL,
+    merchant_name               TEXT,
+    frequency                   TEXT,
+    average_amount_cents        BIGINT,
+    last_amount_cents           BIGINT,
+    currency                    TEXT DEFAULT 'USD',
+    pfc_primary                 TEXT,
+    pfc_detailed                TEXT,
+    first_date                  DATE,
+    last_date                   DATE,
+    is_active                   BOOLEAN DEFAULT TRUE,
+    status                      TEXT,
+    category_id                 INTEGER REFERENCES categories(id),
+    user_label                  TEXT,
+    price_change_pct            NUMERIC(6,2),
+    last_synced_at              TIMESTAMPTZ DEFAULT NOW(),
+    user_status                 TEXT NOT NULL DEFAULT 'active'
+        CHECK (user_status IN ('active', 'paused', 'cancelled')),
+    paused_until                DATE,
+    cancelled_at                TIMESTAMPTZ,
+    price_change_snoozed_until  DATE
 )
 """
 
@@ -684,6 +689,44 @@ async def _migrate_recurring_price_change_signed(conn) -> None:
     )
 
 
+async def _migrate_recurring_user_status(conn) -> None:
+    """V2.3: user-managed lifecycle for recurring streams.
+
+    Plaid's API can detect streams but cannot pause / cancel third-party
+    subscriptions, so we keep the local state ourselves:
+
+    * ``user_status`` — 'active' (default) | 'paused' | 'cancelled'.
+      The Plaid upsert (``recurring/repo.py::upsert_streams``) deliberately
+      does NOT touch this column on ON CONFLICT, so user choices survive
+      every sync.
+    * ``paused_until`` — optional auto-resume date (NULL = pause indefinitely).
+    * ``cancelled_at`` — audit timestamp; set whenever ``user_status`` flips
+      to 'cancelled'.
+    * ``price_change_snoozed_until`` — hide the price-change alert (UI badge
+      and Insights card) until this date.
+
+    All columns are additive and idempotent.
+    """
+    for stmt in (
+        "ALTER TABLE recurring_streams ADD COLUMN IF NOT EXISTS user_status TEXT NOT NULL DEFAULT 'active'",
+        "ALTER TABLE recurring_streams ADD COLUMN IF NOT EXISTS paused_until DATE",
+        "ALTER TABLE recurring_streams ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ",
+        "ALTER TABLE recurring_streams ADD COLUMN IF NOT EXISTS price_change_snoozed_until DATE",
+    ):
+        await _ddl(conn, stmt)
+    chk = await conn.fetchval(
+        "SELECT 1 FROM pg_constraint WHERE conname = 'recurring_streams_user_status_check'"
+    )
+    if not chk:
+        await _ddl(
+            conn,
+            """
+            ALTER TABLE recurring_streams ADD CONSTRAINT recurring_streams_user_status_check
+            CHECK (user_status IN ('active', 'paused', 'cancelled'))
+            """,
+        )
+
+
 async def _migrate_merchant_rules_global_family(conn) -> None:
     """
     One global rule per merchant_key (family-wide). Legacy table had (user_id, merchant_key).
@@ -1010,6 +1053,7 @@ async def run_v2_migrations(pool) -> None:
         await _migrate_categories_parent_id(conn)
         await _migrate_categories_is_income(conn)
         await _migrate_recurring_price_change_signed(conn)
+        await _migrate_recurring_user_status(conn)
         await _migrate_transactions_display_title_backfill(conn)
         await _migrate_transactions_transaction_class(conn)
         await _migrate_insights_persistence(conn)

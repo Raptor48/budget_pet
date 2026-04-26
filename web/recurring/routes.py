@@ -2,10 +2,18 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
-from .models import RecurringStreamCreate, RecurringStreamOut, RecurringStreamUpdate
+from .models import (
+    RecurringBulkAction,
+    RecurringBulkResult,
+    RecurringStreamCreate,
+    RecurringStreamOut,
+    RecurringStreamUpdate,
+)
 from .repo import RecurringRepository
 
 router = APIRouter(prefix="/api/recurring", tags=["recurring"])
+
+VALID_USER_STATUSES = ("active", "paused", "cancelled")
 
 
 def _repo() -> RecurringRepository:
@@ -30,13 +38,27 @@ async def list_streams(
     _request: Request,
     direction: Optional[str] = Query(None, pattern=r"^(inflow|outflow)$"),
     active_only: bool = Query(True),
+    user_status: Optional[List[str]] = Query(
+        None,
+        description=(
+            "Repeatable filter on user_status. Values: active, paused, cancelled. "
+            "Default = active+paused (cancelled is hidden)."
+        ),
+    ),
 ):
     # Family-wide: every logged-in member (and admin) sees all household streams.
     # Per-account privacy is enforced elsewhere (e.g. Insights still passes viewer_user_id).
+    if user_status:
+        invalid = [s for s in user_status if s not in VALID_USER_STATUSES]
+        if invalid:
+            raise HTTPException(
+                status_code=422, detail=f"Invalid user_status value: {invalid[0]}"
+            )
     return await _repo().list_streams(
         direction=direction,
         active_only=active_only,
         viewer_user_id=None,
+        include_user_statuses=user_status,
     )
 
 
@@ -44,6 +66,23 @@ async def list_streams(
 async def get_price_changes(_request: Request):
     """Return recurring streams where last price differs from average by more than 10%."""
     return await _repo().get_price_changes(viewer_user_id=None)
+
+
+@router.post("/bulk", response_model=RecurringBulkResult)
+async def bulk_apply(body: RecurringBulkAction):
+    """Apply one lifecycle action (cancel / pause / reactivate / snooze_price_change)
+    to a list of stream ids. Plaid does not let third-party subscriptions be
+    paused or cancelled via API — this endpoint only flips local state for KPI
+    and Insights filtering. The user is still expected to cancel with the
+    merchant directly.
+    """
+    updated = await _repo().bulk_apply(
+        ids=body.ids,
+        action=body.action,
+        paused_until=body.paused_until,
+        snooze_days=body.snooze_days,
+    )
+    return RecurringBulkResult(updated=updated)
 
 
 @router.get("/{stream_id}", response_model=RecurringStreamOut)

@@ -322,3 +322,131 @@ class TestUpsertSignedPriceChangePct:
         pct_arg = conn.execute.call_args.args[16]
         assert pct_arg is not None and pct_arg > 0
         assert abs(pct_arg - 48.42) < 0.1  # ~(22.99 - 15.49) / 15.49 * 100
+
+
+class TestUserStatusFilter:
+    """``list_streams`` defaults to active+paused, hides cancelled.
+
+    Plaid does not let third-party subscriptions be cancelled via API, so the
+    user's ``cancelled`` flag is purely a local archive flag — they should
+    not surface in the default tab.
+    """
+
+    @pytest.mark.asyncio
+    async def test_default_excludes_cancelled(self):
+        from web.recurring.repo import RecurringRepository
+
+        conn = AsyncMock()
+        pool = make_mock_pool(conn)
+        conn.fetch.return_value = []
+        with patch("web.recurring.repo.get_pool", AsyncMock(return_value=pool)):
+            await RecurringRepository().list_streams()
+        sql = conn.fetch.call_args.args[0]
+        # Filter is applied as: rs.user_status = ANY($N::text[])
+        assert "rs.user_status = ANY(" in sql
+        # And the default array is active+paused.
+        passed_array = next(
+            (a for a in conn.fetch.call_args.args if isinstance(a, list)), None
+        )
+        assert passed_array == ["active", "paused"]
+
+    @pytest.mark.asyncio
+    async def test_explicit_cancelled_status(self):
+        from web.recurring.repo import RecurringRepository
+
+        conn = AsyncMock()
+        pool = make_mock_pool(conn)
+        conn.fetch.return_value = []
+        with patch("web.recurring.repo.get_pool", AsyncMock(return_value=pool)):
+            await RecurringRepository().list_streams(include_user_statuses=["cancelled"])
+        passed_array = next(
+            (a for a in conn.fetch.call_args.args if isinstance(a, list)), None
+        )
+        assert passed_array == ["cancelled"]
+
+
+class TestPriceChangesSnooze:
+    """Snoozed streams must not surface in ``get_price_changes`` (so the
+    Insights ``price_changes_warn`` card and the UI top-movers strip both
+    quiet down)."""
+
+    @pytest.mark.asyncio
+    async def test_query_filters_snoozed_and_cancelled(self):
+        from web.recurring.repo import RecurringRepository
+
+        conn = AsyncMock()
+        pool = make_mock_pool(conn)
+        conn.fetch.return_value = []
+        with patch("web.recurring.repo.get_pool", AsyncMock(return_value=pool)):
+            await RecurringRepository().get_price_changes()
+        sql = conn.fetch.call_args.args[0]
+        assert "rs.user_status <> 'cancelled'" in sql
+        assert "price_change_snoozed_until" in sql
+
+
+class TestBulkApply:
+    """Bulk endpoint flips local lifecycle for many streams in one call."""
+
+    @pytest.mark.asyncio
+    async def test_cancel_stamps_cancelled_at_and_status(self):
+        from web.recurring.repo import RecurringRepository
+
+        conn = AsyncMock()
+        pool = make_mock_pool(conn)
+        conn.fetch.return_value = [{"id": 1}, {"id": 2}]
+        with patch("web.recurring.repo.get_pool", AsyncMock(return_value=pool)):
+            updated = await RecurringRepository().bulk_apply(
+                ids=[1, 2], action="cancel"
+            )
+        assert updated == 2
+        sql = conn.fetch.call_args.args[0]
+        assert "user_status  = 'cancelled'" in sql
+        assert "cancelled_at = NOW()" in sql
+
+    @pytest.mark.asyncio
+    async def test_pause_passes_paused_until_arg(self):
+        from web.recurring.repo import RecurringRepository
+
+        conn = AsyncMock()
+        pool = make_mock_pool(conn)
+        conn.fetch.return_value = [{"id": 1}]
+        target = date(2026, 6, 1)
+        with patch("web.recurring.repo.get_pool", AsyncMock(return_value=pool)):
+            await RecurringRepository().bulk_apply(
+                ids=[1], action="pause", paused_until=target
+            )
+        # paused_until is passed as $2.
+        assert target in conn.fetch.call_args.args
+
+    @pytest.mark.asyncio
+    async def test_snooze_uses_default_30_days_when_unset(self):
+        from web.recurring.repo import RecurringRepository
+
+        conn = AsyncMock()
+        pool = make_mock_pool(conn)
+        conn.fetch.return_value = [{"id": 1}]
+        with patch("web.recurring.repo.get_pool", AsyncMock(return_value=pool)):
+            await RecurringRepository().bulk_apply(
+                ids=[1], action="snooze_price_change"
+            )
+        snooze_until = next(
+            (a for a in conn.fetch.call_args.args if isinstance(a, date)), None
+        )
+        assert snooze_until is not None
+        days = (snooze_until - date.today()).days
+        assert 29 <= days <= 30
+
+    @pytest.mark.asyncio
+    async def test_unknown_action_raises(self):
+        from web.recurring.repo import RecurringRepository
+
+        with pytest.raises(ValueError):
+            await RecurringRepository().bulk_apply(ids=[1], action="zap")
+
+    @pytest.mark.asyncio
+    async def test_empty_ids_returns_zero_without_db(self):
+        from web.recurring.repo import RecurringRepository
+
+        # No pool patch — we never reach the DB on empty ids.
+        updated = await RecurringRepository().bulk_apply(ids=[], action="cancel")
+        assert updated == 0

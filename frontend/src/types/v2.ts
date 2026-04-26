@@ -357,6 +357,18 @@ export interface RecurringStream {
   last_synced_at: string | null;
   /** plaid | manual — manual streams are not overwritten by Plaid sync */
   stream_source?: string;
+  /**
+   * User-managed lifecycle. Plaid cannot pause/cancel third-party
+   * subscriptions, so we just mark intent locally. KPI sums and Insights
+   * skip non-`active` rows.
+   */
+  user_status?: "active" | "paused" | "cancelled";
+  /** Optional auto-resume date for paused streams. */
+  paused_until?: string | null;
+  /** Stamped when user_status flips to `cancelled`. */
+  cancelled_at?: string | null;
+  /** Hide the price-change badge / Insight until this date. */
+  price_change_snoozed_until?: string | null;
   // --- Enrichment (joined, optional for backwards compatibility) ---
   /** Joined from accounts.name. */
   account_name?: string | null;
