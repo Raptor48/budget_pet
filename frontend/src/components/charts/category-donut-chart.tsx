@@ -219,6 +219,12 @@ export function CategoryLegend({
 }) {
   const activeIdx = hoveredIdx ?? lockedIdx;
   return (
+    // The legend now follows the standard "label / value" list pattern: the
+    // category name takes ``flex-1`` (no max-w cap), and the amount + share
+    // sit ``shrink-0`` at the right edge. The earlier 10rem cap kept rows
+    // visually clustered against the donut on the wide Reports module —
+    // looked like the whole module was shoved to the left third of the
+    // card. Right-aligned amounts read better at any column width.
     <div className="flex flex-col justify-start gap-0.5 overflow-auto pr-1" style={{ maxHeight }}>
       {data.map((row, i) => {
         const isActive = activeIdx === i;
@@ -230,7 +236,7 @@ export function CategoryLegend({
             key={`${row.category_name}-${i}`}
             type="button"
             className={cn(
-              "flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm transition-colors",
+              "flex w-full items-center gap-3 rounded-lg px-3 py-1.5 text-left text-sm transition-colors",
               isActive && "bg-muted",
               !isActive && "hover:bg-muted/50",
               isDimmed && "opacity-40",
@@ -253,10 +259,7 @@ export function CategoryLegend({
               )}
               style={{ backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length] }}
             />
-            {/* Cap the category name's growth so it doesn't push the amounts
-                all the way to the right edge of the card. Names that overflow
-                still truncate gracefully. */}
-            <span className="min-w-0 max-w-[10rem] flex-1 truncate font-medium">
+            <span className="min-w-0 flex-1 truncate font-medium">
               {row.category_name}
             </span>
             {canDrill ? (
@@ -267,7 +270,7 @@ export function CategoryLegend({
             <span className="shrink-0 tabular-nums text-muted-foreground">
               {formatMoney(row.amount_cents)}
             </span>
-            <span className="w-12 shrink-0 text-right tabular-nums text-muted-foreground text-xs">
+            <span className="w-14 shrink-0 text-right tabular-nums text-muted-foreground text-xs">
               {row.percent.toFixed(1)}%
             </span>
           </button>
