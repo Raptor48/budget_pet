@@ -555,6 +555,19 @@ export const plaidApi = {
   resetCursor: (itemId: string): Promise<{ message: string }> =>
     apiRequest(`/api/plaid/items/${itemId}/reset-cursor`, { method: 'POST' }),
 
+  /** Re-fetch institution branding (logo, color) from Plaid and overwrite
+   * the stored values — used by the "Refresh bank logo" UI when a previously
+   * missing logo might now be available. */
+  refreshBranding: (
+    itemId: string,
+  ): Promise<{
+    logo_present: boolean;
+    color_present: boolean;
+    item_id: string;
+    institution_name: string | null;
+  }> =>
+    apiRequest(`/api/plaid/items/${itemId}/refresh-branding`, { method: 'POST' }),
+
   sync: (): Promise<PlaidSyncResult[]> =>
     apiRequest('/api/plaid/sync', { method: 'POST' }),
 

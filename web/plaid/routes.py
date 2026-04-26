@@ -246,6 +246,63 @@ async def delete_item(
     return {"message": "Bank connection removed"}
 
 
+@router.post("/items/{item_id}/refresh-branding")
+async def refresh_item_branding(item_id: str, request: Request):
+    """Re-fetch institution name/logo/color from Plaid and overwrite stored values.
+
+    Useful when an institution's logo was missing at link time (Plaid's docs
+    note "not all institutions' logos are available" — it can happen even for
+    big banks like Chase). Calling this asks Plaid for the current branding
+    and writes whatever comes back, even if we already had a value, so an
+    institution that gained a logo after we linked it can be picked up.
+    """
+    user = getattr(request.state, "user", None) or {}
+    uid = user.get("id")
+    if uid is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    repo = get_plaid_repo()
+    row = await repo.get_item(item_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if not user.get("is_owner") and row.get("user_id") != int(uid):
+        raise HTTPException(status_code=403, detail="Not allowed to refresh this item")
+
+    access_token = row.get("access_token")
+    if not access_token:
+        raise HTTPException(status_code=400, detail="Item has no access token")
+
+    institution_id = get_item_institution_id(access_token)
+    if not institution_id:
+        raise HTTPException(
+            status_code=502,
+            detail="Plaid did not return an institution_id for this item",
+        )
+    meta = get_institution_metadata(institution_id)
+    updated = await repo.update_branding(
+        item_id,
+        institution_logo=meta.get("logo"),
+        institution_color=meta.get("color"),
+    )
+    await audit_record(
+        "plaid.branding_refresh",
+        source="manual",
+        request=request,
+        target_kind="plaid_item",
+        target_id=item_id,
+        metadata={
+            "institution_name": row.get("institution_name"),
+            "logo_present": bool(meta.get("logo")),
+            "color_present": bool(meta.get("color")),
+        },
+    )
+    return {
+        "logo_present": bool(meta.get("logo")),
+        "color_present": bool(meta.get("color")),
+        "item_id": item_id,
+        "institution_name": (updated or {}).get("institution_name"),
+    }
+
+
 @router.post("/items/{item_id}/reset-cursor")
 async def reset_cursor(item_id: str, request: Request):
     """Reset sync cursor. Only the item's owner (or app owner) can reset it."""

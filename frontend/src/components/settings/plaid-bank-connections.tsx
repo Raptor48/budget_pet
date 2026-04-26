@@ -19,8 +19,10 @@ import {
 } from "@/components/ui/dialog";
 import {
   Building2, RefreshCw, Trash2, CheckCircle, AlertCircle, Clock, RotateCcw, Loader2,
+  ImageDown,
 } from "lucide-react";
 import { plaidApi } from "@/lib/api";
+import { notify } from "@/lib/notify";
 import { Progress } from "@/components/ui/progress";
 import { TRANSACTIONS_DATE_RANGE_QUERY_KEY } from "@/lib/hooks/use-transactions-date-range";
 import type { PlaidItem, PlaidSyncResult } from "@/types/v2";
@@ -226,6 +228,25 @@ export function PlaidBankConnections() {
     },
   });
 
+  const refreshBrandingMutation = useMutation({
+    mutationFn: (itemId: string) => plaidApi.refreshBranding(itemId),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["plaid-items"] });
+      queryClient.invalidateQueries({ queryKey: ["v2-accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      const inst = result.institution_name ?? "the bank";
+      if (result.logo_present) {
+        notify.success(`Logo refreshed for ${inst}.`);
+      } else {
+        notify.info(
+          `Plaid still doesn't have a logo for ${inst}. Try again later — coverage changes over time.`,
+        );
+      }
+    },
+    onError: (err) =>
+      notify.error(err instanceof Error ? err.message : "Could not refresh branding."),
+  });
+
   const lastSync = syncLog[0] as (typeof syncLog)[0] | undefined;
 
   return (
@@ -300,6 +321,31 @@ export function PlaidBankConnections() {
                         queryClient.invalidateQueries({ queryKey: ["plaid-sync-log"] });
                       }}
                     />
+                    {/* Refresh branding — only when no Plaid logo is on
+                        file. Plaid coverage isn't always present at link
+                        time (their docs admit "not all institutions' logos
+                        are available"); this asks again. */}
+                    {!item.institution_logo ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        title="Re-fetch institution logo from Plaid"
+                        className="gap-1.5"
+                        onClick={() => refreshBrandingMutation.mutate(item.item_id)}
+                        disabled={
+                          refreshBrandingMutation.isPending &&
+                          refreshBrandingMutation.variables === item.item_id
+                        }
+                      >
+                        {refreshBrandingMutation.isPending &&
+                        refreshBrandingMutation.variables === item.item_id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <ImageDown className="h-3.5 w-3.5" />
+                        )}
+                        Refresh logo
+                      </Button>
+                    ) : null}
                     {/* Reset cursor — danger */}
                     <Button
                       size="sm"
