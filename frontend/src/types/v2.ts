@@ -50,6 +50,7 @@ export interface Account {
   created_at: string;
   updated_at: string;
   /** Institution branding from plaid_items (may be null if not available) */
+  institution_name: string | null;
   institution_logo: string | null;
   /** Hex color, e.g. "#004966" */
   institution_color: string | null;
