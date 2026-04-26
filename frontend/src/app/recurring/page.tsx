@@ -68,6 +68,7 @@ import { formatMoney } from "@/components/accounts/helpers";
 import { PriceChangeBadge, classifyPriceChange } from "@/components/ui/price-change-badge";
 import type { RecurringStream } from "@/types/v2";
 
+import { CalendarView } from "./_components/calendar-view";
 import {
   PRICE_CHANGE_THRESHOLD_PCT,
   SNOOZE_DAYS_DEFAULT,
@@ -88,7 +89,7 @@ import {
 
 type Direction = "outflow" | "inflow";
 type StatusFilter = "active" | "paused" | "cancelled" | "all";
-type ViewMode = "list" | "by-category";
+type ViewMode = "list" | "by-category" | "calendar";
 
 // ---------------------------------------------------------------------------
 // Page
@@ -449,13 +450,33 @@ export default function RecurringPage() {
               monthlyTotalCents={monthlyTotalCents}
               annualTotalCents={annualTotalCents}
             />
-          ) : (
+          ) : viewMode === "by-category" ? (
             <ByCategoryView
               rows={visibleRows}
               streamHighlight={streamHighlight}
               selected={selected}
               onToggleSelect={toggleSelect}
               onAction={handleSingleAction}
+            />
+          ) : (
+            <CalendarView
+              rows={visibleRows}
+              onJumpToRow={(id) => {
+                setViewMode("list");
+                // The list-view row scroll is handled by the same effect
+                // that watches `?stream=`. Defer to the next tick so the
+                // List re-renders with rows present before we scroll.
+                window.setTimeout(() => {
+                  const el = document.getElementById(`recurring-row-${id}`);
+                  if (el) {
+                    el.scrollIntoView({ behavior: "smooth", block: "center" });
+                    el.classList.add("ring-2", "ring-primary", "ring-offset-2", "ring-offset-background");
+                    window.setTimeout(() => {
+                      el.classList.remove("ring-2", "ring-primary", "ring-offset-2", "ring-offset-background");
+                    }, 2000);
+                  }
+                }, 50);
+              }}
             />
           )}
         </div>
@@ -914,6 +935,7 @@ function ViewModeBar({
       {[
         { key: "list" as const, label: "List" },
         { key: "by-category" as const, label: "By category" },
+        { key: "calendar" as const, label: "Calendar" },
       ].map((opt) => (
         <button
           key={opt.key}
