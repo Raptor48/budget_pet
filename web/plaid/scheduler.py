@@ -245,15 +245,40 @@ def schedule_debounced_sync_item(item_id: str, delay_sec: float = 12.0) -> None:
     _debounce_tasks[item_id] = loop.create_task(_job())
 
 
+def _invalidate_insights_cache_post_sync() -> None:
+    """Drop every Insights cache entry so the next ``GET /api/insights/feed``
+    recomputes from the just-synced data instead of returning a stale (up
+    to 5-minute) snapshot. Called from both the scheduled and manual sync
+    paths. The import is local because ``web.insights.store`` imports from
+    other repos and can pull the dependency graph in odd directions if
+    pulled at module load time.
+    """
+    try:
+        from web.insights.store import invalidate_cache as insights_invalidate
+
+        insights_invalidate(None)
+    except Exception as exc:
+        # Cache invalidation is best-effort: failing here must not abort
+        # a successful sync. The next read will eventually expire on TTL.
+        logger.warning("post-sync insights cache invalidation failed: %s", exc)
+
+
 async def iter_sync_all_items(*, audit_source: str = "manual"):
-    """Yield one result dict per Plaid item (same payloads as ``sync_all_items``)."""
+    """Yield one result dict per Plaid item (same payloads as ``sync_all_items``).
+
+    Insights cache is invalidated after the *last* item — exhaustion of
+    the generator triggers the flush so streaming callers also benefit.
+    """
     from .repo import get_plaid_repo
 
     repo = get_plaid_repo()
     items = await repo.get_items()
     source = _get_source()
-    for item in items:
-        yield await _sync_item_payload(item, source, audit_source=audit_source)
+    try:
+        for item in items:
+            yield await _sync_item_payload(item, source, audit_source=audit_source)
+    finally:
+        _invalidate_insights_cache_post_sync()
 
 
 async def sync_all_items(*, audit_source: str = "manual") -> List[dict]:
