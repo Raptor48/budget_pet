@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   CreditCard as CreditCardIcon,
@@ -119,18 +119,52 @@ function InstitutionLogo({
   );
 }
 
-function TypeLabel({ type }: { type: string }) {
-  const labels: Record<string, string> = {
+/**
+ * Top-right corner stack: bank name (prominent) + account type (small).
+ *
+ * If Plaid gave us an institution_name we surface it here so the user
+ * knows *which* bank a card belongs to even before flipping. Without
+ * this, an unbranded card (no Plaid logo) is identified only by its
+ * mask and product name, which doesn't include the bank — confusing.
+ *
+ * Falls back to type-only when no institution name is available (cash,
+ * manually-created accounts, etc.) so the layout stays balanced.
+ */
+function TitleStack({ account, compact }: { account: Account; compact: boolean }) {
+  const typeLabels: Record<string, string> = {
     depository: "Checking / Savings",
     credit: "Credit Card",
     loan: "Loan",
     investment: "Investment",
     other: "Account",
   };
+  const typeText = typeLabels[account.type] ?? account.type;
+  const bankName = (account.institution_name ?? "").trim();
+
   return (
-    <span className="rounded-full bg-white/20 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-widest text-white/90">
-      {labels[type] ?? type}
-    </span>
+    <div className="flex max-w-[60%] flex-col items-end gap-0.5 text-right">
+      {bankName ? (
+        <span
+          className={
+            compact
+              ? "max-w-full truncate text-[12px] font-semibold leading-none text-white drop-shadow-sm"
+              : "max-w-full truncate text-sm font-semibold leading-none text-white drop-shadow-sm"
+          }
+          title={bankName}
+        >
+          {bankName}
+        </span>
+      ) : null}
+      <span
+        className={
+          compact
+            ? "rounded-full bg-white/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-widest text-white/85"
+            : "rounded-full bg-white/20 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-widest text-white/90"
+        }
+      >
+        {typeText}
+      </span>
+    </div>
   );
 }
 
@@ -180,10 +214,10 @@ function CardFront({ account, color, size }: FaceProps) {
         style={{ width: 140, height: 140 }}
       />
 
-      {/* Top row */}
-      <div className="relative flex items-start justify-between">
+      {/* Top row: institution logo (left) · bank name + type stack (right). */}
+      <div className="relative flex items-start justify-between gap-3">
         <InstitutionLogo account={account} size={logoSize} />
-        <TypeLabel type={account.type} />
+        <TitleStack account={account} compact={compact} />
       </div>
 
       {/* Middle: chip + account label */}
@@ -562,6 +596,12 @@ function OwnerSelector({
 // Flip card wrapper
 // ---------------------------------------------------------------------------
 
+// Tilt magnitude (degrees) and an optional "lift" so the card slightly
+// rises out of the page on hover. Tuned to feel premium without crossing
+// into the gimmicky territory of bigger angles.
+const TILT_MAX_DEG = 6;
+const TILT_LIFT_PX = 6;
+
 export function FlipCard({
   account,
   members,
@@ -578,6 +618,31 @@ export function FlipCard({
   const color =
     account.institution_color ?? TYPE_COLORS[account.type] ?? TYPE_COLORS.other;
 
+  // Tilt is driven through CSS custom properties on a ref'd wrapper so
+  // we don't trigger React re-renders on every mouse move (60Hz). The
+  // wrapper transform composes with the inner flip transform — outer
+  // tilt, inner flip — so flipping mid-tilt still works smoothly.
+  const tiltRef = useRef<HTMLDivElement | null>(null);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const el = tiltRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const nx = ((e.clientX - rect.left) / rect.width - 0.5) * 2; // −1..1
+    const ny = ((e.clientY - rect.top) / rect.height - 0.5) * 2; // −1..1
+    el.style.setProperty("--tilt-x", `${(-ny * TILT_MAX_DEG).toFixed(2)}deg`);
+    el.style.setProperty("--tilt-y", `${(nx * TILT_MAX_DEG).toFixed(2)}deg`);
+    el.style.setProperty("--tilt-z", `${TILT_LIFT_PX}px`);
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    const el = tiltRef.current;
+    if (!el) return;
+    el.style.setProperty("--tilt-x", "0deg");
+    el.style.setProperty("--tilt-y", "0deg");
+    el.style.setProperty("--tilt-z", "0px");
+  }, []);
+
   return (
     <div
       // Card stretches to the full owner-column width; the column itself
@@ -587,6 +652,8 @@ export function FlipCard({
       className="w-full cursor-pointer select-none"
       style={{ perspective: "1000px" }}
       onClick={() => setFlipped((f) => !f)}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
       role="button"
       tabIndex={0}
       aria-label={`${account.name} — tap to ${flipped ? "see front" : "see details"}`}
@@ -594,23 +661,42 @@ export function FlipCard({
         if (e.key === "Enter" || e.key === " ") setFlipped((f) => !f);
       }}
     >
+      {/* Outer tilt wrapper. CSS variables let mouse-move skip React. The
+          motion-reduce variant collapses tilt + lift to zero so users with
+          reduced-motion preferences just see the static card. */}
       <div
-        className="relative w-full transition-transform duration-500"
+        ref={tiltRef}
+        className="relative w-full transition-transform duration-150 ease-out motion-reduce:!transform-none"
         style={{
           aspectRatio: "85.6 / 54",
           transformStyle: "preserve-3d",
-          transform: flipped ? "rotateY(180deg)" : "rotateY(0deg)",
+          // Default values for the CSS variables — overridden on mousemove.
+          ["--tilt-x" as string]: "0deg",
+          ["--tilt-y" as string]: "0deg",
+          ["--tilt-z" as string]: "0px",
+          transform:
+            "perspective(1000px) rotateX(var(--tilt-x)) rotateY(var(--tilt-y)) translateZ(var(--tilt-z))",
         }}
       >
-        <CardFront account={account} color={color} size={size} />
-        <CardBack
-          account={account}
-          color={color}
-          size={size}
-          members={members}
-          currentUser={currentUser}
-          onFlipBack={() => setFlipped(false)}
-        />
+        {/* Inner flip wrapper — independent transform so flip and tilt
+            compose cleanly. */}
+        <div
+          className="relative size-full transition-transform duration-500"
+          style={{
+            transformStyle: "preserve-3d",
+            transform: flipped ? "rotateY(180deg)" : "rotateY(0deg)",
+          }}
+        >
+          <CardFront account={account} color={color} size={size} />
+          <CardBack
+            account={account}
+            color={color}
+            size={size}
+            members={members}
+            currentUser={currentUser}
+            onFlipBack={() => setFlipped(false)}
+          />
+        </div>
       </div>
     </div>
   );

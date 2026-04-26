@@ -48,6 +48,7 @@ class AccountsRepository:
     _SELECT_WITH_BRANDING = """
         SELECT
             a.*,
+            pi.institution_name,
             pi.institution_logo,
             pi.institution_color,
             u.username AS owner_username

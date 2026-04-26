@@ -40,6 +40,7 @@ class AccountOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     # Institution branding (joined from plaid_items)
+    institution_name: Optional[str] = None
     institution_logo: Optional[str] = None
     institution_color: Optional[str] = None
     # Owner (joined from users via user_id)
