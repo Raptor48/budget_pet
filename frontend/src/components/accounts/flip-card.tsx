@@ -2,7 +2,15 @@
 
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { UserRound } from "lucide-react";
+import {
+  CreditCard as CreditCardIcon,
+  Landmark,
+  PiggyBank,
+  TrendingUp,
+  UserRound,
+  Wallet,
+  type LucideIcon,
+} from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -20,6 +28,27 @@ import {
   formatMoney,
   formatSyncedAt,
 } from "./helpers";
+
+/**
+ * Pick the icon that represents an account type. Used as the visual centerpiece
+ * of the institution-logo placeholder when Plaid hasn't given us a brand
+ * graphic — letters ("CC", "CO") read as a glitch, but a stylized type-icon on
+ * a brand-colored disc reads as design.
+ */
+function accountTypeIcon(type: string): LucideIcon {
+  switch (type) {
+    case "credit":
+      return CreditCardIcon;
+    case "loan":
+      return PiggyBank;
+    case "investment":
+      return TrendingUp;
+    case "depository":
+      return Landmark;
+    default:
+      return Wallet;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Face helpers
@@ -43,46 +72,49 @@ function InstitutionLogo({
 }) {
   if (account.institution_logo) {
     return (
-      // eslint-disable-next-line @next/next/no-img-element
+      // eslint-disable-next-line @next/next/no-img-element -- base64 data URL stored in DB
       <img
         src={`data:image/png;base64,${account.institution_logo}`}
         alt={account.name}
         width={size}
         height={size}
         style={{ width: size, height: size }}
-        className="rounded-md object-contain"
+        className="rounded-md bg-white/95 object-contain p-1 shadow-sm"
       />
     );
   }
+  // No Plaid logo. Instead of awkward initials ("CC", "CO"), render a
+  // disc tinted with the institution's brand color (or the type accent
+  // when Plaid didn't give us a color either) plus a Lucide icon that
+  // signals the account type.
   const accentColor =
     account.institution_color ?? TYPE_COLORS[account.type] ?? TYPE_COLORS.other;
-  const initials = (account.name || "?")
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? "")
-    .join("");
+  const Icon = accountTypeIcon(account.type);
   if (variant === "light") {
     return (
       <div
-        className="flex items-center justify-center rounded-md font-bold"
+        className="flex items-center justify-center rounded-md"
         style={{
           width: size,
           height: size,
-          fontSize: size * 0.38,
           backgroundColor: `${accentColor}22`,
           color: accentColor,
         }}
       >
-        {initials}
+        <Icon style={{ width: size * 0.55, height: size * 0.55 }} aria-hidden />
       </div>
     );
   }
   return (
     <div
-      className="flex items-center justify-center rounded-md bg-white/20 text-white font-bold"
-      style={{ width: size, height: size, fontSize: size * 0.38 }}
+      className="flex items-center justify-center rounded-md text-white shadow-sm ring-1 ring-white/15"
+      style={{
+        width: size,
+        height: size,
+        backgroundColor: `${accentColor}d9`, // ~85% alpha — translucent over gradient
+      }}
     >
-      {initials}
+      <Icon style={{ width: size * 0.55, height: size * 0.55 }} aria-hidden />
     </div>
   );
 }
@@ -120,13 +152,16 @@ function CardFront({ account, color, size }: FaceProps) {
   const name = account.official_name || account.name;
   const mask = account.mask ? `•••• ${account.mask}` : null;
   const isDebt = account.type === "credit" || account.type === "loan";
-  const logoSize = compact ? 30 : 40;
+  // Bigger logo than before — the previous 30px was lost on the card. 40
+  // and 52 give the institution mark proper visual weight without
+  // overwhelming the layout.
+  const logoSize = compact ? 40 : 52;
 
   return (
     <div
       className={
         compact
-          ? "absolute inset-0 flex flex-col justify-between overflow-hidden rounded-xl p-3.5 text-white"
+          ? "absolute inset-0 flex flex-col justify-between overflow-hidden rounded-xl p-3 text-white"
           : "absolute inset-0 flex flex-col justify-between overflow-hidden rounded-2xl p-5 text-white"
       }
       style={{
@@ -184,7 +219,6 @@ function CardFront({ account, color, size }: FaceProps) {
           )}
           <div className="mt-1 flex items-center gap-1.5">
             <OwnerBadge username={account.owner_username} />
-            <p className="text-[9px] text-white/50">Tap for details</p>
           </div>
         </div>
         <div className="text-right">
@@ -480,7 +514,12 @@ export function FlipCard({
 
   return (
     <div
-      className="w-full cursor-pointer select-none"
+      // Cap the visible card width on wide screens — without this the
+      // 85.6:54 aspect ratio meant a 600px-wide owner column produced a
+      // 379px-tall card. Capping at 420px brings tall cards under 270px
+      // and matches typical fintech-app sizing without losing the
+      // physical credit-card silhouette.
+      className="w-full max-w-[420px] cursor-pointer select-none"
       style={{ perspective: "1000px" }}
       onClick={() => setFlipped((f) => !f)}
       role="button"

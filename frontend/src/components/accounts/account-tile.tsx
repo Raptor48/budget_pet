@@ -1,7 +1,30 @@
 "use client";
 
+import {
+  CreditCard as CreditCardIcon,
+  Landmark,
+  PiggyBank,
+  TrendingUp,
+  Wallet,
+  type LucideIcon,
+} from "lucide-react";
 import type { Account } from "@/types/v2";
 import { TYPE_COLORS, formatDate, formatMoney } from "./helpers";
+
+function accountTypeIcon(type: string): LucideIcon {
+  switch (type) {
+    case "credit":
+      return CreditCardIcon;
+    case "loan":
+      return PiggyBank;
+    case "investment":
+      return TrendingUp;
+    case "depository":
+      return Landmark;
+    default:
+      return Wallet;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Institution logo (light variant, duplicated lean copy of flip-card's)
@@ -16,36 +39,34 @@ function InstitutionLogo({
 }) {
   if (account.institution_logo) {
     return (
-      // eslint-disable-next-line @next/next/no-img-element
+      // eslint-disable-next-line @next/next/no-img-element -- base64 data URL stored in DB
       <img
         src={`data:image/png;base64,${account.institution_logo}`}
         alt={account.name}
         width={size}
         height={size}
         style={{ width: size, height: size }}
-        className="rounded-md object-contain"
+        className="rounded-md bg-white object-contain p-0.5"
       />
     );
   }
+  // No Plaid logo — show a tinted disc with the account-type icon. Same
+  // contract as the FlipCard placeholder so the two surfaces feel like
+  // the same visual language.
   const accentColor =
     account.institution_color ?? TYPE_COLORS[account.type] ?? TYPE_COLORS.other;
-  const initials = (account.name || "?")
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? "")
-    .join("");
+  const Icon = accountTypeIcon(account.type);
   return (
     <div
-      className="flex items-center justify-center rounded-md font-bold"
+      className="flex items-center justify-center rounded-md"
       style={{
         width: size,
         height: size,
-        fontSize: size * 0.38,
         backgroundColor: `${accentColor}22`,
         color: accentColor,
       }}
     >
-      {initials}
+      <Icon style={{ width: size * 0.55, height: size * 0.55 }} aria-hidden />
     </div>
   );
 }
