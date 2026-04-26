@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
+import { Wallet } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -22,6 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { AddCashWalletDialog } from "@/components/accounts/add-cash-wallet-dialog";
 import { accountsApi, transactionsApi } from "@/lib/api";
 import { TRANSACTIONS_DATE_RANGE_QUERY_KEY } from "@/lib/hooks/use-transactions-date-range";
 import type { Category, ManualCashTransactionCreate } from "@/types/v2";
@@ -56,16 +58,28 @@ export function AddCashTransactionDialog({ open, onOpenChange, categories }: Pro
   const [userNote, setUserNote] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
 
+  const [createWalletOpen, setCreateWalletOpen] = useState(false);
+
+  // Source the cash wallet from the regular accounts list — NOT from
+  // GET /api/accounts/cash-wallet, which silently auto-creates one. The
+  // auto-create endpoint was the reason "delete cash wallet" never stuck:
+  // opening this dialog rebirthed the deleted wallet on the next mount.
+  // If the user has no cash wallet, we now show an explicit CTA to create
+  // one instead.
   const {
-    data: cashWallet,
+    data: accountsList,
     isLoading: walletLoading,
     isError: walletError,
     error: walletErr,
   } = useQuery({
-    queryKey: ["accounts", "cash-wallet"],
-    queryFn: () => accountsApi.cashWallet(),
+    queryKey: ["v2-accounts", "all"],
+    queryFn: () => accountsApi.list(false),
     enabled: open,
   });
+  const cashWallet = useMemo(
+    () => accountsList?.find((a) => a.is_cash_wallet) ?? null,
+    [accountsList],
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -124,6 +138,8 @@ export function AddCashTransactionDialog({ open, onOpenChange, categories }: Pro
     walletError && walletErr instanceof Error ? walletErr.message : "Could not load Cash wallet.";
 
   return (
+    <>
+    <AddCashWalletDialog open={createWalletOpen} onOpenChange={setCreateWalletOpen} />
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[min(90vh,720px)] overflow-y-auto sm:max-w-md">
         <DialogHeader>
@@ -138,12 +154,31 @@ export function AddCashTransactionDialog({ open, onOpenChange, categories }: Pro
         <form onSubmit={handleSubmit} className="space-y-4">
           {walletError ? <p className="text-sm text-destructive">{walletErrMsg}</p> : null}
           {walletLoading ? (
-            <p className="text-sm text-muted-foreground">Preparing your Cash wallet…</p>
-          ) : cashWallet ? (
+            <p className="text-sm text-muted-foreground">Loading your accounts…</p>
+          ) : !cashWallet ? (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/[0.06] px-3 py-3 text-sm">
+              <p className="flex items-center gap-2 font-medium">
+                <Wallet className="size-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+                You don&rsquo;t have a cash wallet yet
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Cash transactions land on a manual wallet account. Create one
+                first — name it however you like.
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                className="mt-2 gap-1.5"
+                onClick={() => setCreateWalletOpen(true)}
+              >
+                <Wallet className="size-3.5" aria-hidden /> Create cash wallet
+              </Button>
+            </div>
+          ) : (
             <p className="text-xs text-muted-foreground">
               Wallet: <span className="font-medium text-foreground">{cashWallet.name}</span>
             </p>
-          ) : null}
+          )}
 
           <div className="grid gap-2">
             <Label htmlFor="cash-date">
@@ -243,5 +278,6 @@ export function AddCashTransactionDialog({ open, onOpenChange, categories }: Pro
         </form>
       </DialogContent>
     </Dialog>
+    </>
   );
 }
