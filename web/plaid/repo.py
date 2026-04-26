@@ -142,6 +142,49 @@ class PlaidRepository:
             )
         return self._row_with_decrypted_token(dict(row))
 
+    async def update_branding(
+        self,
+        item_id: str,
+        *,
+        institution_name: Optional[str] = None,
+        institution_logo: Optional[str] = None,
+        institution_color: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Overwrite institution branding for a single item.
+
+        Distinct from ``save_item`` which uses COALESCE to preserve any
+        existing non-null branding (the right behaviour during routine
+        re-saves). This method is invoked by the explicit
+        "Refresh bank branding" UI: if Plaid added or updated a logo
+        since the original link, the new value should win even when we
+        already have a stored one. Pass ``None`` for any field you don't
+        want to touch — only non-None values are written.
+        """
+        sets: List[str] = []
+        params: List[Any] = [item_id]
+        idx = 2
+        if institution_name is not None:
+            sets.append(f"institution_name = ${idx}")
+            params.append(institution_name)
+            idx += 1
+        if institution_logo is not None:
+            sets.append(f"institution_logo = ${idx}")
+            params.append(institution_logo)
+            idx += 1
+        if institution_color is not None:
+            sets.append(f"institution_color = ${idx}")
+            params.append(institution_color)
+            idx += 1
+        if not sets:
+            return await self.get_item(item_id)
+        pool = await self._pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"UPDATE plaid_items SET {', '.join(sets)} WHERE item_id = $1 RETURNING *",
+                *params,
+            )
+        return self._row_with_decrypted_token(dict(row)) if row else None
+
     async def get_items(self) -> List[Dict[str, Any]]:
         pool = await self._pool()
         async with pool.acquire() as conn:
