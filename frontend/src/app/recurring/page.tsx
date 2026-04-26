@@ -1025,11 +1025,12 @@ function ListView({
 }: ListViewProps) {
   return (
     <div className="overflow-hidden rounded-md border">
-      <div className="bg-muted/30 grid grid-cols-[36px_1fr_140px_160px_180px_44px] items-center gap-3 border-b px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground sm:px-4">
+      {/* Mobile select-all bar — visually compact, mirrors the desktop header. */}
+      <div className="flex items-center gap-2 border-b bg-muted/30 px-3 py-2 text-xs sm:hidden">
         <button
           type="button"
           onClick={onToggleAll}
-          className="hover:text-foreground inline-flex size-5 items-center justify-center"
+          className="hover:text-foreground inline-flex size-5 items-center justify-center text-muted-foreground"
           aria-label={allVisibleSelected ? "Clear selection" : "Select all visible"}
         >
           {allVisibleSelected ? (
@@ -1038,11 +1039,30 @@ function ListView({
             <Square className="size-4" />
           )}
         </button>
-        <span>Description</span>
-        <span>Next payment</span>
-        <span className="text-right">Amount</span>
-        <span>Category</span>
-        <span className="sr-only">Actions</span>
+        <span className="text-muted-foreground">
+          {allVisibleSelected ? "Clear selection" : "Select all visible"}
+        </span>
+      </div>
+      {/* Desktop column header. Widths match RecurringRow's per-column shrink-0. */}
+      <div className="hidden bg-muted/30 items-center gap-3 border-b px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground sm:flex">
+        <button
+          type="button"
+          onClick={onToggleAll}
+          className="hover:text-foreground inline-flex size-5 shrink-0 items-center justify-center"
+          aria-label={allVisibleSelected ? "Clear selection" : "Select all visible"}
+        >
+          {allVisibleSelected ? (
+            <CheckSquare2 className="size-4" />
+          ) : (
+            <Square className="size-4" />
+          )}
+        </button>
+        {/* 36 (avatar) + 12 (gap) align the Description label to row content. */}
+        <span className="ml-[48px] flex-1">Description</span>
+        <span className="w-[120px] shrink-0">Next payment</span>
+        <span className="w-[110px] shrink-0 text-right">Amount</span>
+        <span className="w-[160px] shrink-0">Category</span>
+        <span className="w-8 shrink-0 sr-only">Actions</span>
       </div>
       {rows.map((row) => (
         <RecurringRow
@@ -1065,19 +1085,16 @@ function ListView({
           onAction={(action) => onAction(row, action)}
         />
       ))}
-      <div className="bg-muted/20 grid grid-cols-[36px_1fr_140px_160px_180px_44px] items-center gap-3 border-t px-3 py-2 text-xs sm:px-4">
-        <span />
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t bg-muted/20 px-3 py-2 text-xs sm:px-4">
         <span className="text-muted-foreground">
           {rows.length} stream{rows.length === 1 ? "" : "s"}
         </span>
-        <span />
-        <span className="text-right tabular-nums font-medium">
-          {formatMoney(monthlyTotalCents)}/mo
+        <span className="inline-flex items-center gap-3 tabular-nums">
+          <span className="font-medium">{formatMoney(monthlyTotalCents)}/mo</span>
+          <span className="text-muted-foreground">
+            ≈ {formatMoney(annualTotalCents)}/yr
+          </span>
         </span>
-        <span className="text-muted-foreground tabular-nums">
-          ≈ {formatMoney(annualTotalCents)}/yr
-        </span>
-        <span />
       </div>
     </div>
   );
@@ -1138,7 +1155,7 @@ function RecurringRow({
     <div
       id={`recurring-row-${row.id}`}
       className={cn(
-        "group relative grid grid-cols-[36px_1fr_140px_160px_180px_44px] items-center gap-3 border-b px-3 py-3 last:border-b-0 sm:px-4",
+        "group relative flex items-start gap-2 border-b px-3 py-3 last:border-b-0 sm:items-center sm:gap-3 sm:px-4",
         "transition-colors hover:bg-muted/40",
         isSelected && "bg-primary/5",
         isHighlighted && "ring-2 ring-primary ring-offset-2 ring-offset-background",
@@ -1158,104 +1175,134 @@ function RecurringRow({
       <button
         type="button"
         onClick={onToggleSelect}
-        className="hover:text-primary inline-flex size-5 items-center justify-center text-muted-foreground"
+        className="hover:text-primary mt-1 inline-flex size-5 shrink-0 items-center justify-center text-muted-foreground sm:mt-0"
         aria-label={isSelected ? "Deselect" : "Select"}
       >
         {isSelected ? <CheckSquare2 className="size-4" /> : <Square className="size-4" />}
       </button>
 
-      {/* Description + avatar */}
-      <div className="flex min-w-0 items-center gap-3">
-        <StreamAvatar stream={row} size={36} />
-        <div className="min-w-0 flex-1">
-          {isEditing ? (
-            <div className="flex flex-col gap-2">
-              <Input
-                value={draftLabel}
-                onChange={(e) => setDraftLabel(e.target.value)}
-                placeholder="Custom label"
-              />
-              <Select value={draftCategoryId} onValueChange={setDraftCategoryId}>
-                <SelectTrigger className="h-9 w-full min-w-0">
-                  <SelectValue placeholder="Category" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Uncategorized</SelectItem>
-                  {categories.map((c) => (
-                    <SelectItem key={c.id} value={String(c.id)}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <div className="flex gap-1">
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={onSaveEdit}
-                  disabled={isUpdating}
-                >
-                  Save
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={onCancelEdit}
-                  disabled={isUpdating}
-                >
-                  Cancel
-                </Button>
-              </div>
+      {/* Avatar */}
+      <StreamAvatar stream={row} size={36} />
+
+      {/* Description / edit form */}
+      <div className="min-w-0 flex-1">
+        {isEditing ? (
+          <div className="flex flex-col gap-2">
+            <Input
+              value={draftLabel}
+              onChange={(e) => setDraftLabel(e.target.value)}
+              placeholder="Custom label"
+            />
+            <Select value={draftCategoryId} onValueChange={setDraftCategoryId}>
+              <SelectTrigger className="h-9 w-full min-w-0">
+                <SelectValue placeholder="Category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Uncategorized</SelectItem>
+                {categories.map((c) => (
+                  <SelectItem key={c.id} value={String(c.id)}>
+                    {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className="flex gap-1">
+              <Button
+                type="button"
+                size="sm"
+                onClick={onSaveEdit}
+                disabled={isUpdating}
+              >
+                Save
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={onCancelEdit}
+                disabled={isUpdating}
+              >
+                Cancel
+              </Button>
             </div>
-          ) : (
-            <>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span
-                      className="min-w-0 truncate text-sm font-medium leading-tight"
-                      title={row.description}
-                    >
-                      {title}
-                    </span>
-                  </TooltipTrigger>
-                  {acctTag ? (
-                    <TooltipContent side="top" align="start">
-                      Charged to {acctTag}
-                    </TooltipContent>
-                  ) : null}
-                </Tooltip>
-                <UserStatusPill status={lifecycle} />
-                {showPriceAlert ? (
-                  <PriceChangeBadge pct={pct} direction={row.direction} compact />
-                ) : null}
-                {isSnoozedNow(row) ? (
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Tooltip>
+                <TooltipTrigger asChild>
                   <span
-                    className="text-muted-foreground inline-flex items-center gap-1 rounded-full border bg-muted/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
-                    title={`Price-change alerts snoozed until ${row.price_change_snoozed_until}`}
+                    className="min-w-0 max-w-full truncate text-sm font-medium leading-tight"
+                    title={row.description}
                   >
-                    <BellOff className="size-2.5" />
-                    Snoozed
+                    {title}
                   </span>
-                ) : null}
-              </div>
-              <div className="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
-                <span>{formatFrequency(row.frequency)}</span>
+                </TooltipTrigger>
                 {acctTag ? (
-                  <>
-                    <span aria-hidden>·</span>
-                    <span className="truncate">{acctTag}</span>
-                  </>
+                  <TooltipContent side="top" align="start">
+                    Charged to {acctTag}
+                  </TooltipContent>
                 ) : null}
-              </div>
-            </>
-          )}
-        </div>
+              </Tooltip>
+              <UserStatusPill status={lifecycle} />
+              {showPriceAlert ? (
+                <PriceChangeBadge pct={pct} direction={row.direction} compact />
+              ) : null}
+              {isSnoozedNow(row) ? (
+                <span
+                  className="text-muted-foreground inline-flex items-center gap-1 rounded-full border bg-muted/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
+                  title={`Price-change alerts snoozed until ${row.price_change_snoozed_until}`}
+                >
+                  <BellOff className="size-2.5" />
+                  Snoozed
+                </span>
+              ) : null}
+            </div>
+            <div className="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+              <span>{formatFrequency(row.frequency)}</span>
+              {acctTag ? (
+                <>
+                  <span aria-hidden>·</span>
+                  <span className="truncate">{acctTag}</span>
+                </>
+              ) : null}
+            </div>
+            {/* Mobile-only secondary line — fold the desktop columns
+                (next-payment + category) into the description block so the
+                whole row stays readable on a phone. Hidden ≥ sm where the
+                dedicated columns take over. */}
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs sm:hidden">
+              <span className="text-muted-foreground inline-flex items-center gap-1">
+                <CalendarClock className="size-3" aria-hidden />
+                <span className="text-foreground tabular-nums">
+                  {formatNextRecurringDate(row.last_date, row.frequency)}
+                </span>
+                {row.last_date ? (
+                  <span>· last {formatRecurringDate(row.last_date)}</span>
+                ) : null}
+              </span>
+              {categoryName ? (
+                <span
+                  className="inline-flex max-w-full items-center gap-1 truncate rounded-full bg-muted/60 px-1.5 py-0.5"
+                  title={categoryName}
+                >
+                  {categoryColor ? (
+                    <span
+                      className="size-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: categoryColor }}
+                      aria-hidden
+                    />
+                  ) : null}
+                  <span className="truncate">{categoryName}</span>
+                </span>
+              ) : null}
+            </div>
+          </>
+        )}
       </div>
 
-      {/* Next payment */}
-      <div className="min-w-0 text-xs leading-tight">
+      {/* Desktop-only: Next payment column */}
+      <div className="hidden w-[120px] shrink-0 text-xs leading-tight sm:block">
         <div className="text-foreground tabular-nums">
           {formatNextRecurringDate(row.last_date, row.frequency)}
         </div>
@@ -1266,11 +1313,13 @@ function RecurringRow({
         ) : null}
       </div>
 
-      {/* Amount: last big, avg small + trend tone */}
-      <AmountCell row={row} />
+      {/* Amount (always visible, narrower on mobile) */}
+      <div className="w-[88px] shrink-0 sm:w-[110px]">
+        <AmountCell row={row} />
+      </div>
 
-      {/* Category */}
-      <div className="min-w-0">
+      {/* Desktop-only: Category column */}
+      <div className="hidden w-[160px] shrink-0 sm:block">
         {categoryName ? (
           <span
             className="inline-flex max-w-full items-center gap-1.5 truncate rounded-full bg-muted/60 px-2 py-0.5 text-xs"
@@ -1290,8 +1339,8 @@ function RecurringRow({
         )}
       </div>
 
-      {/* Hover actions */}
-      <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+      {/* Actions: always visible on touch (no hover), hover-only on desktop */}
+      <div className="flex shrink-0 items-center justify-end gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
         <RowActionsMenu
           stream={row}
           onAction={onAction}
@@ -1468,51 +1517,38 @@ function BulkActionBar({
   onSnooze: () => void;
 }) {
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-4 z-30 flex justify-center px-4">
-      <div className="bg-background pointer-events-auto inline-flex flex-wrap items-center gap-2 rounded-full border px-3 py-2 shadow-lg">
-        <span className="text-sm font-medium">
-          {count} selected
-        </span>
-        <span className="text-muted-foreground tabular-nums text-xs">
+    <div className="pointer-events-none fixed inset-x-0 bottom-3 z-30 flex justify-center px-3">
+      <div className="bg-background pointer-events-auto inline-flex max-w-full flex-wrap items-center gap-1.5 rounded-2xl border px-2.5 py-1.5 shadow-lg sm:gap-2 sm:rounded-full sm:px-3 sm:py-2">
+        <span className="text-sm font-medium">{count} selected</span>
+        <span className="text-muted-foreground hidden tabular-nums text-xs sm:inline">
           ≈ {formatMoney(monthlySavingsCents)}/mo
         </span>
-        <span className="bg-border mx-1 h-5 w-px" aria-hidden />
-        <Button
-          size="sm"
-          variant="ghost"
+        <span className="bg-border mx-0.5 h-5 w-px sm:mx-1" aria-hidden />
+        <BulkButton
+          icon={<Pause className="size-3.5" />}
+          label="Pause"
           disabled={disabled}
           onClick={onPause}
-          className="gap-1"
-        >
-          <Pause className="size-3.5" /> Pause
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
+        />
+        <BulkButton
+          icon={<Play className="size-3.5" />}
+          label="Reactivate"
           disabled={disabled}
           onClick={onReactivate}
-          className="gap-1"
-        >
-          <Play className="size-3.5" /> Reactivate
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
+        />
+        <BulkButton
+          icon={<BellOff className="size-3.5" />}
+          label="Snooze"
           disabled={disabled}
           onClick={onSnooze}
-          className="gap-1"
-        >
-          <BellOff className="size-3.5" /> Snooze
-        </Button>
-        <Button
-          size="sm"
+        />
+        <BulkButton
+          icon={<XCircle className="size-3.5" />}
+          label="Cancel"
           variant="destructive"
           disabled={disabled}
           onClick={onCancel}
-          className="gap-1"
-        >
-          <XCircle className="size-3.5" /> Mark cancelled
-        </Button>
+        />
         <button
           type="button"
           onClick={onClear}
@@ -1524,6 +1560,35 @@ function BulkActionBar({
         </button>
       </div>
     </div>
+  );
+}
+
+function BulkButton({
+  icon,
+  label,
+  onClick,
+  disabled,
+  variant = "ghost",
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  disabled: boolean;
+  variant?: "ghost" | "destructive";
+}) {
+  return (
+    <Button
+      size="sm"
+      variant={variant}
+      disabled={disabled}
+      onClick={onClick}
+      className="gap-1"
+      aria-label={label}
+      title={label}
+    >
+      {icon}
+      <span className="hidden sm:inline">{label}</span>
+    </Button>
   );
 }
 
@@ -1614,7 +1679,7 @@ function CategoryGroup({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="bg-muted/30 hover:bg-muted/50 flex w-full items-center gap-3 px-4 py-2 text-left"
+        className="bg-muted/30 hover:bg-muted/50 flex w-full items-center gap-2 px-3 py-2 text-left sm:gap-3 sm:px-4"
       >
         {group.color ? (
           <span
@@ -1623,11 +1688,11 @@ function CategoryGroup({
             aria-hidden
           />
         ) : null}
-        <span className="text-sm font-medium">{group.name}</span>
-        <span className="text-muted-foreground text-xs">
+        <span className="min-w-0 truncate text-sm font-medium">{group.name}</span>
+        <span className="text-muted-foreground hidden text-xs sm:inline">
           {group.rows.length} stream{group.rows.length === 1 ? "" : "s"}
         </span>
-        <span className="ml-auto inline-flex items-center gap-2">
+        <span className="ml-auto inline-flex shrink-0 items-center gap-2">
           <span className="text-sm tabular-nums font-medium">
             {formatMoney(group.monthlyCents)}/mo
           </span>
@@ -1681,7 +1746,7 @@ function CategoryGroupRow({
     <div
       id={`recurring-row-${row.id}`}
       className={cn(
-        "group flex items-center gap-3 border-b px-4 py-2.5 last:border-b-0 hover:bg-muted/40",
+        "group flex items-center gap-2 border-b px-3 py-2.5 last:border-b-0 hover:bg-muted/40 sm:gap-3 sm:px-4",
         isSelected && "bg-primary/5",
         isHighlighted && "ring-2 ring-primary ring-offset-2 ring-offset-background",
         muted && "opacity-60",
@@ -1690,14 +1755,16 @@ function CategoryGroupRow({
       <button
         type="button"
         onClick={onToggleSelect}
-        className="hover:text-primary inline-flex size-5 items-center justify-center text-muted-foreground"
+        className="hover:text-primary inline-flex size-5 shrink-0 items-center justify-center text-muted-foreground"
       >
         {isSelected ? <CheckSquare2 className="size-4" /> : <Square className="size-4" />}
       </button>
       <StreamAvatar stream={row} size={28} />
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <span className="truncate text-sm font-medium">{title}</span>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="min-w-0 max-w-full truncate text-sm font-medium">
+            {title}
+          </span>
           <UserStatusPill status={lifecycle} />
           {showPriceAlert ? (
             <PriceChangeBadge pct={pct} direction={row.direction} compact />
@@ -1708,7 +1775,7 @@ function CategoryGroupRow({
           {formatNextRecurringDate(row.last_date, row.frequency)}
         </div>
       </div>
-      <div className="text-right tabular-nums">
+      <div className="shrink-0 text-right tabular-nums">
         <div className="text-sm font-semibold">
           {formatMoney(Math.abs(row.last_amount_cents ?? 0))}
         </div>
@@ -1716,7 +1783,7 @@ function CategoryGroupRow({
           ≈ {formatMoney(monthlyCostCents(row))}/mo
         </div>
       </div>
-      <div className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
+      <div className="shrink-0 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:focus-within:opacity-100">
         <RowActionsMenu
           stream={row}
           onAction={onAction}
