@@ -709,6 +709,8 @@ export interface InsightCard {
   user_state?: InsightUserState | null;
   /** Server-computed flag: first_seen_at > user_preferences.insights_last_viewed_at. */
   is_new?: boolean;
+  /** ISO-8601 — when the card was first persisted. Drives the "since 3d" footer. */
+  first_seen_at?: string | null;
 }
 
 export interface InsightsFeed {

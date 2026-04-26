@@ -646,16 +646,27 @@ export default function Reports() {
                 )}
                 {byCategoryQuery.data && byCategoryQuery.data.length > 0 && (
                   <>
-                    {/* Chart + interactive legend */}
-                    <div className="grid gap-4 sm:grid-cols-[280px_1fr]">
-                      <CategoryDonutChart
-                        data={byCategoryQuery.data}
-                        hoveredIdx={catHoveredIdx}
-                        lockedIdx={catLockedIdx}
-                        onHover={setCatHoveredIdx}
-                        onLock={setCatLockedIdx}
-                        onSliceClick={focusedParent ? undefined : handleSliceDrilldown}
-                      />
+                    {/* Chart + interactive legend. The Reports module is
+                        wider than the Dashboard widget — give the donut a
+                        bigger square (~360px) and let the legend take the
+                        whole remaining ``1fr`` column instead of being
+                        crammed against a fixed 280px gutter. */}
+                    <div className="grid gap-8 lg:grid-cols-[minmax(320px,420px)_1fr]">
+                      <div className="flex items-center justify-center">
+                        <div className="w-full max-w-[420px]">
+                          <CategoryDonutChart
+                            data={byCategoryQuery.data}
+                            hoveredIdx={catHoveredIdx}
+                            lockedIdx={catLockedIdx}
+                            onHover={setCatHoveredIdx}
+                            onLock={setCatLockedIdx}
+                            onSliceClick={focusedParent ? undefined : handleSliceDrilldown}
+                            innerRadius={92}
+                            outerRadius={150}
+                            height={360}
+                          />
+                        </div>
+                      </div>
                       <CategoryLegend
                         data={byCategoryQuery.data}
                         hoveredIdx={catHoveredIdx}
@@ -663,6 +674,7 @@ export default function Reports() {
                         onHover={setCatHoveredIdx}
                         onLock={setCatLockedIdx}
                         onSliceClick={focusedParent ? undefined : handleSliceDrilldown}
+                        maxHeight={360}
                       />
                     </div>
                     {!focusedParent && (

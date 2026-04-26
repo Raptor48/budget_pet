@@ -115,6 +115,10 @@ export function CategoryDonutChart({
     totalCentsOverride ?? data.reduce((s, r) => s + r.amount_cents, 0);
   const displayRow = activeIdx != null ? data[activeIdx] : null;
   const pieData = data.map((r) => ({ name: r.category_name, value: r.amount_cents }));
+  // Tight padding on dense pies so small slices don't disappear into gaps;
+  // a touch of breathing room on sparse pies so the segments still read as
+  // distinct. Matches the visual density of D3-style donuts.
+  const paddingAngle = data.length >= 8 ? 0.5 : data.length >= 4 ? 1 : 2;
 
   return (
     <div className="relative w-full">
@@ -128,7 +132,7 @@ export function CategoryDonutChart({
             cy="50%"
             innerRadius={innerRadius}
             outerRadius={outerRadius}
-            paddingAngle={2}
+            paddingAngle={paddingAngle}
             animationBegin={0}
             animationDuration={800}
             animationEasing="ease-out"
@@ -349,7 +353,10 @@ export function CategoryDonutWidget({
   const { displayData, totalCents } = collapseTailIntoOther(data, maxSlices);
 
   return (
-    <div className="grid gap-4 sm:grid-cols-[240px_1fr]">
+    // Donut column uses ``minmax(220px, 280px)`` so the chart gets a real
+    // square area to draw in (the prior fixed 240px column left a thin
+    // donut floating in whitespace). Legend keeps its 1fr behaviour.
+    <div className="grid gap-6 sm:grid-cols-[minmax(220px,280px)_1fr]">
       <CategoryDonutChart
         data={displayData}
         totalCents={totalCents}
@@ -357,9 +364,9 @@ export function CategoryDonutWidget({
         lockedIdx={lockedIdx}
         onHover={setHoveredIdx}
         onLock={setLockedIdx}
-        innerRadius={60}
-        outerRadius={96}
-        height={240}
+        innerRadius={70}
+        outerRadius={114}
+        height={260}
       />
       <CategoryLegend
         data={displayData}
@@ -367,7 +374,7 @@ export function CategoryDonutWidget({
         lockedIdx={lockedIdx}
         onHover={setHoveredIdx}
         onLock={setLockedIdx}
-        maxHeight={240}
+        maxHeight={260}
       />
     </div>
   );
