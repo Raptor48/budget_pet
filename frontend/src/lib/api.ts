@@ -294,10 +294,17 @@ export const transactionsApi = {
 // ---------------------------------------------------------------------------
 
 export const recurringApi = {
-  list: (direction?: 'inflow' | 'outflow', activeOnly = true): Promise<RecurringStream[]> => {
+  list: (
+    direction?: 'inflow' | 'outflow',
+    activeOnly = true,
+    userStatuses?: Array<'active' | 'paused' | 'cancelled'>,
+  ): Promise<RecurringStream[]> => {
     const params = new URLSearchParams();
     if (direction) params.set('direction', direction);
     params.set('active_only', String(activeOnly));
+    if (userStatuses && userStatuses.length > 0) {
+      for (const s of userStatuses) params.append('user_status', s);
+    }
     return apiRequest(`/api/recurring?${params}`);
   },
 
@@ -321,9 +328,23 @@ export const recurringApi = {
 
   update: (
     id: number,
-    data: { user_label?: string | null; category_id?: number | null },
+    data: {
+      user_label?: string | null;
+      category_id?: number | null;
+      user_status?: 'active' | 'paused' | 'cancelled';
+      paused_until?: string | null;
+      price_change_snoozed_until?: string | null;
+    },
   ): Promise<RecurringStream> =>
     apiRequest(`/api/recurring/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+  bulk: (data: {
+    ids: number[];
+    action: 'cancel' | 'pause' | 'reactivate' | 'snooze_price_change';
+    paused_until?: string | null;
+    snooze_days?: number;
+  }): Promise<{ updated: number }> =>
+    apiRequest('/api/recurring/bulk', { method: 'POST', body: JSON.stringify(data) }),
 };
 
 // ---------------------------------------------------------------------------
