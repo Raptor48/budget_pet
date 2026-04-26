@@ -52,7 +52,7 @@ web/
 ├── transactions/        — /api/transactions CRUD + splits + CSV export
 ├── categories/          — /api/categories CRUD + PFC auto-mapping
 ├── tags/                — /api/tags CRUD + transaction-tag linking
-├── recurring/           — /api/recurring + price change detector
+├── recurring/           — /api/recurring + price change detector + bulk lifecycle (pause/cancel/snooze)
 ├── budgets/             — /api/budgets + progress calculation
 ├── investments/         — /api/investments/holdings
 ├── reports/             — /api/reports/* (cash flow, net worth, forecast, health)

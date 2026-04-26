@@ -93,6 +93,19 @@ down), `info` for favorable ones. Uses `RecurringRepository.get_price_changes`
 which surfaces streams whose latest charge differs from the long-term
 average by more than `PRICE_CHANGE_THRESHOLD` (10%).
 
+Excluded at SQL level:
+
+- `user_status = 'cancelled'` — the user explicitly archived this stream.
+- `price_change_snoozed_until >= CURRENT_DATE` — the user dismissed the
+  alert from the Recurring page (default snooze window is 30 days).
+
+The same `user_status` filter applies to **`missed_recurring`** and
+**`duplicate_subscription`**: any stream with `user_status != 'active'`
+is skipped in the corresponding card builder so a paused subscription
+does not generate "missing charge" or "duplicate" warnings. Plaid's API
+cannot pause / cancel third-party subscriptions, so these flags are
+purely local intent — see [`docs/data-model.md#recurring_streams`](data-model.md#recurring_streams).
+
 ### `liquidity_buffer`
 
 Severity: `warn` only. Fires when the sum of absolute outflow amounts in
