@@ -529,7 +529,17 @@ export default function Reports() {
                                 <td className="px-4 py-2">
                                   <MerchantLogo url={m.logo_url} name={m.merchant_name} />
                                 </td>
-                                <td className="px-4 py-2 font-medium">{m.merchant_name}</td>
+                                <td className="px-4 py-2 font-medium">
+                                  <span>{m.merchant_name}</span>
+                                  {m.is_aliased ? (
+                                    <span
+                                      className="text-muted-foreground ml-1.5 inline-flex items-center rounded border bg-muted/50 px-1 py-0.5 text-[9px] uppercase tracking-wide"
+                                      title="Display rename — categorization & math unchanged."
+                                    >
+                                      renamed
+                                    </span>
+                                  ) : null}
+                                </td>
                                 <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">
                                   {formatMoney(m.amount_cents)}
                                 </td>

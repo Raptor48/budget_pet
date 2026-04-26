@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from web.db import get_pool
 from web.env_flags import reports_include_plaid_sandbox
+from web.merchant_rules.aliases import alias_join_sql
 
 logger = logging.getLogger(__name__)
 
@@ -523,17 +524,25 @@ class ReportsRepository:
             idx += 1
         params.append(limit)
         where = " AND ".join(conditions)
+        # Group by the *aliased* name so two Plaid merchants the user renamed
+        # to the same string (e.g. "Whole Foods" and "WHOLEFDS #123" → both
+        # "Groceries") aggregate into one row. Falls back to t.merchant_name
+        # for any merchant without an alias. The COALESCE expression is
+        # repeated in SELECT and GROUP BY because PostgreSQL does not
+        # accept GROUP BY on a column alias.
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
                 SELECT
-                    t.merchant_name,
+                    COALESCE(ma.display_name, t.merchant_name) AS merchant_name,
+                    BOOL_OR(ma.display_name IS NOT NULL)        AS is_aliased,
                     MAX(t.logo_url) AS logo_url,
                     SUM(t.amount_cents) AS amount_cents,
                     COUNT(*) AS transaction_count
                 FROM transactions t
+                {alias_join_sql("t", "ma")}
                 WHERE {where}
-                GROUP BY t.merchant_name
+                GROUP BY COALESCE(ma.display_name, t.merchant_name)
                 ORDER BY amount_cents DESC
                 LIMIT ${idx}
                 """,

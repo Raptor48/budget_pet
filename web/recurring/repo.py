@@ -108,6 +108,11 @@ class RecurringRepository:
             params.append(viewer_user_id)
             idx += 1
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        # Plaid's recurring endpoint does not return ``merchant_entity_id``,
+        # only ``merchant_name`` — so we match aliases by the ``name:`` key
+        # path. ``upsert_alias`` writes both ``eid:`` and ``name:`` rows for
+        # any merchant where both are available, so an alias created from a
+        # transaction also resolves here.
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
@@ -119,12 +124,15 @@ class RecurringRepository:
                     c.parent_id            AS category_parent_id,
                     COALESCE(pc.id, c.id)     AS primary_category_id,
                     COALESCE(pc.name, c.name) AS primary_category_name,
-                    COALESCE(pc.color, c.color) AS primary_category_color
+                    COALESCE(pc.color, c.color) AS primary_category_color,
+                    ma.display_name           AS merchant_alias
                 FROM recurring_streams rs
                 LEFT JOIN accounts a   ON a.id = rs.account_id
                 LEFT JOIN users u      ON u.id = a.user_id
                 LEFT JOIN categories c ON c.id = rs.category_id
                 LEFT JOIN categories pc ON pc.id = c.parent_id
+                LEFT JOIN merchant_aliases ma ON ma.merchant_key =
+                    'name:' || lower(NULLIF(TRIM(rs.merchant_name), ''))
                 {where}
                 """,
                 *params,
@@ -135,7 +143,11 @@ class RecurringRepository:
             d.pop("category_parent_id", None)
             d["display_title"] = normalize_transaction_title(
                 {
-                    "merchant_name": d.get("merchant_name"),
+                    # Layer the alias onto merchant_name so the
+                    # title-normalizer treats it as the canonical merchant
+                    # label — keeps the same precedence chain (user_label
+                    # > merchant_name > description).
+                    "merchant_name": d.get("merchant_alias") or d.get("merchant_name"),
                     "name": d.get("description"),
                     "description": d.get("description"),
                     "user_label": d.get("user_label"),

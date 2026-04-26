@@ -261,8 +261,13 @@ export interface Transaction {
   account_mask: string | null;
   /** Username of the account owner (joined via accounts.user_id → users) */
   owner_username: string | null;
-  /** Derived display title — short, human-friendly. Server-computed via web/transactions/display.py. */
+  /** Derived display title — short, human-friendly. Server-computed via web/transactions/display.py.
+   * When ``merchant_alias`` is set, the server overrides this field with the alias on read. */
   display_title?: string | null;
+  /** User-chosen merchant rename (e.g. "Nyflower" → "Rent"). NULL when no alias is set.
+   * The server already layers this onto ``display_title``; the field is exposed so the UI
+   * can render an "aliased" affordance and expose a quick revert. */
+  merchant_alias?: string | null;
 }
 
 export interface TransactionFilters {
@@ -382,8 +387,12 @@ export interface RecurringStream {
   primary_category_name?: string | null;
   /** Primary category color (hex) for chips and dots. */
   primary_category_color?: string | null;
-  /** Short, human-friendly label for the stream (normalized from description). */
+  /** Short, human-friendly label for the stream (normalized from description).
+   * When ``merchant_alias`` is set, the server layers it onto this field. */
   display_title?: string | null;
+  /** User-chosen merchant rename. Recurring rows from Plaid have no
+   * merchant_entity_id so the alias is matched by ``name:<lower(merchant_name)>``. */
+  merchant_alias?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -512,10 +521,28 @@ export interface TagSpend {
 }
 
 export interface MerchantSpend {
+  /** Display name — already the alias when one is set (server-side COALESCE). */
   merchant_name: string;
+  /** True when the row's display name is a user-chosen alias, not the raw Plaid label. */
+  is_aliased?: boolean;
   logo_url: string | null;
   amount_cents: number;
   transaction_count: number;
+}
+
+// ---------------------------------------------------------------------------
+// Merchant aliases (display rename for Plaid-detected merchants)
+// ---------------------------------------------------------------------------
+
+export interface MerchantAlias {
+  /** Family-global key used both here and by merchant_category_rules. */
+  merchant_key: string;
+  /** Human-readable rendering of merchant_key, e.g. "Nyflower". */
+  display_label: string;
+  /** Chosen rename (e.g. "Rent"). */
+  display_name: string;
+  created_at?: string | null;
+  updated_at?: string | null;
 }
 
 export interface NetWorthSnapshot {

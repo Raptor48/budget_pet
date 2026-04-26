@@ -65,7 +65,10 @@ from web.investments import router as investments_router  # noqa: E402
 from web.reports import router as reports_router  # noqa: E402
 from web.plaid import plaid_router  # noqa: E402
 from web.piggy import router as piggy_router  # noqa: E402
-from web.merchant_rules import merchant_rules_router  # noqa: E402
+from web.merchant_rules import (  # noqa: E402
+    merchant_aliases_router,
+    merchant_rules_router,
+)
 from web.insights import insights_router  # noqa: E402
 from web.app_settings import app_settings_router  # noqa: E402
 from web.internal_transfers import internal_transfers_router  # noqa: E402
@@ -83,6 +86,7 @@ app.include_router(reports_router)
 app.include_router(plaid_router)
 app.include_router(piggy_router)
 app.include_router(merchant_rules_router)
+app.include_router(merchant_aliases_router)
 app.include_router(insights_router)
 app.include_router(app_settings_router)
 app.include_router(internal_transfers_router)

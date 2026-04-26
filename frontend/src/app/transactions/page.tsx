@@ -44,6 +44,7 @@ import {
 import { AddCashTransactionDialog } from "@/app/transactions/_components/add-cash-transaction-dialog";
 import { CreateRuleFromTransactionButton } from "@/app/transactions/_components/create-rule-from-transaction-button";
 import { InternalTransferSettingsDialog } from "@/app/transactions/_components/internal-transfer-settings-dialog";
+import { RenameMerchantPopover } from "@/app/transactions/_components/rename-merchant-popover";
 import { TransactionMobileCard } from "@/app/transactions/_components/transaction-mobile-card";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Badge } from "@/components/ui/badge";
@@ -698,6 +699,9 @@ function TransactionDetailsDialog({
                       Pending
                     </Badge>
                   ) : null}
+                </div>
+                <div className="-ml-1 pt-1">
+                  <RenameMerchantPopover tx={transaction} />
                 </div>
               </div>
             </div>

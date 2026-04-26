@@ -64,6 +64,31 @@ Matching SQL coalesces `NULLIF(merchant_name, '')` onto `transactions.display_ti
 | POST | /api/merchant-rules/{id}/apply-existing | Apply saved rule to existing transactions (only `category_id` + `updated_at` on `transactions`; idempotent). |
 | DELETE | /api/merchant-rules/{id} | Delete rule |
 
+## Merchant Aliases (display rename)
+
+User-chosen rename for a Plaid-detected merchant — purely a presentation
+overlay. Categorization, merchant_key matching, math, and Plaid sync are
+**unaffected**. Stored in the `merchant_aliases` table keyed on the same
+`merchant_key` as `merchant_category_rules` (see
+[`docs/data-model.md#merchant_aliases`](data-model.md#merchant_aliases)).
+
+When both `merchant_entity_id` and `merchant_name` are supplied, `PUT
+/api/merchant-aliases` writes **two rows** — `eid:<id>` and
+`name:<lower(name)>` — with the same `display_name`. The redundant
+`name:` row is necessary because Plaid's recurring endpoint returns
+only `merchant_name` (no entity id), so without it the alias would
+silently fail to match recurring stream rows of the same merchant.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | /api/merchant-aliases | List every alias (`merchant_key`, `display_label`, `display_name`, timestamps). |
+| PUT | /api/merchant-aliases | Upsert. Body: `display_name` (non-empty) + at least one of `merchant_entity_id`, `merchant_name`, `merchant_label`. Writes both `eid:` and `name:` twin rows when both are present. Returns the **primary** row (the one matched first by `merchant_key()` precedence). |
+| POST | /api/merchant-aliases/delete | Remove. Body: `merchant_key` (single-key delete, e.g. from a Settings list) **or** `merchant_entity_id`+`merchant_name` (twin delete — clears both rows the upsert wrote). 204 on success, 404 if no rows matched. |
+
+Read-side application is centralized in `web/merchant_rules/aliases.py::alias_join_sql(table_alias)`. Every repo that returns merchant-bearing rows (transactions, recurring streams, top merchants) wraps its query with this `LEFT JOIN merchant_aliases ma ON ...` clause and `COALESCE(ma.display_name, t.display_title)` overrides the auto-normalized title in the response. The DB column `transactions.display_title` stays auto-normalized — the alias is layered on read so a rename instantly applies to **all** historical rows of that merchant without a backfill UPDATE.
+
+`MerchantSpend` rows from `/api/reports/merchants` carry a `is_aliased: bool` so the UI can label aggregated rows as renamed; aggregation groups by `COALESCE(ma.display_name, t.merchant_name)` so two Plaid merchants the user renamed to the same string aggregate into one row.
+
 ## Transactions
 
 | Method | Path | Description |

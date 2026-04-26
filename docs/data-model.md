@@ -174,6 +174,19 @@ Key-building priority (see `web/merchant_rules/keys.py`):
 | category_id | INTEGER FK | |
 | created_at | TIMESTAMPTZ | |
 
+### merchant_aliases
+Family-wide **display rename** for a merchant. Layered on read via a LEFT JOIN — the underlying `transactions.display_title` and `recurring_streams.merchant_name` columns are never modified. Categorization (`merchant_category_rules`), merchant_key matching, math, and Plaid sync are **unaffected**. See [`docs/api.md#merchant-aliases-display-rename`](api.md#merchant-aliases-display-rename) for the HTTP surface.
+
+The table reuses the same `merchant_key` algorithm as `merchant_category_rules` (`web/merchant_rules/keys.py`). Because Plaid's `/transactions/recurring/get` endpoint returns only `merchant_name` (no `merchant_entity_id`), `upsert_alias` writes **two rows** when both identifiers are available — `eid:<id>` and `name:<lower(name)>` — with the same `display_name`. This guarantees the rename matches both transaction rows (which usually have the entity id) and recurring stream rows (which never do).
+
+The single source of truth for the read-side LEFT JOIN clause is `web/merchant_rules/aliases.py::alias_join_sql(table_alias)`. Every repo that returns merchant-bearing rows (transactions list/get, recurring `list_streams`, reports `get_top_merchants`) wraps its query with this fragment and `COALESCE(ma.display_name, t.display_title)` to surface the alias.
+
+| Column | Type | Notes |
+|---|---|---|
+| merchant_key | TEXT PK | Same key shape as `merchant_category_rules`. Two rows may exist for the same merchant — the `eid:` row plus the `name:` twin. |
+| display_name | TEXT NOT NULL | User-chosen rename, e.g. "Rent". CHECK ensures non-empty after trim. |
+| created_at, updated_at | TIMESTAMPTZ | `updated_at` bumps on each PUT. |
+
 ### user_preferences
 | Column | Type | Notes |
 | insights_last_viewed_at | TIMESTAMPTZ | Optional; used for Insights “new since last visit” UX |

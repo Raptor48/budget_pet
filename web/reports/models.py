@@ -46,7 +46,16 @@ class TagSpend(BaseModel):
 
 
 class MerchantSpend(BaseModel):
+    """One row in the Top-merchants list.
+
+    ``merchant_name`` is the *display* name — when the household has set a
+    ``merchant_alias`` for this merchant the alias is returned here and
+    ``is_aliased`` is true so the UI can show a small "renamed" hint.
+    Aggregation is done by aliased name (see ``ReportsRepository.get_top_merchants``).
+    """
+
     merchant_name: str
+    is_aliased: bool = False
     logo_url: Optional[str] = None
     amount_cents: int
     transaction_count: int
