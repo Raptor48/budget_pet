@@ -22,7 +22,23 @@ export const notify = {
 };
 
 export function formatApiError(err: unknown, fallback = "Something went wrong"): string {
-  if (err instanceof ApiError) return err.detail || err.message || fallback;
+  // Defensive coerce: if some future code path stores a non-string into
+  // ApiError.detail (e.g. a Pydantic 422 array slipping past the
+  // normaliser in api.ts), we serialise here so the toast never renders
+  // an object — that would crash the React tree with error #31
+  // ("Objects are not valid as a React child").
+  const asString = (v: unknown, fb: string): string => {
+    if (typeof v === "string" && v.length > 0) return v;
+    if (v == null) return fb;
+    try {
+      return JSON.stringify(v);
+    } catch {
+      return fb;
+    }
+  };
+  if (err instanceof ApiError) {
+    return asString(err.detail ?? err.message, fallback);
+  }
   if (err instanceof Error) return err.message || fallback;
   if (typeof err === "string") return err;
   return fallback;

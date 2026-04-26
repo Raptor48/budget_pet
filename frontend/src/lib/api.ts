@@ -61,6 +61,41 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Coerce a FastAPI / Pydantic error response body into a *plain string*
+ * suitable for `<p>{detail}</p>` rendering and toast messages.
+ *
+ * Pydantic v2 validation failures (HTTP 422) come back as
+ * `{ detail: [{ type, loc, msg, input, ctx }, ...] }` — an **array of
+ * objects**, not a string. Treating that array as the error message and
+ * letting it land inside the React tree (e.g. via `toast.error(...)` or
+ * `<p>{err.detail}</p>`) triggers React error #31 ("Objects are not
+ * valid as a React child") and crashes the page. Always normalise here
+ * so callers can assume `ApiError.detail` is a string.
+ */
+function extractErrorDetail(body: unknown, fallback: string): string {
+  if (!body || typeof body !== 'object') return fallback;
+  const obj = body as Record<string, unknown>;
+  const raw = obj.detail ?? obj.message;
+  if (typeof raw === 'string' && raw.length > 0) return raw;
+  if (Array.isArray(raw)) {
+    // Pydantic 422: pick the human-readable `msg` from each entry; fall
+    // back to the loc-joined path if msg is missing on a malformed item.
+    const messages = raw
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') return null;
+        const e = entry as Record<string, unknown>;
+        const msg = typeof e.msg === 'string' ? e.msg : null;
+        const loc = Array.isArray(e.loc) ? e.loc.filter((p) => p !== 'body').join('.') : null;
+        if (msg && loc) return `${loc}: ${msg}`;
+        return msg ?? loc ?? null;
+      })
+      .filter((s): s is string => Boolean(s));
+    if (messages.length > 0) return messages.join('; ');
+  }
+  return fallback;
+}
+
 async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {},
@@ -79,10 +114,11 @@ async function apiRequest<T>(
   });
 
   if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
+    const fallback = `HTTP ${response.status}`;
+    let detail = fallback;
     try {
       const body = await response.json();
-      detail = body.detail || body.message || detail;
+      detail = extractErrorDetail(body, fallback);
     } catch {
       // ignore parse errors
     }
@@ -534,10 +570,11 @@ export async function plaidSyncStream(
   };
   const response = await fetch(url, { method: 'POST', headers, credentials: 'include' });
   if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
+    const fallback = `HTTP ${response.status}`;
+    let detail = fallback;
     try {
       const body = await response.json();
-      detail = body.detail || body.message || detail;
+      detail = extractErrorDetail(body, fallback);
     } catch {
       // ignore
     }

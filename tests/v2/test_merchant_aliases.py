@@ -137,6 +137,73 @@ class TestUpsertAlias:
             )
 
 
+class TestUpsertModelValidator:
+    """The Pydantic-side ``MerchantAliasUpsert`` validator must accept any
+    one of the three identifier fields. Earlier versions had a generator
+    bug that always evaluated ``merchant_entity_id`` and rejected
+    ``{merchant_entity_id: null, merchant_name: "Nyflower"}`` as 422
+    "Provide ...". This regression test pins the behaviour."""
+
+    def test_accepts_merchant_name_only(self):
+        from web.merchant_rules.aliases_routes import MerchantAliasUpsert
+
+        m = MerchantAliasUpsert(
+            display_name="Rent",
+            merchant_entity_id=None,
+            merchant_name="Nyflower",
+            merchant_label=None,
+        )
+        assert m.merchant_name == "Nyflower"
+
+    def test_accepts_merchant_entity_id_only(self):
+        from web.merchant_rules.aliases_routes import MerchantAliasUpsert
+
+        m = MerchantAliasUpsert(
+            display_name="Rent",
+            merchant_entity_id="abc123",
+            merchant_name=None,
+            merchant_label=None,
+        )
+        assert m.merchant_entity_id == "abc123"
+
+    def test_accepts_merchant_label_only(self):
+        from web.merchant_rules.aliases_routes import MerchantAliasUpsert
+
+        m = MerchantAliasUpsert(
+            display_name="Rent",
+            merchant_entity_id=None,
+            merchant_name=None,
+            merchant_label="Pmts Sec: Ind",
+        )
+        assert m.merchant_label == "Pmts Sec: Ind"
+
+    def test_rejects_all_blank(self):
+        import pydantic
+
+        from web.merchant_rules.aliases_routes import MerchantAliasUpsert
+
+        with pytest.raises(pydantic.ValidationError):
+            MerchantAliasUpsert(
+                display_name="Rent",
+                merchant_entity_id=None,
+                merchant_name=None,
+                merchant_label=None,
+            )
+
+    def test_rejects_all_whitespace(self):
+        import pydantic
+
+        from web.merchant_rules.aliases_routes import MerchantAliasUpsert
+
+        with pytest.raises(pydantic.ValidationError):
+            MerchantAliasUpsert(
+                display_name="Rent",
+                merchant_entity_id="   ",
+                merchant_name="",
+                merchant_label="\t",
+            )
+
+
 class TestDeleteAlias:
     @pytest.mark.asyncio
     async def test_deletes_both_keys_when_trio_supplied(self):
