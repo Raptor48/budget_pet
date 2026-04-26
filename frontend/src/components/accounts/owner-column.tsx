@@ -142,7 +142,12 @@ export function OwnerColumn({
   if (accounts.length === 0) return null;
 
   return (
-    <div className="flex flex-col gap-4 rounded-2xl border border-border/60 bg-card/40 p-4 shadow-sm">
+    // The whole owner column is capped at ~440px and centered inside its
+    // grid cell. This is what locks the card visual to the same width as
+    // the list rows below it — without this cap, the FlipCard's natural
+    // aspect ratio produced 380px-tall cards in 600px columns and the
+    // gutter on the right looked broken. Cards now fill the column.
+    <div className="mx-auto flex w-full max-w-[440px] flex-col gap-4 rounded-2xl border border-border/60 bg-card/40 p-4 shadow-sm">
       <OwnerHeader name={name} accounts={accounts} isUnassigned={isUnassigned} />
 
       {creditCards.length > 0 && (

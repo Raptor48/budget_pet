@@ -514,12 +514,11 @@ export function FlipCard({
 
   return (
     <div
-      // Cap the visible card width on wide screens — without this the
-      // 85.6:54 aspect ratio meant a 600px-wide owner column produced a
-      // 379px-tall card. Capping at 420px brings tall cards under 270px
-      // and matches typical fintech-app sizing without losing the
-      // physical credit-card silhouette.
-      className="w-full max-w-[420px] cursor-pointer select-none"
+      // Card stretches to the full owner-column width; the column itself
+      // is what's capped at ~440px (in OwnerColumn) so the card and the
+      // list rows below it line up exactly. Capping here too made the
+      // columns look lopsided — wide column, narrow card, empty gutter.
+      className="w-full cursor-pointer select-none"
       style={{ perspective: "1000px" }}
       onClick={() => setFlipped((f) => !f)}
       role="button"
