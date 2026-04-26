@@ -284,8 +284,8 @@ function CardBack({
     <div
       className={
         compact
-          ? "absolute inset-0 flex flex-col justify-between overflow-hidden rounded-xl p-3 text-white"
-          : "absolute inset-0 flex flex-col justify-between overflow-hidden rounded-2xl p-4 text-white"
+          ? "absolute inset-0 flex flex-col gap-2 overflow-hidden rounded-xl px-2.5 pt-2.5 pb-5 text-white"
+          : "absolute inset-0 flex flex-col gap-2.5 overflow-hidden rounded-2xl px-3.5 pt-3 pb-6 text-white"
       }
       style={{
         background: cardGradient(darken(color, 0.1)),
@@ -295,53 +295,62 @@ function CardBack({
       }}
       onClick={(e) => e.stopPropagation()}
     >
-      {/* Decorative stripe */}
-      <div className="absolute left-0 right-0 top-7 h-7 bg-black/30" />
+      {/* Slim magnetic stripe — kept for the credit-card silhouette but
+          shrunk so it doesn't dominate the back face. */}
+      <div className="pointer-events-none absolute left-0 right-0 top-4 h-3.5 bg-black/30" />
 
-      {/* Header */}
-      <div className="relative flex items-center justify-between pt-7">
+      {/* Header. Sits *above* the stripe — the stripe is purely decorative
+          behind the title now. */}
+      <div className="relative z-10 flex items-center justify-between">
         <p className="text-[10px] uppercase tracking-widest text-white/60">Details</p>
         <button
           type="button"
-          className="flex items-center gap-1 rounded-full bg-white/20 px-2.5 py-0.5 text-[10px] font-medium text-white hover:bg-white/30 active:bg-white/40"
+          className="flex items-center gap-1 rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-medium text-white hover:bg-white/30 active:bg-white/40"
           onClick={onFlipBack}
         >
           ← Back
         </button>
       </div>
 
+      {/* Spacer so content clears the magnetic stripe sitting at top-4. */}
+      <div className="h-2.5" aria-hidden />
+
       {/* Financial details by account type */}
       <div className="relative flex flex-col gap-1.5">
         {isCreditLike && (
           <>
             <UtilizationBar account={account} />
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+            {/* Two inline lines of data instead of the previous 4-cell grid.
+                Roughly halves the vertical footprint of this section. */}
+            <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px]">
               <ManualOverrideField
                 account={account}
                 kind="credit_limit"
                 label="Limit"
                 format={(v) => formatMoney(Number(v), account.currency)}
+                inline
               />
               <ManualOverrideField
                 account={account}
                 kind="apr"
                 label="APR"
                 format={(v) => `${v}%`}
+                inline
               />
-              <div>
-                <p className="text-white/50">Min payment</p>
-                <p className="font-semibold text-white tabular-nums">
+              <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                <span className="text-white/50">Min</span>
+                <span className="font-semibold text-white tabular-nums">
                   {account.min_payment_cents != null
                     ? formatMoney(account.min_payment_cents, account.currency)
                     : "—"}
-                </p>
-              </div>
-              <div>
-                <p className="text-white/50">Due day</p>
-                <p className="font-semibold text-white tabular-nums">
+                </span>
+              </span>
+              <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                <span className="text-white/50">Due</span>
+                <span className="font-semibold text-white tabular-nums">
                   {account.due_day != null ? `Day ${account.due_day}` : "—"}
-                </p>
-              </div>
+                </span>
+              </span>
             </div>
             {account.is_overdue && (
               <span className="w-fit rounded-full bg-red-500/30 px-2 py-0.5 text-[10px] font-bold text-red-300">
@@ -351,38 +360,41 @@ function CardBack({
           </>
         )}
         {isInvestment && (
-          <div className="text-[11px]">
-            <p className="text-white/50">Portfolio value</p>
-            <p className="font-semibold text-white tabular-nums">
+          <p className="flex items-center gap-1 text-[11px]">
+            <span className="text-white/50">Portfolio</span>
+            <span className="font-semibold text-white tabular-nums">
               {formatMoney(account.current_balance_cents, account.currency)}
-            </p>
-          </div>
+            </span>
+          </p>
         )}
         {isDepository && (
-          <div className="grid grid-cols-2 gap-x-4 text-[11px]">
-            <div>
-              <p className="text-white/50">Available</p>
-              <p className="font-semibold text-white tabular-nums">
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px]">
+            <span className="inline-flex items-center gap-1 whitespace-nowrap">
+              <span className="text-white/50">Available</span>
+              <span className="font-semibold text-white tabular-nums">
                 {account.available_balance_cents != null
                   ? formatMoney(account.available_balance_cents, account.currency)
                   : "—"}
-              </p>
-            </div>
-            <div>
-              <p className="text-white/50">Currency</p>
-              <p className="font-semibold text-white">{account.currency}</p>
-            </div>
+              </span>
+            </span>
+            <span className="inline-flex items-center gap-1 whitespace-nowrap">
+              <span className="text-white/50">Currency</span>
+              <span className="font-semibold text-white">{account.currency}</span>
+            </span>
           </div>
         )}
       </div>
 
-      {/* Owner section */}
-      <div className="relative rounded-xl border border-white/15 bg-black/20 px-3 py-2">
-        <OwnerSelector account={account} members={members} currentUser={currentUser} />
+      {/* Owner row — read-only by default; click "Change" to toggle the
+          inline owner selector open. Saves vertical compared to the
+          always-on dropdown layout. */}
+      <div className="relative">
+        <OwnerInlineRow account={account} members={members} currentUser={currentUser} />
       </div>
 
-      {/* Footer: last synced */}
-      <p className="relative text-[9px] text-white/40">
+      {/* Footer: pinned to the absolute bottom so it doesn't compete for
+          flex space with the data above. */}
+      <p className="absolute bottom-1 left-2.5 text-[9px] text-white/40">
         Synced: {formatSyncedAt(account.last_synced_at)}
       </p>
     </div>
@@ -400,6 +412,60 @@ function OwnerBadge({ username }: { username: string | null }) {
       <UserRound className="size-2.5 shrink-0" />
       {username}
     </span>
+  );
+}
+
+/**
+ * Compact owner row for the dense card back. Read-only by default — shows
+ * "Owner: Taya" plus a subtle "Change" link for owners who can reassign.
+ * Clicking "Change" expands the existing OwnerSelector dropdown inline,
+ * so we don't pay the dropdown's vertical cost on every flip.
+ */
+function OwnerInlineRow({
+  account,
+  members,
+  currentUser,
+}: {
+  account: Account;
+  members: Member[];
+  currentUser: { is_owner: boolean } | null;
+}) {
+  const [editing, setEditing] = useState(false);
+  const ownerLabel = account.owner_username ?? "Unassigned";
+
+  if (editing) {
+    return (
+      <div className="rounded-lg border border-white/15 bg-black/20 px-2.5 py-1.5">
+        <OwnerSelector
+          account={account}
+          members={members}
+          currentUser={currentUser}
+        />
+        <button
+          type="button"
+          className="mt-1 text-[10px] text-white/60 underline-offset-2 hover:underline"
+          onClick={() => setEditing(false)}
+        >
+          Done
+        </button>
+      </div>
+    );
+  }
+  return (
+    <p className="flex items-center gap-1.5 text-[11px]">
+      <UserRound className="size-3 shrink-0 text-white/50" aria-hidden />
+      <span className="text-white/50">Owner</span>
+      <span className="font-semibold text-white">{ownerLabel}</span>
+      {currentUser?.is_owner && members.length > 0 ? (
+        <button
+          type="button"
+          className="ml-1 text-[10px] text-white/60 underline underline-offset-2 hover:text-white"
+          onClick={() => setEditing(true)}
+        >
+          Change
+        </button>
+      ) : null}
+    </p>
   );
 }
 
