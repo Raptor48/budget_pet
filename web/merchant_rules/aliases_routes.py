@@ -36,13 +36,14 @@ class MerchantAliasUpsert(BaseModel):
 
     @model_validator(mode="after")
     def _at_least_one_identifier(self) -> "MerchantAliasUpsert":
+        # Earlier draft accidentally compared ``self.merchant_entity_id``
+        # in every branch instead of the loop variable, so a perfectly
+        # valid {merchant_entity_id: null, merchant_name: "Nyflower"}
+        # was rejected as 422 ("Provide ..."). The straightforward
+        # generator below treats all three identifiers symmetrically.
         if not any(
-            (self.merchant_entity_id or "").strip() if isinstance(s, str) else bool(s)
-            for s in (
-                self.merchant_entity_id,
-                self.merchant_name,
-                self.merchant_label,
-            )
+            (s or "").strip()
+            for s in (self.merchant_entity_id, self.merchant_name, self.merchant_label)
         ):
             raise ValueError(
                 "Provide merchant_entity_id, merchant_name, or merchant_label."
