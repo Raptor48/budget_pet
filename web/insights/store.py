@@ -264,6 +264,10 @@ async def load_feed(
             and (last_viewed_at is None or first_ts > last_viewed_at)
         )
         c2["is_new"] = bool(is_new)
+        # Expose ``first_seen_at`` so the UI can render a "since 3d" line
+        # without a second roundtrip. ISO-8601 string for JSON; ``None``
+        # when the card hasn't been persisted yet (e.g. very first build).
+        c2["first_seen_at"] = first_ts.isoformat() if first_ts else None
         if not hidden and c.get("severity") == "warn":
             actionable_count += 1
         if not hidden and is_new:

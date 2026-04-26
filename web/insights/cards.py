@@ -265,7 +265,7 @@ def build_missed_recurring(
                 ),
                 detail=(
                     f"Based on a {freq.lower() or 'recurring'} cadence. "
-                    f"Grace window: {grace.days} day(s)."
+                    f"Grace window: {grace.days} {'day' if grace.days == 1 else 'days'}."
                 ),
                 dedupe_key=f"missed_recurring:{s.get('id')}:{expected.isoformat()}",
                 action_url="/recurring",
