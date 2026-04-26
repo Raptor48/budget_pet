@@ -4,16 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlertTriangle,
   BellOff,
   CalendarClock,
   CheckSquare2,
   ChevronDown,
   ChevronUp,
   MoreHorizontal,
-  Pause,
   Pencil,
-  Play,
   Plus,
   Square,
   TrendingDown,
@@ -88,7 +85,7 @@ import {
 // ---------------------------------------------------------------------------
 
 type Direction = "outflow" | "inflow";
-type StatusFilter = "active" | "paused" | "cancelled" | "all";
+type StatusFilter = "active" | "cancelled" | "all";
 type ViewMode = "list" | "by-category" | "calendar";
 
 // ---------------------------------------------------------------------------
@@ -118,7 +115,11 @@ export default function RecurringPage() {
   const [showAllPriceChanges, setShowAllPriceChanges] = useState(false);
 
   const userStatuses = useMemo<Array<"active" | "paused" | "cancelled">>(() => {
+    // The Pause action is gone but the backend still supports a `paused`
+    // value, so we keep it visible alongside `active` and in `all` so any
+    // legacy paused row stays reachable rather than silently disappearing.
     if (statusFilter === "all") return ["active", "paused", "cancelled"];
+    if (statusFilter === "active") return ["active", "paused"];
     return [statusFilter];
   }, [statusFilter]);
 
@@ -159,12 +160,20 @@ export default function RecurringPage() {
       if (!Number.isFinite(average_amount_cents) || average_amount_cents <= 0) {
         return Promise.reject(new Error("Enter a positive amount."));
       }
+      // Seed last_date / first_date with today so the manual row instantly
+      // gets a Next-payment forecast, shows up in the Calendar grid, and
+      // is sortable alongside Plaid streams. The backend leaves these NULL
+      // when omitted — which would silently exclude the row from those
+      // surfaces. The user can later edit via the row menu.
+      const today = new Date().toISOString().slice(0, 10);
       return recurringApi.create({
         account_id,
         direction,
         description: cDesc.trim(),
         frequency: cFreq,
         average_amount_cents,
+        first_date: today,
+        last_date: today,
       });
     },
     onSuccess: () => {
@@ -293,7 +302,7 @@ export default function RecurringPage() {
 
   const handleSingleAction = async (
     stream: RecurringStream,
-    action: "cancel" | "pause" | "reactivate" | "snooze_price_change",
+    action: "cancel" | "snooze_price_change",
   ) => {
     if (action === "cancel") {
       const ok = await confirm({
@@ -506,18 +515,6 @@ export default function RecurringPage() {
                 action: "cancel",
               });
             }}
-            onPause={() =>
-              bulkMutation.mutate({
-                ids: Array.from(selected),
-                action: "pause",
-              })
-            }
-            onReactivate={() =>
-              bulkMutation.mutate({
-                ids: Array.from(selected),
-                action: "reactivate",
-              })
-            }
             onSnooze={() =>
               bulkMutation.mutate({
                 ids: Array.from(selected),
@@ -652,8 +649,21 @@ function KpiStrip({
   const isOut = direction === "outflow";
   const monthLabel = isOut ? "Monthly outflows" : "Monthly inflows";
   const yearLabel = isOut ? "Annual outflows" : "Annual inflows";
+  // Compose the Next-payment sub line so the user sees *what* charges
+  // and *where* it lands in one glance: "Paymthly · $26.98 · ··5993 · @Denis".
+  const nextSubParts: string[] = [];
+  if (nextUp) {
+    nextSubParts.push(streamTitle(nextUp));
+    nextSubParts.push(
+      formatMoney(
+        Math.abs(nextUp.last_amount_cents ?? nextUp.average_amount_cents ?? 0),
+      ),
+    );
+    const tag = accountTag(nextUp);
+    if (tag) nextSubParts.push(tag);
+  }
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       <KpiCard
         icon={<Wallet className="size-4" aria-hidden />}
         label={monthLabel}
@@ -674,19 +684,7 @@ function KpiStrip({
             ? formatNextRecurringDate(nextUp.last_date, nextUp.frequency)
             : "—"
         }
-        sub={
-          nextUp
-            ? `${streamTitle(nextUp)} · ${formatMoney(
-                Math.abs(nextUp.last_amount_cents ?? nextUp.average_amount_cents ?? 0),
-              )}`
-            : "Nothing scheduled"
-        }
-      />
-      <KpiCard
-        icon={<AlertTriangle className="size-4" aria-hidden />}
-        label="Plaid limitation"
-        value="Read-only"
-        sub="We can mark cancelled — you still cancel with the merchant."
+        sub={nextUp ? nextSubParts.join(" · ") : "Nothing scheduled"}
       />
     </div>
   );
@@ -898,7 +896,6 @@ function StatusFilterBar({
 }) {
   const options: Array<{ key: StatusFilter; label: string }> = [
     { key: "active", label: "Active" },
-    { key: "paused", label: "Paused" },
     { key: "cancelled", label: "Cancelled" },
     { key: "all", label: "All" },
   ];
@@ -963,9 +960,7 @@ function EmptyState({ statusFilter }: { statusFilter: StatusFilter }) {
   const message =
     statusFilter === "cancelled"
       ? "No cancelled streams yet. Streams you mark cancelled show up here."
-      : statusFilter === "paused"
-        ? "Nothing paused. Use the row menu to pause a stream."
-        : "No recurring streams for this tab. Add a manual one or wait for Plaid sync.";
+      : "No recurring streams for this tab. Add a manual one or wait for Plaid sync.";
   return (
     <div className="rounded-lg border border-dashed py-12 text-center text-sm text-muted-foreground">
       {message}
@@ -996,7 +991,7 @@ type ListViewProps = {
   isUpdating: boolean;
   onAction: (
     stream: RecurringStream,
-    action: "cancel" | "pause" | "reactivate" | "snooze_price_change",
+    action: "cancel" | "snooze_price_change",
   ) => void;
   monthlyTotalCents: number;
   annualTotalCents: number;
@@ -1138,7 +1133,7 @@ function RecurringRow({
   isUpdating: boolean;
   editLockedByOther: boolean;
   onAction: (
-    action: "cancel" | "pause" | "reactivate" | "snooze_price_change",
+    action: "cancel" | "snooze_price_change",
   ) => void;
 }) {
   const title = streamTitle(row);
@@ -1387,7 +1382,7 @@ function RowActionsMenu({
 }: {
   stream: RecurringStream;
   onAction: (
-    action: "cancel" | "pause" | "reactivate" | "snooze_price_change",
+    action: "cancel" | "snooze_price_change",
   ) => void;
   onStartEdit: () => void;
   editLockedByOther: boolean;
@@ -1417,26 +1412,6 @@ function RowActionsMenu({
             onStartEdit();
           }}
         />
-        {status !== "paused" ? (
-          <RowActionItem
-            icon={<Pause className="size-4" />}
-            label="Pause"
-            onClick={() => {
-              setOpen(false);
-              onAction("pause");
-            }}
-          />
-        ) : null}
-        {status !== "active" ? (
-          <RowActionItem
-            icon={<Play className="size-4" />}
-            label="Reactivate"
-            onClick={() => {
-              setOpen(false);
-              onAction("reactivate");
-            }}
-          />
-        ) : null}
         <RowActionItem
           icon={<BellOff className="size-4" />}
           label={`Snooze price alert ${SNOOZE_DAYS_DEFAULT}d`}
@@ -1503,8 +1478,6 @@ function BulkActionBar({
   disabled,
   onClear,
   onCancel,
-  onPause,
-  onReactivate,
   onSnooze,
 }: {
   count: number;
@@ -1512,8 +1485,6 @@ function BulkActionBar({
   disabled: boolean;
   onClear: () => void;
   onCancel: () => void;
-  onPause: () => void;
-  onReactivate: () => void;
   onSnooze: () => void;
 }) {
   return (
@@ -1524,18 +1495,6 @@ function BulkActionBar({
           ≈ {formatMoney(monthlySavingsCents)}/mo
         </span>
         <span className="bg-border mx-0.5 h-5 w-px sm:mx-1" aria-hidden />
-        <BulkButton
-          icon={<Pause className="size-3.5" />}
-          label="Pause"
-          disabled={disabled}
-          onClick={onPause}
-        />
-        <BulkButton
-          icon={<Play className="size-3.5" />}
-          label="Reactivate"
-          disabled={disabled}
-          onClick={onReactivate}
-        />
         <BulkButton
           icon={<BellOff className="size-3.5" />}
           label="Snooze"
@@ -1609,7 +1568,7 @@ function ByCategoryView({
   onToggleSelect: (id: number) => void;
   onAction: (
     stream: RecurringStream,
-    action: "cancel" | "pause" | "reactivate" | "snooze_price_change",
+    action: "cancel" | "snooze_price_change",
   ) => void;
 }) {
   type Group = {
@@ -1670,7 +1629,7 @@ function CategoryGroup({
   onToggleSelect: (id: number) => void;
   onAction: (
     stream: RecurringStream,
-    action: "cancel" | "pause" | "reactivate" | "snooze_price_change",
+    action: "cancel" | "snooze_price_change",
   ) => void;
 }) {
   const [open, setOpen] = useState(true);
@@ -1733,7 +1692,7 @@ function CategoryGroupRow({
   isSelected: boolean;
   onToggleSelect: () => void;
   onAction: (
-    action: "cancel" | "pause" | "reactivate" | "snooze_price_change",
+    action: "cancel" | "snooze_price_change",
   ) => void;
 }) {
   const title = streamTitle(row);
