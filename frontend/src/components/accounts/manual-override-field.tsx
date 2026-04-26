@@ -39,6 +39,8 @@ interface ManualOverrideFieldProps {
   label: string;
   /** Format the resolved (Plaid or manual) value for read-only display. */
   format: (value: number | string) => string;
+  /** Compact one-line mode for the card back: label and value flow inline. */
+  inline?: boolean;
 }
 
 const HINT_TEXT =
@@ -49,6 +51,7 @@ export function ManualOverrideField({
   kind,
   label,
   format,
+  inline = false,
 }: ManualOverrideFieldProps) {
   const plaidValue =
     kind === "credit_limit" ? account.credit_limit_cents : account.apr_percent;
@@ -62,6 +65,34 @@ export function ManualOverrideField({
     plaidValue ?? manualValue ?? null;
   const source: "plaid" | "manual" | "missing" =
     plaidValue != null ? "plaid" : manualValue != null ? "manual" : "missing";
+
+  // Inline variant — used on the dense card-back layout. Renders as a single
+  // line: "Limit $5,000" or "APR 19.99% [Manual ✏️]" or "APR — set" link.
+  if (inline) {
+    return (
+      <span className="inline-flex items-center gap-1 whitespace-nowrap">
+        <span className="text-white/50">{label}</span>
+        {source === "plaid" && (
+          <span className="font-semibold text-white tabular-nums">
+            {format(effective as number | string)}
+          </span>
+        )}
+        {source === "manual" && (
+          <ManualValueRow
+            account={account}
+            kind={kind}
+            label={label}
+            value={manualValue as number | string}
+            format={format}
+            inline
+          />
+        )}
+        {source === "missing" && (
+          <EnterManuallyButton account={account} kind={kind} label={label} inline />
+        )}
+      </span>
+    );
+  }
 
   return (
     <div>
@@ -107,16 +138,44 @@ function ManualValueRow({
   label,
   value,
   format,
+  inline = false,
 }: {
   account: Account;
   kind: FieldKind;
   label: string;
   value: number | string;
   format: (value: number | string) => string;
+  inline?: boolean;
 }) {
+  const valueEl = (
+    <span className="font-semibold text-white tabular-nums">{format(value)}</span>
+  );
+  const editTrigger = (
+    <button
+      type="button"
+      className="rounded-full p-0.5 text-white/60 hover:bg-white/10 hover:text-white"
+      aria-label="Edit manual value"
+    >
+      <Pencil className="size-3" />
+    </button>
+  );
+  if (inline) {
+    return (
+      <>
+        {valueEl}
+        <OverridePopover
+          account={account}
+          kind={kind}
+          label={label}
+          initial={value}
+          trigger={editTrigger}
+        />
+      </>
+    );
+  }
   return (
     <div className="flex items-center gap-1.5">
-      <p className="font-semibold text-white tabular-nums">{format(value)}</p>
+      {valueEl}
       <span className="rounded-full bg-white/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-white/80">
         Manual
       </span>
@@ -125,15 +184,7 @@ function ManualValueRow({
         kind={kind}
         label={label}
         initial={value}
-        trigger={
-          <button
-            type="button"
-            className="rounded-full p-0.5 text-white/60 hover:bg-white/10 hover:text-white"
-            aria-label="Edit manual value"
-          >
-            <Pencil className="size-3" />
-          </button>
-        }
+        trigger={editTrigger}
       />
     </div>
   );
@@ -143,11 +194,31 @@ function EnterManuallyButton({
   account,
   kind,
   label,
+  inline = false,
 }: {
   account: Account;
   kind: FieldKind;
   label: string;
+  inline?: boolean;
 }) {
+  if (inline) {
+    return (
+      <OverridePopover
+        account={account}
+        kind={kind}
+        label={label}
+        initial=""
+        trigger={
+          <button
+            type="button"
+            className="text-[11px] text-white/70 underline underline-offset-2 hover:text-white"
+          >
+            — set
+          </button>
+        }
+      />
+    );
+  }
   return (
     <OverridePopover
       account={account}
