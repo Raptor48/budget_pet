@@ -11,7 +11,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from .users_repo import get_auth_repo
 
 _SKIP_PREFIXES = ("/api/auth/",)
-_SKIP_EXACT = {"/api/healthz"}
+_SKIP_EXACT = {"/api/healthz", "/api/telegram/health"}
 # Plaid verifies webhooks with JWT (see docs/plaid.md); no session cookie on this path.
 # Telegram verifies the secret-token header (see web/telegram/router.py); no session either.
 _SKIP_WEBHOOK_PATHS = {
