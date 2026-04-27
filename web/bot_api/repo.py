@@ -885,6 +885,15 @@ class BotRepository:
         transaction_id: Optional[int] = None,
         lines: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
+        # ``raw_ocr_json`` lands in a JSONB column. The pool's init hook
+        # (``web/db.py``) registers a json.dumps/json.loads codec, so a
+        # dict / list / None all marshal correctly without callers needing
+        # to remember ``::jsonb`` casts. ``parse_status`` is gated to one
+        # of ('pending', 'parsed', 'failed') by a CHECK constraint —
+        # the FE renders 'failed' rows in red so the user can spot dud
+        # OCR rounds without opening Railway logs.
+        if parse_status not in ("pending", "parsed", "failed"):
+            raise ValueError(f"Invalid parse_status: {parse_status!r}")
         pool = await self._pool()
         async with pool.acquire() as conn:
             async with conn.transaction():

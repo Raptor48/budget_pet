@@ -817,6 +817,7 @@ async def on_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         receipt_date=parsed.get("date"),
         total_cents=total_cents,
         tax_cents=parsed.get("tax_cents"),
+        currency=parsed.get("currency") or "USD",
         raw_ocr_json=parsed,
         lines=parsed.get("lines"),
     )
