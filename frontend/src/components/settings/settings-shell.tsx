@@ -3,9 +3,17 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AppLayout } from "@/components/layout/app-layout";
+import { useAuth } from "@/contexts/auth-context";
 import { cn } from "@/lib/utils";
 
-const tabs: { href: string; label: string; match: (pathname: string) => boolean }[] = [
+type Tab = {
+  href: string;
+  label: string;
+  match: (pathname: string) => boolean;
+  ownerOnly?: boolean;
+};
+
+const tabs: Tab[] = [
   {
     href: "/settings",
     label: "App",
@@ -22,6 +30,12 @@ const tabs: { href: string; label: string; match: (pathname: string) => boolean 
     match: (p) => p.startsWith("/settings/budgets"),
   },
   {
+    href: "/settings/data-quality",
+    label: "Data quality",
+    match: (p) => p.startsWith("/settings/data-quality"),
+    ownerOnly: true,
+  },
+  {
     href: "/settings/log",
     label: "Log",
     match: (p) => p.startsWith("/settings/log"),
@@ -30,7 +44,10 @@ const tabs: { href: string; label: string; match: (pathname: string) => boolean 
 
 export function SettingsShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { user } = useAuth();
+  const isOwner = Boolean(user?.is_owner);
   const hideTabs = pathname.startsWith("/settings/users");
+  const visibleTabs = tabs.filter((t) => !t.ownerOnly || isOwner);
 
   return (
     <AppLayout>
@@ -39,7 +56,7 @@ export function SettingsShell({ children }: { children: React.ReactNode }) {
           className="mb-6 flex flex-wrap gap-2 border-b border-border pb-3"
           aria-label="Settings sections"
         >
-          {tabs.map((t) => {
+          {visibleTabs.map((t) => {
             const active = t.match(pathname);
             return (
               <Link

@@ -688,32 +688,46 @@ export interface DiagnosticsClassCounts {
   expense: number;
   internal_transfer: number;
   uncategorized: number;
+  total: number;
 }
 
-/** A single suspicious row flagged by the classifier diagnostics. */
+/** A single suspicious row flagged by the classifier diagnostics.
+ *
+ * The shape mirrors the permissive Pydantic model on the backend: not every
+ * field is populated for every section (e.g. ``recent_expense_date`` only
+ * shows on possible-refund rows). FE renders only the fields it knows about
+ * for each section. */
 export interface DiagnosticsRow {
-  transaction_id: number;
-  account_id: number;
-  account_name: string | null;
-  date: string;
-  name: string;
+  id: number;
+  date: string | null;
   amount_cents: number;
-  transaction_class: TransactionClass;
-  category_id: number | null;
+  merchant_name: string | null;
+  name: string | null;
+  pfc_primary: string | null;
+  pfc_detailed: string | null;
   category_name: string | null;
-  /** Why the classifier flagged the row (free-form, human-readable). */
-  reason: string;
+  account_type: string | null;
+  transaction_class: TransactionClass | null;
+  merchant_entity_id: string | null;
+  /** ISO date of the most recent expense from the same merchant within the
+   *  60-day refund-detection window. Only set for possible-refund rows. */
+  recent_expense_date: string | null;
 }
 
 export interface Diagnostics {
   month: string;
-  class_counts: DiagnosticsClassCounts;
+  counts: DiagnosticsClassCounts;
   /** Income-flagged category paired with a positive amount (sign mismatch). */
-  positive_income_rows: DiagnosticsRow[];
-  /** `TRANSFER_IN` / `TRANSFER_OUT` without pair match and without a name hit. */
-  unmatched_transfers: DiagnosticsRow[];
+  suspicious_income_category_with_positive_amount: DiagnosticsRow[];
+  /** `TRANSFER_IN` / `TRANSFER_OUT` / `LOAN_PAYMENTS` without pair match
+   *  and without a name hit. */
+  transfer_pfc_not_classified_as_internal: DiagnosticsRow[];
   /** Uncategorized rows whose magnitude is large enough to warrant review. */
   large_uncategorized: DiagnosticsRow[];
+  /** Rule-5.5 income rows whose merchant matches a recent expense from the
+   *  same merchant_entity_id — likely refunds the classifier mis-tagged
+   *  as income. */
+  possible_refunds_misclassified_as_income: DiagnosticsRow[];
 }
 
 export interface FinancialHealthScore {
