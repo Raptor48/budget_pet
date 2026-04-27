@@ -104,6 +104,13 @@ export interface MerchantRule {
   display_label: string;
   category_id: number;
   category_name: string;
+  /**
+   * Optional substring filter (lower-cased on the server) that narrows the
+   * rule to transactions whose ``name`` or ``display_title`` contains the
+   * value. Null means "match every transaction with this merchant_key" —
+   * the legacy behavior. See ``docs/categorization-precedence.md`` §3.
+   */
+  description_contains?: string | null;
 }
 
 export interface MerchantRulePreviewResult {
@@ -115,12 +122,20 @@ export interface MerchantRulePreviewResult {
   sample_merchant_names: string[];
   /** Category-less match count (only present when preview was called without category_id). */
   match_count?: number | null;
+  /**
+   * Distinct ``name`` values for this merchant in the table. Used by the
+   * smart popover to decide whether to surface the "narrow with
+   * description" affordance — showing it for a merchant with only one
+   * distinct description would be noise.
+   */
+  distinct_description_count?: number | null;
   merchant_key?: string | null;
   display_label?: string | null;
 }
 
 export interface MerchantRuleApplyResult extends MerchantRulePreviewResult {
   updated_count: number;
+  description_contains?: string | null;
 }
 
 // ---------------------------------------------------------------------------
