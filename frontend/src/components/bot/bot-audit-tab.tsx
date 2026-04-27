@@ -40,14 +40,39 @@ export function BotAuditTab() {
     queryFn: () => botApi.listAudit(26),
   });
 
-  const update = useMutation({
-    mutationFn: ({ weekStart, patch }: { weekStart: string; patch: AuditPatch }) =>
-      botApi.updateAudit(weekStart, patch),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["bot", "audit-current"] });
-      qc.invalidateQueries({ queryKey: ["bot", "audit-history"] });
-    },
+  // Two mutations on purpose: sharing one made the loader logic depend on
+  // `mutation.variables.patch.completed`, which is brittle (variables hold
+  // the LAST args even after settle, so the wrong button could flash a
+  // spinner if the user fired actions back-to-back). Splitting the writes
+  // gives each button its own `isPending` flag and prevents the visual
+  // overlap the user reported on the "Mark completed" button.
+  const invalidateAudit = () => {
+    qc.invalidateQueries({ queryKey: ["bot", "audit-current"] });
+    qc.invalidateQueries({ queryKey: ["bot", "audit-history"] });
+  };
+
+  const saveDraft = useMutation({
+    mutationFn: ({
+      weekStart,
+      patch,
+    }: {
+      weekStart: string;
+      patch: AuditPatch;
+    }) => botApi.updateAudit(weekStart, patch),
+    onSuccess: invalidateAudit,
     onError: onMutationError("Couldn't save the audit session."),
+  });
+
+  const toggleCompleted = useMutation({
+    mutationFn: ({
+      weekStart,
+      patch,
+    }: {
+      weekStart: string;
+      patch: AuditPatch;
+    }) => botApi.updateAudit(weekStart, patch),
+    onSuccess: invalidateAudit,
+    onError: onMutationError("Couldn't update the audit session."),
   });
 
   const [snack, setSnack] = useState("");
@@ -85,8 +110,9 @@ export function BotAuditTab() {
       tea_choice: tea,
       notes,
     };
+    const mutation = alsoComplete !== undefined ? toggleCompleted : saveDraft;
     if (alsoComplete !== undefined) patch.completed = alsoComplete;
-    await update.mutateAsync({
+    await mutation.mutateAsync({
       weekStart: current.data.week_start,
       patch,
     });
@@ -185,9 +211,10 @@ export function BotAuditTab() {
               <Button
                 variant="outline"
                 onClick={() => submitDraft(!completed)}
-                disabled={update.isPending}
+                disabled={toggleCompleted.isPending || saveDraft.isPending}
+                className="min-w-[160px]"
               >
-                {update.isPending && update.variables?.patch.completed !== undefined ? (
+                {toggleCompleted.isPending ? (
                   <Loader2 className="mr-1 h-4 w-4 animate-spin" />
                 ) : completed ? (
                   <CircleDashed className="mr-1 h-4 w-4" />
@@ -198,9 +225,12 @@ export function BotAuditTab() {
               </Button>
               <Button
                 onClick={() => submitDraft()}
-                disabled={!dirty || update.isPending}
+                disabled={
+                  !dirty || saveDraft.isPending || toggleCompleted.isPending
+                }
+                className="min-w-[100px]"
               >
-                {update.isPending && update.variables?.patch.completed === undefined ? (
+                {saveDraft.isPending ? (
                   <Loader2 className="mr-1 h-4 w-4 animate-spin" />
                 ) : (
                   <Check className="mr-1 h-4 w-4" />

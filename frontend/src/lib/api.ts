@@ -1044,6 +1044,8 @@ export const botApi = {
     apiRequest('/api/bot/telegram/link', { method: 'POST' }),
   unlinkTelegram: (): Promise<void> =>
     apiRequest('/api/bot/telegram/link', { method: 'DELETE' }),
+  sendTestAlert: (): Promise<{ sent: boolean; deduped?: boolean; queued_id?: number }> =>
+    apiRequest('/api/bot/telegram/test', { method: 'POST' }),
 
   // Settings
   getSettings: (): Promise<CoupleSettings> => apiRequest('/api/bot/settings'),

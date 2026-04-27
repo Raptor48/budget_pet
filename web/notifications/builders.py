@@ -123,6 +123,18 @@ def _render_streak_milestone(payload: Dict[str, Any]) -> str:
     return _line("🔥", f"<b>{label}</b>: {count} in a row")
 
 
+def _render_test_alert(payload: Dict[str, Any]) -> str:
+    """End-to-end probe — verifies queue → dispatcher → Telegram works.
+    Triggered manually from /bot → Overview → Send test alert."""
+    requested_by = payload.get("requested_by") or "you"
+    return (
+        "🧪 <b>Test alert</b>\n"
+        f"If you can read this, the full pipeline is alive — queue, "
+        f"dispatcher, and the Telegram bot are talking. Requested by "
+        f"<i>{requested_by}</i>."
+    )
+
+
 _RENDERERS = {
     "budget_threshold": _render_budget_threshold,
     "recurring_tomorrow": _render_recurring_tomorrow,
@@ -133,6 +145,7 @@ _RENDERERS = {
     "mood_check": _render_mood_check,
     "leaderboard": _render_leaderboard,
     "streak_milestone": _render_streak_milestone,
+    "test_alert": _render_test_alert,
 }
 
 

@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -220,6 +221,11 @@ export function BotReceiptsTab() {
 
       <TransactionPicker
         receiptId={pickerForId}
+        referenceAmountCents={
+          pickerForId
+            ? list.data?.find((r) => r.id === pickerForId)?.total_cents ?? null
+            : null
+        }
         onClose={() => setPickerForId(null)}
         onPick={(txnId) => {
           if (pickerForId) {
@@ -435,14 +441,21 @@ function ReceiptDetail({
  */
 function TransactionPicker({
   receiptId,
+  referenceAmountCents,
   onClose,
   onPick,
 }: {
   receiptId: number | null;
+  /** Total of the receipt being attached, used by the ±$1 filter. */
+  referenceAmountCents: number | null;
   onClose: () => void;
   onPick: (transactionId: number) => void;
 }) {
   const [search, setSearch] = useState("");
+  // ±$1 default-ON when we know the receipt amount — that's exactly the
+  // shortcut the user asked for. Toggling it off falls back to the full
+  // search list.
+  const [matchAmount, setMatchAmount] = useState(true);
   const open = receiptId != null;
   const transactions = useQuery({
     queryKey: ["transactions", "picker", search],
@@ -450,14 +463,23 @@ function TransactionPicker({
       transactionsApi.list({
         search: search.trim() || undefined,
         exclude_internal_transfers: true,
-        limit: 50,
+        limit: 100,
       }),
     enabled: open,
     staleTime: 10_000,
   });
 
-  // Reset search when the dialog closes so reopening starts fresh.
-  const memoSearch = useMemo(() => search, [search]);
+  // ±$1 = 100 cents, applied client-side because there's no backend
+  // amount-range filter on /api/transactions today. With limit=100 most
+  // households' last few weeks are covered without paging.
+  const filtered = useMemo(() => {
+    const all = transactions.data ?? [];
+    if (!matchAmount || referenceAmountCents == null) return all;
+    return all.filter(
+      (t: Transaction) =>
+        Math.abs(t.amount_cents - referenceAmountCents) <= 100,
+    );
+  }, [transactions.data, matchAmount, referenceAmountCents]);
 
   return (
     <Dialog
@@ -465,6 +487,7 @@ function TransactionPicker({
       onOpenChange={(o) => {
         if (!o) {
           setSearch("");
+          setMatchAmount(true);
           onClose();
         }
       }}
@@ -481,12 +504,29 @@ function TransactionPicker({
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="Search by merchant or description"
-              value={memoSearch}
+              value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-8"
               autoFocus
             />
           </div>
+          {referenceAmountCents != null ? (
+            <label className="flex cursor-pointer items-center justify-between rounded-md border bg-muted/20 px-3 py-2 text-sm">
+              <span className="flex items-center gap-2">
+                <Switch
+                  checked={matchAmount}
+                  onCheckedChange={setMatchAmount}
+                  aria-label="Toggle amount match"
+                />
+                <span className="font-medium">
+                  Match amount ±$1
+                </span>
+              </span>
+              <span className="text-xs text-muted-foreground">
+                Receipt total: {formatCents(referenceAmountCents)}
+              </span>
+            </label>
+          ) : null}
           {transactions.isLoading ? (
             <ul className="divide-y rounded-md border">
               {Array.from({ length: 6 }).map((_, i) => (
@@ -499,13 +539,15 @@ function TransactionPicker({
                 </li>
               ))}
             </ul>
-          ) : !transactions.data?.length ? (
+          ) : !filtered.length ? (
             <p className="rounded-md border border-dashed py-6 text-center text-sm text-muted-foreground">
-              No transactions match. Try a different search.
+              {matchAmount && referenceAmountCents != null
+                ? `No transaction within ±$1 of ${formatCents(referenceAmountCents)}. Disable the match toggle to see everything.`
+                : "No transactions match. Try a different search."}
             </p>
           ) : (
             <ul className="max-h-[55vh] divide-y overflow-y-auto rounded-md border">
-              {transactions.data.map((t: Transaction) => (
+              {filtered.map((t: Transaction) => (
                 <li
                   key={t.id}
                   role="button"

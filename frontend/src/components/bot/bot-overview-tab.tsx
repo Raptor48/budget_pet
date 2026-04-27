@@ -17,6 +17,7 @@ import {
   Link as LinkIcon,
   Loader2,
   MoonStar,
+  Sparkles,
   Sun,
   Trophy,
   Unlink,
@@ -59,6 +60,17 @@ export function BotOverviewTab() {
     },
     onError: onMutationError("Couldn't unlink Telegram."),
   });
+  const sendTest = useMutation({
+    mutationFn: () => botApi.sendTestAlert(),
+    onSuccess: (res) => {
+      if (res.sent) {
+        notify.success("Test alert sent — check Telegram.");
+      } else if (res.deduped) {
+        notify.info("Already sent one in the last second — check Telegram.");
+      }
+    },
+    onError: onMutationError("Couldn't send the test alert."),
+  });
 
   return (
     <div className="space-y-8">
@@ -87,20 +99,35 @@ export function BotOverviewTab() {
                 ? ` (@${status.data.telegram_username})`
                 : null}
             </span>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => unlink.mutate()}
-              disabled={unlink.isPending}
-              className="ml-auto"
-            >
-              {unlink.isPending ? (
-                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Unlink className="mr-1 h-3.5 w-3.5" />
-              )}
-              Unlink
-            </Button>
+            <div className="ml-auto flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => sendTest.mutate()}
+                disabled={sendTest.isPending}
+                title="Push a one-shot test message through the full pipeline"
+              >
+                {sendTest.isPending ? (
+                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="mr-1 h-3.5 w-3.5" />
+                )}
+                Send test
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => unlink.mutate()}
+                disabled={unlink.isPending}
+              >
+                {unlink.isPending ? (
+                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Unlink className="mr-1 h-3.5 w-3.5" />
+                )}
+                Unlink
+              </Button>
+            </div>
           </div>
         ) : (
           <div className="space-y-3">

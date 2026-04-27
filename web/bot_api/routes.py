@@ -76,6 +76,54 @@ async def telegram_unlink(request: Request):
     await get_bot_repo().detach_telegram_chat(_user_id(request))
 
 
+@router.post("/telegram/test")
+async def telegram_send_test(request: Request):
+    """Probe the full notification pipeline.
+
+    Enqueues a P0 ``test_alert`` row for the caller's user_id, then forces
+    the dispatcher to drain immediately so the round-trip latency is just
+    "Telegram API + your phone push" rather than the regular 60s tick.
+
+    Response surfaces ``{sent: true}`` if the dispatcher claimed the row;
+    failures live in ``notifications_queue.failed_at`` and the FastAPI
+    logs (search for ``Failed to send P0 notification``).
+    """
+    user_id = _user_id(request)
+    status = await get_bot_repo().get_telegram_link_status(user_id)
+    if not status.get("linked"):
+        raise HTTPException(
+            status_code=412,
+            detail=(
+                "This account isn't linked to Telegram yet. Generate a "
+                "code on the Bot → Overview tab and run /link in the bot."
+            ),
+        )
+    from web.notifications.dispatcher import trigger_drain_now
+    from web.notifications.queue import (
+        dedup_key_for,
+        enqueue_notification,
+    )
+
+    user = getattr(request.state, "user", None) or {}
+    new_id = await enqueue_notification(
+        user_id=user_id,
+        type="test_alert",
+        priority="P0",
+        payload={"requested_by": user.get("username") or "user"},
+        # Per-second dedup so the user can mash the button without spam,
+        # but a single click always goes through.
+        dedup_key=dedup_key_for(
+            "test_alert",
+            user_id,
+            datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S"),
+        ),
+    )
+    if new_id is None:
+        return {"sent": False, "deduped": True}
+    await trigger_drain_now()
+    return {"sent": True, "queued_id": new_id}
+
+
 # ---------------------------------------------------------------------------
 # Couple / bot settings (anniversary, mood threshold, brief time, quiet hours)
 # ---------------------------------------------------------------------------
