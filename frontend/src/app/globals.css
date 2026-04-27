@@ -262,6 +262,27 @@
   100% { opacity: 0; transform: translateY(-4px); }
 }
 
+/* Per-card staggered fade-in for any tab that opts in via the
+   ``.reports-tab-stagger`` class. Each direct child slides up + fades
+   in, with an 80 ms cascade so the page assembles top-down. The Net
+   Worth tab uses this; Cash Flow / Income / Expenses / By Category /
+   Budget History tabs all opt in too. Trends keeps its bespoke
+   loading-overlay animation and is intentionally NOT in this list. */
+.reports-tab-stagger > * {
+  animation: reports-tab-card-in 500ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.reports-tab-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.reports-tab-stagger > *:nth-child(2) { animation-delay: 80ms; }
+.reports-tab-stagger > *:nth-child(3) { animation-delay: 160ms; }
+.reports-tab-stagger > *:nth-child(4) { animation-delay: 240ms; }
+.reports-tab-stagger > *:nth-child(5) { animation-delay: 320ms; }
+.reports-tab-stagger > *:nth-child(n+6) { animation-delay: 400ms; }
+
+@keyframes reports-tab-card-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
 /* Fallback for browsers without View Transitions (Firefox, older Safari):
    the panel still gets a subtle fade-in via Radix's data-state attribute,
    which Radix flips synchronously on tab change. Without this, those

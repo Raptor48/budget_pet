@@ -316,7 +316,7 @@ export default function Reports() {
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="cashflow" className="reports-tab-content space-y-6">
+          <TabsContent value="cashflow" className="reports-tab-content reports-tab-stagger space-y-6">
             <Card className="border-border/80 shadow-sm">
               <CardHeader className="flex flex-row flex-wrap items-end justify-between gap-4">
                 <div>
@@ -522,15 +522,21 @@ export default function Reports() {
             <TrendsTab />
           </TabsContent>
 
-          <TabsContent value="income" className="reports-tab-content space-y-6">
+          {/* Income / Expenses return a single <Card> directly, so the
+              stagger on TabsContent animates that card cleanly. Net
+              Worth and Budget History wrap in an inner <div>; for those
+              the ``reports-tab-stagger`` class lives on the wrapping
+              div inside the component, since the CSS selector targets
+              direct children only. */}
+          <TabsContent value="income" className="reports-tab-content reports-tab-stagger space-y-6">
             <IncomeTab month={month} onMonthChange={setMonth} />
           </TabsContent>
 
-          <TabsContent value="expenses" className="reports-tab-content space-y-6">
+          <TabsContent value="expenses" className="reports-tab-content reports-tab-stagger space-y-6">
             <ExpensesTab month={month} onMonthChange={setMonth} />
           </TabsContent>
 
-          <TabsContent value="category" className="reports-tab-content space-y-6">
+          <TabsContent value="category" className="reports-tab-content reports-tab-stagger space-y-6">
             <Card className="border-border/80 shadow-sm">
               <CardHeader className="flex flex-row flex-wrap items-end justify-between gap-4">
                 <div className="min-w-0 space-y-1">
