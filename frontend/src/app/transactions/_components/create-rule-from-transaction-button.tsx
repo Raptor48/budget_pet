@@ -143,18 +143,32 @@ export function CreateRuleFromTransactionButton({
   const [genericPreview, setGenericPreview] = useState<MerchantRulePreviewResult | null>(null);
   const [narrowPreview, setNarrowPreview] = useState<MerchantRulePreviewResult | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
+  // Two distinct loading flags so the UI can surface progress per-row
+  // instead of one ambiguous "loading" state. ``narrowLoading`` flips
+  // both during the initial parallel preview AND during every debounced
+  // re-run when the user types — giving immediate visual feedback that
+  // a recompute is in flight.
+  const [genericLoading, setGenericLoading] = useState(false);
+  const [narrowLoading, setNarrowLoading] = useState(false);
   // Debounce ref for narrow-preview re-runs while user types.
   const narrowDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Monotonically incremented per dialog-open. Each in-flight request
+  // captures the current value; when its response lands the handler
+  // checks the token still matches before applying state, dropping
+  // stale results. Closes the race that previously let an old
+  // dialog-open's preview overwrite the current one's data (the
+  // "first time the count showed 0" symptom).
+  const requestTokenRef = useRef(0);
 
   const identity = merchantIdentity(transaction);
   const canCreate = Boolean(identity.entityId || identity.label) && !!category;
 
-  /** Fetch both previews in parallel; auto-pick scope based on diversity. */
+  /** Fetch both previews; auto-pick scope based on diversity. */
   const loadPreview = useCallback(async () => {
     if (!category) return;
-    setPreviewLoading(true);
+    const myToken = ++requestTokenRef.current;
     setPreviewError(null);
+    setGenericLoading(true);
     try {
       const generic = await merchantRulesApi.preview({
         merchant_entity_id: identity.entityId,
@@ -162,7 +176,12 @@ export function CreateRuleFromTransactionButton({
         merchant_label: identity.label,
         category_id: category.id,
       });
+      // Stale-response guard: dialog was closed / reopened before this
+      // resolved; whatever we'd write is meaningless and would only
+      // pollute the next open's state.
+      if (myToken !== requestTokenRef.current) return;
       setGenericPreview(generic);
+      setGenericLoading(false);
 
       // Decide whether to even compute the narrow preview. We surface
       // the narrow option only when the merchant has multiple distinct
@@ -171,6 +190,8 @@ export function CreateRuleFromTransactionButton({
       const suggestion = suggestNarrowSubstring(transaction);
       if (distinct > 1 && suggestion) {
         setNarrowText(suggestion);
+        setScope("narrow");
+        setNarrowLoading(true);
         const narrow = await merchantRulesApi.preview({
           merchant_entity_id: identity.entityId,
           merchant_name: identity.merchantName,
@@ -178,16 +199,20 @@ export function CreateRuleFromTransactionButton({
           category_id: category.id,
           description_contains: suggestion,
         });
+        if (myToken !== requestTokenRef.current) return;
         setNarrowPreview(narrow);
-        setScope("narrow");
+        setNarrowLoading(false);
       } else {
         setNarrowPreview(null);
         setNarrowText("");
         setScope("all");
       }
     } catch (e) {
+      if (myToken !== requestTokenRef.current) return;
       setGenericPreview(null);
       setNarrowPreview(null);
+      setGenericLoading(false);
+      setNarrowLoading(false);
       const msg =
         e instanceof ApiError
           ? e.detail || e.message
@@ -195,8 +220,6 @@ export function CreateRuleFromTransactionButton({
             ? e.message
             : "Preview failed.";
       setPreviewError(msg);
-    } finally {
-      setPreviewLoading(false);
     }
     // ``identity`` is derived from ``transaction``; safe to depend on the parts.
   }, [
@@ -208,10 +231,22 @@ export function CreateRuleFromTransactionButton({
   ]);
 
   useEffect(() => {
-    if (open) void loadPreview();
-    // Reset state when dialog closes so re-opening for a different row
-    // re-evaluates the scope from scratch.
+    if (open) {
+      // Hard reset of all preview state so a previous open's leftovers
+      // never bleed into this one. Without this, a user who closed the
+      // dialog mid-load and reopened would briefly see stale numbers
+      // (or "0 matches" when the previous request resolved post-close).
+      setGenericPreview(null);
+      setNarrowPreview(null);
+      setNarrowText("");
+      setScope("all");
+      setPreviewError(null);
+      void loadPreview();
+    }
     return () => {
+      // Bumping the token here invalidates any in-flight requests from
+      // this open; they'll see the mismatch and drop their writes.
+      requestTokenRef.current += 1;
       if (narrowDebounceRef.current) clearTimeout(narrowDebounceRef.current);
     };
   }, [open, loadPreview]);
@@ -224,9 +259,15 @@ export function CreateRuleFromTransactionButton({
     const text = narrowText.trim();
     if (!text) {
       setNarrowPreview(null);
+      setNarrowLoading(false);
       return;
     }
     if (narrowDebounceRef.current) clearTimeout(narrowDebounceRef.current);
+    // Optimistic loading flag — starts the spinner the moment the user
+    // types, even before the 250ms debounce fires. Without this the UI
+    // sat silent for the entire debounce window.
+    setNarrowLoading(true);
+    const myToken = requestTokenRef.current;
     narrowDebounceRef.current = setTimeout(async () => {
       try {
         const data = await merchantRulesApi.preview({
@@ -236,10 +277,14 @@ export function CreateRuleFromTransactionButton({
           category_id: category.id,
           description_contains: text,
         });
+        if (myToken !== requestTokenRef.current) return;
         setNarrowPreview(data);
+        setNarrowLoading(false);
       } catch {
         // Errors here are non-fatal — the user can still save; the
         // displayed "X matches" just won't update for a bad query.
+        if (myToken !== requestTokenRef.current) return;
+        setNarrowLoading(false);
       }
     }, 250);
     return () => {
@@ -360,7 +405,7 @@ export function CreateRuleFromTransactionButton({
             </DialogDescription>
           </DialogHeader>
 
-          {previewLoading && !genericPreview ? (
+          {genericLoading && !genericPreview ? (
             <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
               <Loader2 className="size-3.5 animate-spin" />
               Checking existing transactions…
@@ -391,19 +436,10 @@ export function CreateRuleFromTransactionButton({
                     </span>
                   }
                   subtitle={
-                    <span>
-                      {narrowPreview?.eligible_count != null ? (
-                        <>
-                          <span className="font-medium">
-                            {narrowPreview.eligible_count}
-                          </span>{" "}
-                          existing transaction
-                          {narrowPreview.eligible_count === 1 ? "" : "s"} match
-                        </>
-                      ) : (
-                        "Computing…"
-                      )}
-                    </span>
+                    <CountSubtitle
+                      loading={narrowLoading}
+                      count={narrowPreview?.eligible_count}
+                    />
                   }
                   recommended
                 >
@@ -428,17 +464,10 @@ export function CreateRuleFromTransactionButton({
                   </span>
                 }
                 subtitle={
-                  genericPreview?.eligible_count != null ? (
-                    <span>
-                      <span className="font-medium">
-                        {genericPreview.eligible_count}
-                      </span>{" "}
-                      existing transaction
-                      {genericPreview.eligible_count === 1 ? "" : "s"} match
-                    </span>
-                  ) : (
-                    <span>Computing…</span>
-                  )
+                  <CountSubtitle
+                    loading={genericLoading}
+                    count={genericPreview?.eligible_count}
+                  />
                 }
               />
             </div>
@@ -455,7 +484,8 @@ export function CreateRuleFromTransactionButton({
             <Button
               disabled={
                 saveMutation.isPending ||
-                previewLoading ||
+                genericLoading ||
+                narrowLoading ||
                 !!previewError ||
                 (scope === "narrow" && !narrowText.trim())
               }
@@ -532,5 +562,49 @@ function ScopeOption({
         {children}
       </div>
     </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Subtitle that distinguishes "still computing" from "no results"
+// ---------------------------------------------------------------------------
+
+/**
+ * Renders the per-option match-count line. The earlier version showed a
+ * silent "Computing…" string with no visible activity, which made users
+ * think the count was final ("0 found") rather than in-flight. This
+ * variant pairs the label with a spinner and a subtle background pulse
+ * so the loading state is unmistakable.
+ *
+ * Loading wins over count: if a re-compute is in flight (user typed a
+ * new substring), we keep showing the spinner instead of the stale
+ * count — otherwise the UI would briefly display the previous result
+ * as if it matched the new query.
+ */
+function CountSubtitle({
+  loading,
+  count,
+}: {
+  loading: boolean;
+  count: number | null | undefined;
+}) {
+  if (loading) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+        <Loader2 className="size-3 animate-spin" aria-hidden />
+        <span className="motion-safe:animate-pulse">Computing…</span>
+      </span>
+    );
+  }
+  if (count == null) {
+    // Hasn't been computed yet (e.g. narrow option visible but the
+    // generic preview still in flight). Fall back to a neutral hint.
+    return <span className="text-muted-foreground">—</span>;
+  }
+  return (
+    <span>
+      <span className="font-medium tabular-nums">{count}</span>{" "}
+      existing transaction{count === 1 ? "" : "s"} match
+    </span>
   );
 }
