@@ -289,6 +289,15 @@ function IncomeSourceRow({
         month,
         user_id: userId ?? undefined,
         category_id: source.category_id ?? undefined,
+        // Mirror what ``get_income_breakdown`` actually counts: only
+        // rows with ``transaction_class = 'income'``. Without this the
+        // drilldown showed every row in the category — including
+        // internal_transfer ones the bucket count explicitly excluded
+        // — which made the listed entries disagree with the headline
+        // (×N $X.XX) and led users to believe internal transfers were
+        // being miscounted as income. Math was always right; the
+        // drilldown was just lying.
+        transaction_class: "income",
         limit: 200,
       }),
     enabled: drillable && expanded,
