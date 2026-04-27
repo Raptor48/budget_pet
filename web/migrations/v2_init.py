@@ -800,6 +800,87 @@ async def _migrate_merchant_rules_global_family(conn) -> None:
     )
 
 
+async def _migrate_merchant_rules_description_filter(conn) -> None:
+    """Add ``description_contains`` to ``merchant_category_rules`` so a
+    single rule can be narrowed to transactions whose description / name
+    contains a substring (case-insensitive).
+
+    Use case (see ``docs/categorization-precedence.md`` §3): a household
+    pays rent via Zelle to one specific person while also using Zelle for
+    other things. Without a description filter the only options were
+    "categorize every Zelle as Rent" (wrong) or "manually re-tag every new
+    Zelle to that person" (tedious). With ``description_contains = 'alla'``
+    the rule fires only on rows whose ``name`` or ``display_title``
+    matches.
+
+    Schema notes:
+
+    * Nullable. ``NULL`` preserves the legacy "match every transaction
+      with this merchant_key" behavior — every existing rule keeps
+      working unchanged.
+    * Lowercased on write so the matcher can do a single ``LOWER(...) LIKE
+      '%' || description_contains || '%'`` without per-row case folding.
+    * The unique constraint moves from ``(merchant_key)`` to
+      ``(merchant_key, COALESCE(description_contains, ''))`` so a user
+      can have both a generic ``name:zelle → Transfer Out`` rule AND a
+      narrow ``name:zelle + 'alla' → Rent`` rule for the same merchant.
+      The ``COALESCE(..., '')`` makes ``NULL`` a normal value for index
+      purposes (Postgres treats two NULLs as distinct otherwise).
+
+    All changes are additive and idempotent.
+    """
+    reg = await conn.fetchval("SELECT to_regclass('public.merchant_category_rules')")
+    if not reg:
+        return
+
+    # Add the column. Nullable so legacy rules keep working unchanged.
+    await _ddl(
+        conn,
+        "ALTER TABLE merchant_category_rules ADD COLUMN IF NOT EXISTS description_contains TEXT",
+    )
+
+    # Drop the old single-column UNIQUE in favour of a composite that
+    # treats NULL and '' as the same slot. Done in two steps so we never
+    # hold both indexes on a busy production table at once.
+    has_old_idx = await conn.fetchval(
+        """
+        SELECT 1 FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'merchant_category_rules'
+          AND indexname = 'merchant_category_rules_merchant_key_uidx'
+        """
+    )
+    has_old_constraint = await conn.fetchval(
+        """
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_schema = 'public'
+          AND table_name = 'merchant_category_rules'
+          AND constraint_name = 'merchant_category_rules_merchant_key_key'
+        """
+    )
+
+    await _ddl(
+        conn,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS merchant_category_rules_key_filter_uidx
+        ON merchant_category_rules (merchant_key, COALESCE(description_contains, ''))
+        """,
+    )
+
+    if has_old_idx:
+        await _ddl(
+            conn,
+            "DROP INDEX IF EXISTS merchant_category_rules_merchant_key_uidx",
+        )
+    if has_old_constraint:
+        # The original CREATE TABLE used inline UNIQUE(merchant_key) which
+        # Postgres surfaces as ``merchant_category_rules_merchant_key_key``.
+        await _ddl(
+            conn,
+            "ALTER TABLE merchant_category_rules DROP CONSTRAINT IF EXISTS merchant_category_rules_merchant_key_key",
+        )
+
+
 async def _migrate_transactions_display_title_backfill(conn) -> None:
     """
     Populate `transactions.display_title` for rows where it is NULL by running
@@ -1080,6 +1161,7 @@ async def run_v2_migrations(pool) -> None:
         await _migrate_v21_addons(conn)
         await _migrate_accounts_manual_and_missing(conn)
         await _migrate_merchant_rules_global_family(conn)
+        await _migrate_merchant_rules_description_filter(conn)
         await _migrate_categories_parent_id(conn)
         await _migrate_categories_is_income(conn)
         await _migrate_recurring_price_change_signed(conn)

@@ -625,10 +625,19 @@ class PlaidRepository:
 
                 data["display_title"] = normalize_transaction_title(data)
 
+                # Pass both ``name`` (raw statement line) and
+                # ``display_title`` (cleaned UI form) joined as a single
+                # haystack so a description-filtered rule matches whichever
+                # form the user typed in. ``lookup_category`` lower-cases
+                # internally; we just concatenate.
+                _haystack = " ".join(
+                    s for s in (data.get("name"), data.get("display_title")) if s
+                )
                 rule_cat = await MerchantRulesRepository().lookup_category(
                     data.get("merchant_entity_id"),
                     data.get("merchant_name"),
-                    data.get("display_title"),
+                    fallback_display=data.get("display_title"),
+                    description=_haystack,
                 )
                 if rule_cat is not None:
                     category_id = rule_cat

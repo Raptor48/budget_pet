@@ -26,12 +26,19 @@ class MerchantRuleCreate(BaseModel):
     merchant (ACH / checks / bill pays). It should be the caller's view of the
     merchant — normally the transaction's ``display_title``. Only consulted
     when both ``merchant_entity_id`` and ``merchant_name`` are blank.
+
+    ``description_contains`` (optional) narrows the rule to transactions
+    whose ``name`` (raw statement line) or ``display_title`` contains the
+    given substring (case-insensitive). When set, this rule wins over a
+    generic rule on the same ``merchant_key``. See
+    ``docs/categorization-precedence.md`` §3.
     """
 
     category_id: int = Field(..., ge=1)
     merchant_entity_id: Optional[str] = Field(None, max_length=200)
     merchant_name: Optional[str] = Field(None, max_length=500)
     merchant_label: Optional[str] = Field(None, max_length=500)
+    description_contains: Optional[str] = Field(None, max_length=200)
 
 
 class MerchantRuleOut(BaseModel):
@@ -40,6 +47,7 @@ class MerchantRuleOut(BaseModel):
     display_label: str
     category_id: int
     category_name: str
+    description_contains: Optional[str] = None
 
 
 class MerchantRulePreviewBody(BaseModel):
@@ -51,7 +59,9 @@ class MerchantRulePreviewBody(BaseModel):
       3. ``merchant_*`` without ``category_id`` — lightweight match-count
          preview used while the user is still typing.
 
-    The ``merchant_label`` fallback mirrors :class:`MerchantRuleCreate`.
+    Any of the three shapes may include ``description_contains`` to narrow
+    the match further. Pass ``None`` (default) to preview the existing
+    "match every transaction with this merchant_key" behavior.
     """
 
     category_id: Optional[int] = Field(None, ge=1)
@@ -59,6 +69,7 @@ class MerchantRulePreviewBody(BaseModel):
     merchant_entity_id: Optional[str] = Field(None, max_length=200)
     merchant_name: Optional[str] = Field(None, max_length=500)
     merchant_label: Optional[str] = Field(None, max_length=500)
+    description_contains: Optional[str] = Field(None, max_length=200)
 
     @model_validator(mode="after")
     def rule_or_merchant(self) -> "MerchantRulePreviewBody":
@@ -76,12 +87,17 @@ class MerchantRulePreviewOut(BaseModel):
     skipped_has_entity_id_count: Optional[int] = None
     sample_merchant_names: List[str] = []
     match_count: Optional[int] = None
+    # Total number of distinct ``name`` values for this merchant in the
+    # table (ignores ``description_contains``). UI uses this to decide
+    # whether to surface the "narrow with description" affordance.
+    distinct_description_count: Optional[int] = None
     merchant_key: Optional[str] = None
     display_label: Optional[str] = None
 
 
 class MerchantRuleApplyOut(MerchantRulePreviewOut):
     updated_count: int = 0
+    description_contains: Optional[str] = None
 
 
 @router.get("", response_model=List[MerchantRuleOut])
@@ -109,6 +125,7 @@ async def create_rule(request: Request, body: MerchantRuleCreate):
             body.merchant_name,
             body.category_id,
             body.merchant_label,
+            description_contains=body.description_contains,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -125,7 +142,11 @@ async def preview_merchant_rule(request: Request, body: MerchantRulePreviewBody)
             rule = await _repo().get_rule(int(body.rule_id))
             if not rule:
                 raise HTTPException(status_code=404, detail="Rule not found")
-            data = await preview_for_rule(rule["merchant_key"], int(rule["category_id"]))
+            data = await preview_for_rule(
+                rule["merchant_key"],
+                int(rule["category_id"]),
+                description_contains=rule.get("description_contains"),
+            )
             data["merchant_key"] = rule["merchant_key"]
             data["display_label"] = display_merchant_label(rule["merchant_key"])
         elif body.category_id is not None:
@@ -133,6 +154,7 @@ async def preview_merchant_rule(request: Request, body: MerchantRulePreviewBody)
                 body.merchant_entity_id,
                 body.merchant_name or body.merchant_label,
                 int(body.category_id),
+                description_contains=body.description_contains,
             )
             mk = merchant_key(
                 body.merchant_entity_id, body.merchant_name, body.merchant_label
@@ -145,6 +167,7 @@ async def preview_merchant_rule(request: Request, body: MerchantRulePreviewBody)
             data = await preview_match_count(
                 body.merchant_entity_id,
                 body.merchant_name or body.merchant_label,
+                description_contains=body.description_contains,
             )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
