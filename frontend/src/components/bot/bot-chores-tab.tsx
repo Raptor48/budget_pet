@@ -25,6 +25,13 @@ import { formatDate, todayMonday } from "./bot-helpers";
 
 type Rotation = ChoreRow["rotation"];
 
+interface EditDraft {
+  name: string;
+  icon: string;
+  rotation: Rotation;
+  sort_order: number;
+}
+
 export function BotChoresTab() {
   const qc = useQueryClient();
   const chores = useQuery({
@@ -85,6 +92,43 @@ export function BotChoresTab() {
     rotation: Rotation;
   }>({ name: "", icon: "", rotation: "weekly" });
 
+  // Per-row inline edit state — only one chore can be in edit mode at a time
+  // so the page stays focused and the user can't lose unsaved typing in
+  // siblings.
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState<EditDraft | null>(null);
+
+  const startEdit = (c: ChoreRow) => {
+    setEditingId(c.id);
+    setEditDraft({
+      name: c.name,
+      icon: c.icon ?? "",
+      rotation: c.rotation,
+      sort_order: c.sort_order,
+    });
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditDraft(null);
+  };
+
+  const submitEdit = async () => {
+    if (editingId == null || !editDraft) return;
+    const trimmedName = editDraft.name.trim();
+    if (!trimmedName) return;
+    await updateChore.mutateAsync({
+      id: editingId,
+      patch: {
+        name: trimmedName,
+        icon: editDraft.icon.trim() || null,
+        rotation: editDraft.rotation,
+        sort_order: editDraft.sort_order,
+      },
+    });
+    cancelEdit();
+  };
+
   const submitNew = (e: React.FormEvent) => {
     e.preventDefault();
     if (!draft.name.trim()) return;
@@ -144,58 +188,149 @@ export function BotChoresTab() {
       <section>
         <h2 className="mb-2 text-base font-semibold">Manage chores</h2>
         <ul className="mb-4 divide-y rounded-md border">
-          {(chores.data ?? []).map((c) => (
-            <li
-              key={c.id}
-              className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm"
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-base">{c.icon ?? "🧹"}</span>
-                <span className="font-medium">{c.name}</span>
-                <Badge variant="outline">{c.rotation}</Badge>
-                {!c.is_active ? <Badge variant="secondary">Inactive</Badge> : null}
-              </div>
-              <div className="flex items-center gap-2">
-                <Select
-                  value={c.rotation}
-                  onValueChange={(v) =>
-                    updateChore.mutate({
-                      id: c.id,
-                      patch: { rotation: v as Rotation },
-                    })
-                  }
+          {(chores.data ?? []).map((c) => {
+            const isEditing = editingId === c.id && editDraft !== null;
+            if (isEditing) {
+              return (
+                <li
+                  key={c.id}
+                  className="grid gap-3 px-4 py-3 text-sm sm:grid-cols-[1fr,80px,140px,90px,auto]"
                 >
-                  <SelectTrigger className="h-8 w-[110px] text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="weekly">Weekly</SelectItem>
-                    <SelectItem value="biweekly">Biweekly</SelectItem>
-                    <SelectItem value="fixed">Fixed</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() =>
-                    updateChore.mutate({
-                      id: c.id,
-                      patch: { is_active: !c.is_active },
-                    })
-                  }
-                >
-                  {c.is_active ? "Disable" : "Enable"}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => deleteChore.mutate(c.id)}
-                >
-                  Delete
-                </Button>
-              </div>
-            </li>
-          ))}
+                  <div className="grid gap-1">
+                    <Label htmlFor={`edit-name-${c.id}`} className="text-xs">
+                      Name
+                    </Label>
+                    <Input
+                      id={`edit-name-${c.id}`}
+                      value={editDraft.name}
+                      onChange={(e) =>
+                        setEditDraft((d) =>
+                          d ? { ...d, name: e.target.value } : d,
+                        )
+                      }
+                      autoFocus
+                    />
+                  </div>
+                  <div className="grid gap-1">
+                    <Label htmlFor={`edit-icon-${c.id}`} className="text-xs">
+                      Emoji
+                    </Label>
+                    <Input
+                      id={`edit-icon-${c.id}`}
+                      maxLength={4}
+                      value={editDraft.icon}
+                      onChange={(e) =>
+                        setEditDraft((d) =>
+                          d ? { ...d, icon: e.target.value } : d,
+                        )
+                      }
+                    />
+                  </div>
+                  <div className="grid gap-1">
+                    <Label htmlFor={`edit-rot-${c.id}`} className="text-xs">
+                      Rotation
+                    </Label>
+                    <Select
+                      value={editDraft.rotation}
+                      onValueChange={(v) =>
+                        setEditDraft((d) =>
+                          d ? { ...d, rotation: v as Rotation } : d,
+                        )
+                      }
+                    >
+                      <SelectTrigger id={`edit-rot-${c.id}`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="weekly">Weekly</SelectItem>
+                        <SelectItem value="biweekly">Biweekly</SelectItem>
+                        <SelectItem value="fixed">Fixed</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-1">
+                    <Label htmlFor={`edit-sort-${c.id}`} className="text-xs">
+                      Order
+                    </Label>
+                    <Input
+                      id={`edit-sort-${c.id}`}
+                      type="number"
+                      value={editDraft.sort_order}
+                      onChange={(e) =>
+                        setEditDraft((d) =>
+                          d
+                            ? {
+                                ...d,
+                                sort_order:
+                                  Number.isFinite(Number(e.target.value))
+                                    ? Number(e.target.value)
+                                    : 0,
+                              }
+                            : d,
+                        )
+                      }
+                    />
+                  </div>
+                  <div className="flex items-end gap-1">
+                    <Button
+                      size="sm"
+                      onClick={submitEdit}
+                      disabled={updateChore.isPending || !editDraft.name.trim()}
+                    >
+                      Save
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={cancelEdit}>
+                      Cancel
+                    </Button>
+                  </div>
+                </li>
+              );
+            }
+            return (
+              <li
+                key={c.id}
+                className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-base">{c.icon ?? "🧹"}</span>
+                  <span className="font-medium">{c.name}</span>
+                  <Badge variant="outline">{c.rotation}</Badge>
+                  {!c.is_active ? (
+                    <Badge variant="secondary">Inactive</Badge>
+                  ) : null}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => startEdit(c)}
+                    disabled={editingId != null}
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      updateChore.mutate({
+                        id: c.id,
+                        patch: { is_active: !c.is_active },
+                      })
+                    }
+                  >
+                    {c.is_active ? "Disable" : "Enable"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => deleteChore.mutate(c.id)}
+                  >
+                    Delete
+                  </Button>
+                </div>
+              </li>
+            );
+          })}
           {!chores.data?.length ? (
             <li className="px-4 py-3 text-sm text-muted-foreground">
               No chores yet — defaults seed on first run.
