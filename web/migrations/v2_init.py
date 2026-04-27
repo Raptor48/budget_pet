@@ -1086,35 +1086,76 @@ async def _migrate_transactions_transaction_class(conn) -> None:
 
 
 async def _migrate_fix_internal_transfer_class_drift(conn) -> None:
-    """One-shot fix for rows where ``is_internal_transfer`` (legacy boolean)
-    and ``transaction_class`` (modern 4-class column) disagree.
+    """One-shot fix for rows whose ``transaction_class`` is stale relative
+    to the current rules / counterparty-name list.
 
-    Background: ``import_transactions`` writes the legacy boolean inline
-    (counterparty match) but never sets ``transaction_class`` on INSERT —
-    that's left to the post-import rescan. Until 2026-04-27 the rescan
-    used a 7-day horizon, so any rows older than that imported during a
-    fresh-account sync stayed at ``transaction_class = 'uncategorized'``
-    while the mirror flag was already TRUE.
+    Two failure modes the migration repairs:
 
-    The fix-forward in ``web/plaid/repo.py`` makes future imports run a
-    full rescan; this migration cleans up the historical drift in DBs
-    that already accumulated mismatched rows from the old code path.
-    Manual-class-override rows are always skipped by
-    ``classify_row`` rule 1, so user decisions stay sacred.
+    1. **Legacy/modern column drift.** ``import_transactions`` writes the
+       legacy ``is_internal_transfer`` boolean inline (counterparty match)
+       but never sets ``transaction_class`` on INSERT. Until 2026-04-27
+       the post-import rescan used a 7-day horizon, so rows older than
+       that stayed at ``transaction_class = 'uncategorized'`` while the
+       mirror flag was already TRUE. Symptom users saw: "INTERNAL" pill
+       in the list, "Auto (uncategorized)" in the modal.
 
-    Idempotent: only fires when at least one drifted row exists. On a
-    fresh install or a DB that's already consistent, this is a single
-    ``EXISTS`` probe and a fast return. On a DB with drift, it triggers
-    one full ``rescan_all`` — same path the manual "Re-scan all history"
-    button calls.
+    2. **Stale rule-5.5 income classification.** When ``classify_row``
+       rule 4 (counterparty name match) didn't fire (e.g. because the
+       names list was empty at the time of the rescan, or the row's
+       counterparties metadata was missing), rule 5.5 took over for
+       ``TRANSFER_IN`` rows on a depository account and tagged them
+       ``income``. The legacy boolean and the modern class agreed
+       (``FALSE`` ↔ "not internal"), so the column-drift probe alone
+       wouldn't catch them — but the row is still wrong: now that the
+       names list contains the family member, the row should be
+       ``internal_transfer``. These rows leak into Income reports and
+       inflate the family-income totals.
+
+    The first failure mode is detectable by a SQL probe (drift between
+    columns). The second isn't — the classifier needs to actually run
+    against the current names list to know if a re-classification is
+    warranted. So this migration uses **two triggers**:
+
+      a) A one-shot sentinel ``app_settings.itr_v2_rescan_done``. When
+         FALSE (first deploy of this fix), force a full rescan
+         unconditionally. Set TRUE after success. Future startups skip
+         the unconditional path.
+      b) A drift probe (kept from the original implementation). Catches
+         column drift on any future startup, e.g. if a future bug
+         re-introduces the INSERT-skips-class problem.
+
+    Manual class overrides are always preserved by ``classify_row``
+    rule 1, and the matching legacy ``is_internal_transfer_manual``
+    rows are excluded from both the probe and the classifier mirror-
+    update — user decisions stay sacred.
     """
-    # Probe both directions of drift:
-    # - is_internal_transfer=TRUE but class != 'internal_transfer'
-    #   (the symptom we observed in production: "INTERNAL" pill + "Auto
-    #   (uncategorized)" modal).
-    # - is_internal_transfer=FALSE but class = 'internal_transfer'
-    #   (theoretical asymmetry; the classifier mirror-update should
-    #   prevent it but we still check defensively).
+    # ---- Sentinel column ------------------------------------------------
+    # Idempotent column add. Default FALSE so existing installs trigger
+    # the one-shot rescan once after this code lands.
+    await _ddl(
+        conn,
+        "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS itr_v2_rescan_done BOOLEAN NOT NULL DEFAULT FALSE",
+    )
+
+    # On a brand-new DB the singleton row may not exist yet (it's
+    # ensured by ``AppSettingsRepository.get`` lazily). For the sentinel
+    # check we treat "no row" the same as "flag = FALSE" — but we need a
+    # row to UPDATE later, so insert one if missing.
+    await conn.execute(
+        """
+        INSERT INTO app_settings (id, itr_v2_rescan_done)
+        VALUES (1, FALSE)
+        ON CONFLICT (id) DO NOTHING
+        """
+    )
+
+    flag_done = await conn.fetchval(
+        "SELECT itr_v2_rescan_done FROM app_settings WHERE id = 1"
+    )
+
+    # ---- Drift probe (column-level) ------------------------------------
+    # Catches case (1). Cheap; runs on every startup as a safety net
+    # even after the one-shot has fired.
     has_drift = await conn.fetchval(
         """
         SELECT EXISTS(
@@ -1125,19 +1166,29 @@ async def _migrate_fix_internal_transfer_class_drift(conn) -> None:
         )
         """
     )
-    if not has_drift:
+
+    needs_rescan = (not flag_done) or has_drift
+    if not needs_rescan:
         return
 
     from web.classification.classifier import rescan_all
 
     stats = await rescan_all(conn, horizon_days=None)
     logger.info(
-        "internal-transfer drift backfill done: changed=%d total=%d paired=%d by_class=%s",
+        "internal-transfer rescan complete (trigger=%s): changed=%d total=%d paired=%d by_class=%s",
+        "first-run" if not flag_done else "drift-probe",
         stats.changed,
         stats.total,
         stats.paired,
         stats.by_class,
     )
+
+    # Mark the one-shot done so subsequent startups skip the
+    # unconditional path. The drift probe stays active forever.
+    if not flag_done:
+        await conn.execute(
+            "UPDATE app_settings SET itr_v2_rescan_done = TRUE WHERE id = 1"
+        )
 
 
 async def _migrate_insights_persistence(conn) -> None:

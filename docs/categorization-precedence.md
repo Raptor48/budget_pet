@@ -160,12 +160,27 @@ A full rescan completes in under a second for typical family histories
 (~50k rows). Manual class overrides are always preserved by classifier
 rule 1, so user decisions stay sacred.
 
-`_migrate_fix_internal_transfer_class_drift` is a one-shot, idempotent
-backfill that runs on app startup. It probes for any row where the
-legacy boolean and the modern class disagree (and the row has no
-manual override) and triggers a full rescan when drift is detected.
-On a fresh DB or a DB that's already consistent it's a single
-`EXISTS` check and a fast return.
+`_migrate_fix_internal_transfer_class_drift` runs on app startup with
+**two triggers**:
+
+1. **One-shot sentinel** `app_settings.itr_v2_rescan_done` — when
+   `FALSE` (first deploy of this fix), force a full rescan
+   unconditionally and flip to `TRUE`. This catches stale-but-self-
+   consistent rows, e.g. those that classifier rule 5.5 tagged as
+   `income` on a previous rescan when the counterparty-name list was
+   empty: the legacy + modern columns agree (`FALSE` ↔ "not internal")
+   but the row is now wrong relative to the current names list. A
+   column-drift probe alone misses these.
+2. **Drift probe** — column-level safety net that runs on every
+   startup. Triggers a rescan whenever `is_internal_transfer <>
+   (transaction_class = 'internal_transfer')` for any non-manual row.
+   Catches future regressions (e.g. an INSERT path that re-introduces
+   the column-skip bug).
+
+Manual class overrides are excluded from both triggers and preserved
+by `classify_row` rule 1, so user decisions stay sacred. On a steady-
+state install (sentinel TRUE, no drift) the migration is two cheap
+`fetchval`s and a return.
 
 ### `transaction_class = 'internal_transfer'` AND `category_id IS NOT NULL`
 
