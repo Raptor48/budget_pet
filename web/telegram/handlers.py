@@ -714,9 +714,14 @@ async def on_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     photo = update.message.photo[-1]  # largest
     file = await context.bot.get_file(photo.file_id)
-    bio = bytearray()
-    await file.download_to_memory(out=bio)  # type: ignore[arg-type]
-    image_bytes = bytes(bio)
+    # PTB's download_to_memory writes via .write(), so a file-like buffer
+    # is required. A plain bytearray has no .write attribute and crashed
+    # the handler with AttributeError before this fix.
+    import io as _io
+
+    bio = _io.BytesIO()
+    await file.download_to_memory(out=bio)
+    image_bytes = bio.getvalue()
     await update.message.reply_text("📸 Scanning receipt…")
     try:
         from web.telegram.ocr import extract_receipt
