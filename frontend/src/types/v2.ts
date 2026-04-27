@@ -553,6 +553,48 @@ export interface NetWorthSnapshot {
   net_worth_cents: number;
 }
 
+/**
+ * Per-account row in the redesigned Net Worth tab. ``role`` collapses
+ * the internal ``type`` enum into the two visual buckets the breakdown
+ * cards split on. ``balance_cents`` is always the magnitude (sign is
+ * implied by ``role``), so summing one bucket gives that bucket's total.
+ */
+export interface NetWorthAccountRow {
+  id: number;
+  name: string;
+  type: string;
+  subtype: string | null;
+  role: "asset" | "debt";
+  balance_cents: number;
+  owner_username: string | null;
+  institution_name: string | null;
+  institution_logo: string | null;
+  institution_color: string | null;
+  is_cash_wallet: boolean;
+}
+
+export interface NetWorthSummary {
+  liquid_cents: number;
+  investment_cents: number;
+  debt_cents: number;
+  net_worth_cents: number;
+  /** Net change vs the closest snapshot ~30 days ago (±15d tolerance). */
+  mom_delta_cents: number | null;
+  /** Net change vs the closest snapshot ~180 days ago (±45d tolerance). */
+  six_month_delta_cents: number | null;
+  /** ISO snapshot date used for ``mom_delta_cents``. */
+  mom_compared_to: string | null;
+  /** ISO snapshot date used for ``six_month_delta_cents``. */
+  six_month_compared_to: string | null;
+  accounts: NetWorthAccountRow[];
+  /**
+   * Months until projected debt payoff at the current 6-mo (or MoM)
+   * trajectory. Null when there's no debt, no upward trajectory, or no
+   * comparable snapshot to read a slope from.
+   */
+  debt_payoff_months: number | null;
+}
+
 export interface ForecastEntry {
   date: string;
   description: string;

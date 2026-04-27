@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
@@ -20,13 +20,13 @@ import { ExpensesTab } from "@/components/reports/expenses-tab";
 import { CashFlowHistoryChart } from "@/components/reports/cash-flow-history-chart";
 import { TrendsTab } from "@/components/reports/trends-tab";
 import { BudgetHistoryTab } from "@/components/reports/budget-history-tab";
+import { NetWorthTab } from "@/components/reports/net-worth-tab";
 import { AnimatedMoney } from "@/components/ui/animated-money";
 import { budgetsApi, reportsApi, transactionsApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type {
   CategorySpend,
   MerchantSpend,
-  NetWorthSnapshot,
   Transaction,
 } from "@/types/v2";
 
@@ -46,91 +46,6 @@ function formatMoney(cents: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 2,
   }).format(cents / 100);
-}
-
-function NetWorthLineChart({ data }: { data: NetWorthSnapshot[] }) {
-  const sorted = useMemo(
-    () =>
-      [...data].sort((a, b) =>
-        String(a.snapshot_date).localeCompare(String(b.snapshot_date)),
-      ),
-    [data],
-  );
-
-  const { points, pathD, minV, maxV } = useMemo(() => {
-    if (!sorted.length) {
-      return { points: [] as { x: number; y: number; label: string }[], pathD: "", minV: 0, maxV: 0 };
-    }
-    const values = sorted.map((s) => s.net_worth_cents);
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const pad = max === min ? 1 : (max - min) * 0.08;
-    const minV = min - pad;
-    const maxV = max + pad;
-    const w = 100;
-    const h = 40;
-    const pts = sorted.map((s, i) => {
-      const x = sorted.length === 1 ? w / 2 : (i / (sorted.length - 1)) * w;
-      const t = maxV === minV ? 0.5 : (s.net_worth_cents - minV) / (maxV - minV);
-      const y = h - t * h;
-      return {
-        x,
-        y,
-        label: String(s.snapshot_date).slice(0, 7),
-      };
-    });
-    const pathD = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
-    return { points: pts, pathD, minV, maxV };
-  }, [sorted]);
-
-  if (!sorted.length) {
-    return (
-      <p className="text-muted-foreground text-sm py-8 text-center">No history yet.</p>
-    );
-  }
-
-  return (
-    <div className="space-y-2">
-      <svg
-        viewBox="0 0 100 42"
-        className="w-full h-40 text-primary"
-        preserveAspectRatio="none"
-        role="img"
-        aria-label="Net worth over time"
-      >
-        <defs>
-          <linearGradient id="nwFill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="currentColor" stopOpacity="0.25" />
-            <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <path
-          d={`${pathD} L ${points[points.length - 1]?.x ?? 0} 42 L ${points[0]?.x ?? 0} 42 Z`}
-          fill="url(#nwFill)"
-          className="text-primary"
-        />
-        <path
-          d={pathD}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="0.6"
-          vectorEffect="non-scaling-stroke"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-        />
-        {points.map((p, i) => (
-          <circle key={i} cx={p.x} cy={p.y} r="0.9" fill="currentColor" className="text-primary" />
-        ))}
-      </svg>
-      <div className="flex justify-between text-xs text-muted-foreground px-1">
-        <span>{points[0]?.label}</span>
-        <span>{points[points.length - 1]?.label}</span>
-      </div>
-      <p className="text-xs text-muted-foreground text-center">
-        Range: {formatMoney(minV)} — {formatMoney(maxV)}
-      </p>
-    </div>
-  );
 }
 
 function MerchantLogo({ url, name }: { url: string | null; name: string }) {
@@ -159,12 +74,15 @@ function MerchantLogo({ url, name }: { url: string | null; name: string }) {
 // Page
 // ---------------------------------------------------------------------------
 
+// Visual ordering — left group = "this month" KPIs, right group = "history".
+// The two groups are split by a vertical separator on lg+ (TabsList renders
+// a non-trigger spacer between them).
 const REPORT_TABS = [
   "cashflow",
-  "trends",
   "income",
   "expenses",
   "category",
+  "trends",
   "networth",
   "history",
 ] as const;
@@ -367,14 +285,33 @@ export default function Reports() {
         </header>
 
         <Tabs value={tab} onValueChange={handleTabChange} className="gap-6">
-          <TabsList className="grid h-auto w-full max-w-5xl grid-cols-2 gap-1 p-1 sm:grid-cols-4 lg:grid-cols-7">
-            <TabsTrigger value="cashflow">Cash Flow</TabsTrigger>
-            <TabsTrigger value="trends">Trends</TabsTrigger>
-            <TabsTrigger value="income">Income</TabsTrigger>
-            <TabsTrigger value="expenses">Expenses</TabsTrigger>
-            <TabsTrigger value="category">By Category</TabsTrigger>
-            <TabsTrigger value="networth">Net Worth</TabsTrigger>
-            <TabsTrigger value="history" className="col-span-2 sm:col-span-4 lg:col-span-1">
+          {/* Two-group tab list:
+              - This month: Cash Flow · Income · Expenses · By Category
+              - History:    Trends · Net Worth · Budget History
+
+              On mobile / tablet the tabs flow in a 2- or 4-column grid and
+              the visual separator is hidden — the natural row break does
+              the grouping for free. On lg+ the list switches to flex so we
+              can render a thin vertical line between groups. The separator
+              is announced as ``role="separator"`` for screen readers. */}
+          <TabsList
+            className={cn(
+              "grid h-auto w-full max-w-5xl gap-1 p-1",
+              "grid-cols-2 sm:grid-cols-4",
+              "lg:flex lg:items-center lg:justify-start",
+            )}
+          >
+            <TabsTrigger value="cashflow" className="lg:flex-1">Cash Flow</TabsTrigger>
+            <TabsTrigger value="income" className="lg:flex-1">Income</TabsTrigger>
+            <TabsTrigger value="expenses" className="lg:flex-1">Expenses</TabsTrigger>
+            <TabsTrigger value="category" className="lg:flex-1">By Category</TabsTrigger>
+            <TabGroupSeparator />
+            <TabsTrigger value="trends" className="lg:flex-1">Trends</TabsTrigger>
+            <TabsTrigger value="networth" className="lg:flex-1">Net Worth</TabsTrigger>
+            <TabsTrigger
+              value="history"
+              className="col-span-2 sm:col-span-4 lg:col-span-1 lg:flex-1"
+            >
               Budget History
             </TabsTrigger>
           </TabsList>
@@ -752,41 +689,12 @@ export default function Reports() {
           </TabsContent>
 
           <TabsContent value="networth" className="reports-tab-content space-y-6">
-            <Card className="border-border/80 shadow-sm">
-              <CardHeader>
-                <CardTitle>Net worth</CardTitle>
-                <CardDescription>Liquid, investments, debt, and total net worth — last 12 snapshots.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-8">
-                {netWorthQuery.isLoading && (
-                  <p className="text-muted-foreground text-sm">Loading balances…</p>
-                )}
-                {netWorthQuery.isError && (
-                  <p className="text-destructive text-sm">Could not load net worth.</p>
-                )}
-                {net && (
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    <MetricTile label="Cash & Savings" value={formatMoney(net.liquid_cents)} accent="neutral" />
-                    <MetricTile label="Portfolio" value={formatMoney(net.investment_cents)} accent="blue" />
-                    <MetricTile label="Loans & Debt" value={formatMoney(net.debt_cents)} accent="rose" />
-                    <MetricTile label="Net Worth" value={formatMoney(net.net_worth_cents)} accent="primary" />
-                  </div>
-                )}
-
-                <div>
-                  <h3 className="text-sm font-medium mb-2">12-month trend</h3>
-                  {netWorthHistoryQuery.isLoading && (
-                    <p className="text-muted-foreground text-sm">Loading history…</p>
-                  )}
-                  {netWorthHistoryQuery.isError && (
-                    <p className="text-destructive text-sm">Could not load net worth history.</p>
-                  )}
-                  {netWorthHistoryQuery.data && (
-                    <NetWorthLineChart data={netWorthHistoryQuery.data} />
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+            <NetWorthTab
+              summary={net}
+              history={netWorthHistoryQuery.data}
+              isLoading={netWorthQuery.isLoading || netWorthHistoryQuery.isLoading}
+              isError={netWorthQuery.isError || netWorthHistoryQuery.isError}
+            />
           </TabsContent>
 
           <TabsContent value="history" className="reports-tab-content space-y-6">
@@ -802,28 +710,23 @@ export default function Reports() {
   );
 }
 
-function MetricTile({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: string;
-  accent: "neutral" | "blue" | "rose" | "primary";
-}) {
-  const ring =
-    accent === "blue"
-      ? "border-sky-500/20 bg-sky-500/5"
-      : accent === "rose"
-        ? "border-rose-500/20 bg-rose-500/5"
-        : accent === "primary"
-          ? "border-primary/25 bg-primary/5"
-          : "border-border/80 bg-card";
+/**
+ * Vertical hairline that splits the TabsList into two visual groups
+ * ("this month" KPIs vs historical reports). Hidden on mobile/tablet
+ * because the grid layout already breaks rows; only meaningful on lg+
+ * where every tab sits on a single row.
+ *
+ * Rendered as a non-Trigger child of TabsList — Radix is happy with
+ * that since TabsList just forwards children. ``role="separator"`` +
+ * ``aria-orientation="vertical"`` keeps screen-readers honest.
+ */
+function TabGroupSeparator() {
   return (
-    <div className={`rounded-xl border px-4 py-3 ${ring}`}>
-      <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">{label}</p>
-      <p className="text-lg font-semibold tabular-nums tracking-tight">{value}</p>
-    </div>
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      className="hidden lg:block lg:mx-1 lg:h-5 lg:w-px lg:bg-border/60"
+    />
   );
 }
 

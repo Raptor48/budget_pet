@@ -69,6 +69,58 @@ class NetWorthSnapshot(BaseModel):
     net_worth_cents: int
 
 
+class NetWorthAccountRow(BaseModel):
+    """One account contributing to today's net-worth composition.
+
+    ``role`` collapses our internal ``type`` enum into the two visual buckets
+    the redesigned tab cares about — ``asset`` (depository + investment) vs
+    ``debt`` (credit + loan) — so the front-end doesn't have to repeat that
+    rule. ``balance_cents`` is always the *non-negative* magnitude (the sign
+    is implicit from ``role``); subtotals on the FE just sum either bucket.
+    """
+
+    id: int
+    name: str
+    type: str
+    subtype: Optional[str] = None
+    role: str  # "asset" | "debt"
+    balance_cents: int
+    owner_username: Optional[str] = None
+    institution_name: Optional[str] = None
+    institution_logo: Optional[str] = None
+    institution_color: Optional[str] = None
+    is_cash_wallet: bool = False
+
+
+class NetWorthSummary(BaseModel):
+    """Response shape for ``GET /api/reports/net-worth``.
+
+    The component fields (``liquid_cents``, ``investment_cents``,
+    ``debt_cents``, ``net_worth_cents``) are unchanged from the previous
+    flat dict shape — existing clients keep working. Everything else is
+    additive context the redesigned Net Worth tab consumes.
+    """
+
+    liquid_cents: int
+    investment_cents: int
+    debt_cents: int
+    net_worth_cents: int
+    # Comparison deltas. ``None`` when no historical snapshot exists in the
+    # window (fresh installs, or the user had a sync gap of >45/210 days).
+    mom_delta_cents: Optional[int] = None
+    six_month_delta_cents: Optional[int] = None
+    # Per-account composition. Sorted: assets desc, then debts desc.
+    accounts: List[NetWorthAccountRow] = []
+    # Best-effort runway projection. ``None`` means we don't have enough
+    # signal — either no debt, or the recent net-worth slope is flat/down
+    # (paying down doesn't go anywhere).
+    debt_payoff_months: Optional[int] = None
+    # ISO date strings for the two snapshot endpoints used to compute the
+    # deltas, so the UI can label tooltips honestly ("vs Mar 27, 2026").
+    mom_compared_to: Optional[date] = None
+    six_month_compared_to: Optional[date] = None
+
+
 class ForecastEntry(BaseModel):
     date: date
     description: str
