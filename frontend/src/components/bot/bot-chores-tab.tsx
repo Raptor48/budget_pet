@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -20,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import { botApi, type ChoreRow } from "@/lib/api";
 import { confirm, notify, onMutationError } from "@/lib/notify";
 
@@ -180,11 +182,28 @@ export function BotChoresTab() {
           This week ({formatDate(week)})
         </h2>
         {assignments.isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <ul className="divide-y rounded-md border">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <li
+                key={i}
+                className="flex items-center justify-between px-4 py-3"
+              >
+                <div className="flex items-center gap-2">
+                  <Skeleton className="h-4 w-4 rounded" />
+                  <Skeleton className="h-4 w-24" />
+                  <Skeleton className="h-5 w-14 rounded-full" />
+                </div>
+                <Skeleton className="h-7 w-20" />
+              </li>
+            ))}
+          </ul>
         ) : !assignments.data?.length ? (
-          <p className="text-sm text-muted-foreground">
-            Add at least one chore below — assignments populate automatically.
-          </p>
+          <div className="grid place-items-center rounded-md border border-dashed py-8 text-center">
+            <Check className="h-6 w-6 text-muted-foreground" aria-hidden />
+            <p className="mt-2 text-sm text-muted-foreground">
+              Add at least one chore below — assignments populate automatically.
+            </p>
+          </div>
         ) : (
           <ul className="divide-y rounded-md border">
             {assignments.data.map((a) => {
@@ -194,7 +213,12 @@ export function BotChoresTab() {
               return (
                 <li
                   key={a.chore_id}
-                  className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm"
+                  className={cn(
+                    "flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm transition-colors",
+                    "hover:bg-muted/40",
+                    a.completed_at &&
+                      "bg-gradient-to-r from-emerald-500/5 to-transparent",
+                  )}
                 >
                   <div className="flex items-center gap-2">
                     <ChoreIcon value={a.chore_icon} />
@@ -334,7 +358,11 @@ export function BotChoresTab() {
             return (
               <li
                 key={c.id}
-                className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm"
+                className={cn(
+                  "flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm transition-colors",
+                  "hover:bg-muted/40",
+                  !c.is_active && "opacity-60",
+                )}
               >
                 <div className="flex items-center gap-2">
                   <ChoreIcon value={c.icon} />

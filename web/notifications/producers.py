@@ -447,6 +447,14 @@ async def emit_weekly_leaderboard() -> int:
         uid = int(u["id"])
         if not await repo.is_alert_enabled(uid, "leaderboard"):
             continue
+        # Honour the per-couple `leaderboard_enabled` setting in addition to
+        # the alert-type toggle. The two are deliberately separate: one says
+        # "I never want this notification" (alert pref), the other says
+        # "we don't do the leaderboard ritual at all" (couple-level
+        # opt-out). Either being false skips the push.
+        couple = await repo.get_couple_settings(uid)
+        if not couple.get("leaderboard_enabled", True):
+            continue
         new_id = await enqueue_notification(
             user_id=uid,
             type="leaderboard",

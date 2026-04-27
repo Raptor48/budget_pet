@@ -5,12 +5,23 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, CircleCheck, CircleDashed, Coffee, Cookie, Loader2 } from "lucide-react";
+import {
+  Check,
+  CircleCheck,
+  CircleDashed,
+  ClipboardCheck,
+  Coffee,
+  Cookie,
+  History,
+  Loader2,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 import { botApi, type AuditSession } from "@/lib/api";
 import { notify, onMutationError } from "@/lib/notify";
 
@@ -93,9 +104,29 @@ export function BotAuditTab() {
   return (
     <div className="space-y-8">
       <section>
-        <h2 className="mb-2 text-base font-semibold">This week</h2>
+        <h2 className="mb-2 flex items-center gap-2 text-base font-semibold">
+          <ClipboardCheck className="h-4 w-4 text-muted-foreground" />
+          This week
+        </h2>
         {current.isLoading || !current.data ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <div className="space-y-3">
+            <Skeleton className="h-4 w-64" />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Skeleton className="h-3.5 w-16" />
+                <Skeleton className="h-9 w-full" />
+              </div>
+              <div className="space-y-1.5">
+                <Skeleton className="h-3.5 w-16" />
+                <Skeleton className="h-9 w-full" />
+              </div>
+            </div>
+            <Skeleton className="h-20 w-full" />
+            <div className="flex justify-end gap-2">
+              <Skeleton className="h-9 w-32" />
+              <Skeleton className="h-9 w-20" />
+            </div>
+          </div>
         ) : (
           <div className="space-y-3">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -182,17 +213,39 @@ export function BotAuditTab() {
       </section>
 
       <section>
-        <h2 className="mb-2 text-base font-semibold">History</h2>
+        <h2 className="mb-2 flex items-center gap-2 text-base font-semibold">
+          <History className="h-4 w-4 text-muted-foreground" />
+          History
+        </h2>
         {history.isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
+          <ul className="divide-y rounded-md border">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <li
+                key={i}
+                className="flex items-center justify-between px-4 py-3"
+              >
+                <div className="space-y-1.5">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-48" />
+                </div>
+                <Skeleton className="h-5 w-16" />
+              </li>
+            ))}
+          </ul>
         ) : !history.data?.length ? (
-          <p className="text-sm text-muted-foreground">No past sessions yet.</p>
+          <div className="grid place-items-center rounded-md border border-dashed py-8 text-center">
+            <History className="mb-2 h-6 w-6 text-muted-foreground" aria-hidden />
+            <p className="text-sm text-muted-foreground">No past sessions yet.</p>
+          </div>
         ) : (
           <ul className="divide-y rounded-md border">
             {history.data.map((session) => (
               <li
                 key={session.id}
-                className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm"
+                className={cn(
+                  "flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm transition-colors",
+                  "hover:bg-muted/40",
+                )}
               >
                 <div className="min-w-0">
                   <div className="font-medium">

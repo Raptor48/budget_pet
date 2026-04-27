@@ -311,19 +311,19 @@ CREATE INDEX IF NOT EXISTS receipts_transaction_idx
 
 SEED_DEFAULT_CHORES = """
 INSERT INTO chores (name, icon, rotation, sort_order)
-SELECT 'Kitchen',  '🍳', 'weekly', 1
+SELECT 'Kitchen',  'kitchen', 'weekly', 1
 WHERE NOT EXISTS (SELECT 1 FROM chores);
 """
 
 SEED_DEFAULT_CHORES_2 = """
 INSERT INTO chores (name, icon, rotation, sort_order)
-SELECT 'Bathroom', '🛁', 'weekly', 2
+SELECT 'Bathroom', 'bathroom', 'weekly', 2
 WHERE NOT EXISTS (SELECT 1 FROM chores WHERE name = 'Bathroom');
 """
 
 SEED_DEFAULT_CHORES_3 = """
 INSERT INTO chores (name, icon, rotation, sort_order)
-SELECT 'Floors',   '🧹', 'weekly', 3
+SELECT 'Floors',   'floors', 'weekly', 3
 WHERE NOT EXISTS (SELECT 1 FROM chores WHERE name = 'Floors');
 """
 
