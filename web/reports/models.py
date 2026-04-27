@@ -77,10 +77,18 @@ class NetWorthAccountRow(BaseModel):
     ``debt`` (credit + loan) — so the front-end doesn't have to repeat that
     rule. ``balance_cents`` is always the *non-negative* magnitude (the sign
     is implicit from ``role``); subtotals on the FE just sum either bucket.
+
+    ``official_name`` and ``mask`` are surfaced so the breakdown row can
+    disambiguate generic Plaid labels — Chase returns ``name = 'CREDIT
+    CARD'`` for some products, which alone tells the user nothing.
+    Combined with ``institution_name`` and the last-four mask the FE
+    can render a meaningful subtitle ("Chase · •••• 1234").
     """
 
     id: int
     name: str
+    official_name: Optional[str] = None
+    mask: Optional[str] = None
     type: str
     subtype: Optional[str] = None
     role: str  # "asset" | "debt"

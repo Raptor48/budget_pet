@@ -765,7 +765,7 @@ class ReportsRepository:
             account_rows = await conn.fetch(
                 """
                 SELECT
-                    a.id, a.name, a.type, a.subtype,
+                    a.id, a.name, a.official_name, a.mask, a.type, a.subtype,
                     a.current_balance_cents,
                     a.user_id, a.plaid_account_id,
                     pi.institution_name, pi.institution_logo, pi.institution_color,
@@ -844,6 +844,8 @@ class ReportsRepository:
             accounts.append({
                 "id": r["id"],
                 "name": r["name"],
+                "official_name": r["official_name"],
+                "mask": r["mask"],
                 "type": atype,
                 "subtype": r["subtype"],
                 "role": "debt" if is_debt else "asset",

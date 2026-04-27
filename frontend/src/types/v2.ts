@@ -577,6 +577,10 @@ export interface NetWorthSnapshot {
 export interface NetWorthAccountRow {
   id: number;
   name: string;
+  /** Plaid's longer descriptive name (sometimes more meaningful than ``name``). */
+  official_name: string | null;
+  /** Last 4 digits of the account number. */
+  mask: string | null;
   type: string;
   subtype: string | null;
   role: "asset" | "debt";
