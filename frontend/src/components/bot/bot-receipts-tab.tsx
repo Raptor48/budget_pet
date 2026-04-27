@@ -12,7 +12,7 @@
  * to load (404, network) we surface a placeholder rather than an empty
  * frame so the user can still see the line items + totals.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -240,6 +240,53 @@ export function BotReceiptsTab() {
   );
 }
 
+/**
+ * Fetch + cache a receipt image as an in-memory blob URL. The naive
+ * ``<img src="…/image">`` works only same-origin — once frontend and
+ * backend deploy to different hosts (Railway in production), the
+ * session cookie isn't sent and the Bearer-token fallback in
+ * :func:`apiRequest` can't ride along on an ``<img>`` tag (no custom
+ * headers). Fetching here and using ``URL.createObjectURL`` solves both.
+ */
+function useAuthedReceiptImage(receiptId: number | null, hasImage: boolean) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setSrc(null);
+    setError(false);
+    if (!receiptId || !hasImage) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    let cancelled = false;
+    let blobUrl: string | null = null;
+    botApi
+      .fetchReceiptImageBlob(receiptId)
+      .then((blob) => {
+        if (cancelled) return;
+        blobUrl = URL.createObjectURL(blob);
+        setSrc(blobUrl);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setError(true);
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      // Free the blob even if the user closes the modal mid-fetch — we
+      // don't want a few hundred KB hanging on per receipt opened.
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  }, [receiptId, hasImage]);
+
+  return { src, error, loading };
+}
+
 function ReceiptDetail({
   id,
   onClose,
@@ -268,19 +315,49 @@ function ReceiptDetail({
   });
   const r: ReceiptRow | null = detail.data ?? null;
   const open = id != null;
-  const [imgFailed, setImgFailed] = useState(false);
+  const image = useAuthedReceiptImage(id, !!r?.has_image);
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <ReceiptIcon className="h-4 w-4 text-muted-foreground" />
-            {r?.merchant_name || "Receipt"}
+      {/*
+        max-h + flex column lets the body scroll while the header and the
+        action footer stay anchored. Without this the image (often a tall
+        portrait shot of a paper receipt) would push the Delete / Attach
+        buttons below the viewport and the user couldn't reach them
+        without zooming the browser out.
+      */}
+      <DialogContent className="flex max-h-[90vh] max-w-2xl flex-col gap-0 p-0">
+        <DialogHeader className="flex-row items-center justify-between gap-3 border-b px-5 py-3">
+          <DialogTitle className="flex min-w-0 items-center gap-2 truncate">
+            <ReceiptIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="truncate">{r?.merchant_name || "Receipt"}</span>
           </DialogTitle>
+          {/*
+            Delete moved into the header so it's always reachable, even on
+            tall receipts where the body scrolls. The dialog's close button
+            sits to the right of this via Radix's built-in.
+          */}
+          {r ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onDelete(r.merchant_name)}
+              disabled={deleting}
+              className="mr-6 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              title="Delete receipt"
+            >
+              {deleting ? (
+                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="mr-1 h-4 w-4" />
+              )}
+              Delete
+            </Button>
+          ) : null}
         </DialogHeader>
+
         {!r ? (
-          <div className="grid gap-4 sm:grid-cols-[1fr,1fr]">
+          <div className="grid gap-4 p-5 sm:grid-cols-[1fr,1fr]">
             <Skeleton className="aspect-[3/4] w-full" />
             <div className="space-y-2">
               <Skeleton className="h-4 w-32" />
@@ -292,27 +369,40 @@ function ReceiptDetail({
             </div>
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-[1fr,1fr]">
-            <div className="overflow-hidden rounded-md border bg-muted/30">
-              {r.has_image && id && !imgFailed ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={botApi.receiptImageUrl(id)}
-                  alt="Receipt"
-                  className="w-full object-cover transition-opacity duration-300"
-                  onError={() => setImgFailed(true)}
-                  onLoad={(e) => e.currentTarget.classList.remove("opacity-0")}
-                />
+          <div className="grid flex-1 gap-4 overflow-y-auto p-5 sm:grid-cols-[minmax(0,1fr),minmax(0,1fr)]">
+            <div className="flex items-start justify-center overflow-hidden rounded-md border bg-muted/30">
+              {r.has_image && !image.error ? (
+                image.loading || !image.src ? (
+                  <div className="grid aspect-[3/4] w-full place-items-center text-sm text-muted-foreground">
+                    <Loader2
+                      className="h-5 w-5 animate-spin text-muted-foreground"
+                      aria-label="Loading image"
+                    />
+                  </div>
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={image.src}
+                    alt="Receipt"
+                    /*
+                      object-contain + capped height keeps tall portrait
+                      receipts inside the viewport and never crops their
+                      content; the user can still see the whole photo.
+                      Width is full-card so landscape receipts also fit.
+                    */
+                    className="max-h-[60vh] w-full object-contain"
+                  />
+                )
               ) : (
-                <div className="grid aspect-[3/4] place-items-center text-sm text-muted-foreground">
+                <div className="grid aspect-[3/4] w-full place-items-center text-sm text-muted-foreground">
                   <div className="flex flex-col items-center gap-1.5">
                     <ImageOff className="h-6 w-6" aria-hidden />
-                    {imgFailed ? "Image couldn't load." : "No image stored."}
+                    {image.error ? "Image couldn't load." : "No image stored."}
                   </div>
                 </div>
               )}
             </div>
-            <div className="flex flex-col gap-3">
+            <div className="flex min-w-0 flex-col gap-3">
               <dl className="grid grid-cols-2 gap-y-1.5 text-sm">
                 <dt className="text-muted-foreground">Total</dt>
                 <dd className="text-right font-mono font-medium">
@@ -353,77 +443,70 @@ function ReceiptDetail({
                   </ul>
                 )}
               </div>
-              <div className="rounded-md border bg-muted/20 p-2.5 text-sm">
-                {r.transaction_id ? (
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      <Link2 className="h-3.5 w-3.5 text-emerald-500" />
-                      <span>Linked to transaction #{r.transaction_id}</span>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={onUnlink}
-                      disabled={unlinking}
-                    >
-                      {unlinking ? (
-                        <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Link2Off className="mr-1 h-3.5 w-3.5" />
-                      )}
-                      Detach
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-amber-600 dark:text-amber-400">
-                      Not linked to a transaction yet.
-                    </span>
-                    <div className="flex gap-1">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={onAttachClick}
-                      >
-                        <Link2 className="mr-1 h-3.5 w-3.5" />
-                        Attach…
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={onLogAsCash}
-                        disabled={loggingCash}
-                      >
-                        {loggingCash ? (
-                          <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Wallet className="mr-1 h-3.5 w-3.5" />
-                        )}
-                        Log as cash
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
-              <div className="mt-auto flex justify-end">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => onDelete(r.merchant_name)}
-                  disabled={deleting}
-                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                >
-                  {deleting ? (
-                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="mr-1 h-4 w-4" />
-                  )}
-                  Delete
-                </Button>
-              </div>
             </div>
           </div>
         )}
+
+        {/*
+          Sticky footer for the link/unlink/log-as-cash actions. Always
+          visible regardless of body scroll position so the primary action
+          on an unlinked receipt ("Attach" / "Log as cash") is one tap
+          away.
+        */}
+        {r ? (
+          <div className="border-t bg-muted/20 px-5 py-3 text-sm">
+            {r.transaction_id ? (
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Link2 className="h-3.5 w-3.5 text-emerald-500" />
+                  <span>Linked to transaction #{r.transaction_id}</span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={onUnlink}
+                  disabled={unlinking}
+                >
+                  {unlinking ? (
+                    <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Link2Off className="mr-1 h-3.5 w-3.5" />
+                  )}
+                  Detach
+                </Button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-amber-600 dark:text-amber-400">
+                  Not linked to a transaction yet.
+                </span>
+                <div className="flex gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={onAttachClick}
+                  >
+                    <Link2 className="mr-1 h-3.5 w-3.5" />
+                    Attach…
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={onLogAsCash}
+                    disabled={loggingCash}
+                  >
+                    {loggingCash ? (
+                      <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Wallet className="mr-1 h-3.5 w-3.5" />
+                    )}
+                    Log as cash
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : null}
       </DialogContent>
     </Dialog>
   );

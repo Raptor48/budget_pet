@@ -1160,6 +1160,27 @@ export const botApi = {
     apiRequest(`/api/bot/receipts/${id}`),
   receiptImageUrl: (id: number): string =>
     `${getApiBaseUrl()}/api/bot/receipts/${id}/image`,
+  /**
+   * Fetch the receipt image bytes through the same auth path as every other
+   * /api/bot/* call. A naive ``<img src="…/image">`` works only when the
+   * frontend and backend share an origin (cookies ride along on
+   * cross-origin image requests by default but session cookies on
+   * Railway / *.vercel.app deployments do not). The Bearer-token fallback
+   * in :func:`apiRequest` doesn't help an ``<img>`` tag — it can't carry
+   * custom headers. So we fetch with auth here and the caller turns the
+   * blob into an object URL.
+   */
+  fetchReceiptImageBlob: async (id: number): Promise<Blob> => {
+    const url = `${API_BASE}/api/bot/receipts/${id}/image`;
+    const response = await fetch(url, {
+      credentials: 'include',
+      headers: { ...(getAuthHeaders() as Record<string, string>) },
+    });
+    if (!response.ok) {
+      throw new ApiError(response.status, `HTTP ${response.status}`, `HTTP ${response.status}`);
+    }
+    return response.blob();
+  },
   deleteReceipt: (id: number): Promise<void> =>
     apiRequest(`/api/bot/receipts/${id}`, { method: 'DELETE' }),
   linkReceipt: (id: number, transactionId: number | null): Promise<ReceiptRow> => {
