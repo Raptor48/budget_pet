@@ -893,6 +893,28 @@ function TransactionDetailsDialog({
                   <span>Plaid wasn&rsquo;t confident about this category — please double-check.</span>
                 </p>
               ) : null}
+              {/*
+                Heads-up when classification will silently shadow the chosen
+                category in spending aggregates. Internal transfers are
+                excluded from Cash Flow / By Category / Reports because they
+                represent money moving inside the household, not real spend.
+                Showing a category here without flagging the implication
+                used to confuse users (the Rent category they set on a
+                family Zelle never appeared in their Rent total). See
+                ``docs/categorization-precedence.md`` for the full rules.
+              */}
+              {transaction &&
+              transaction.transaction_class === "internal_transfer" &&
+              editCategoryId !== ALL ? (
+                <p className="flex items-start gap-1.5 pl-6 text-xs text-amber-700 dark:text-amber-400">
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                  <span>
+                    Classified as an internal transfer — this category won&rsquo;t
+                    appear in spending reports. To count it as a real expense,
+                    change the class below to <em>Auto</em> or <em>Expense</em>.
+                  </span>
+                </p>
+              ) : null}
               {isPlaidSource ? (
                 <div className="pl-6">
                   <CreateRuleFromTransactionButton
