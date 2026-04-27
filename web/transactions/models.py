@@ -81,6 +81,11 @@ class TransactionOut(BaseModel):
     updated_at: Optional[DateTime] = None
     tags: List[TagBrief] = []
     has_splits: bool = False
+    # True when at least one row exists in ``receipts`` with this tx_id.
+    # Drives the receipt indicator in the FE list + an expandable lines
+    # breakdown in the detail modal. The actual receipt payload is fetched
+    # on demand via GET /api/bot/receipts/by-transaction/{id}.
+    has_receipt: bool = False
     splits: List[SplitOut] = []
     # Joined from accounts table
     account_name: Optional[str] = None

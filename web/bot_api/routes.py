@@ -35,7 +35,9 @@ from .models import (
     MoodEntryUpsert,
     NotificationPrefOut,
     NotificationPrefUpdate,
+    ReceiptLinesReplace,
     ReceiptOut,
+    ReceiptUpdate,
     StreakOut,
     TelegramLinkCodeOut,
     TelegramLinkStatus,
@@ -384,10 +386,81 @@ async def get_receipt_image(request: Request, receipt_id: int):
 
 
 @router.delete("/receipts/{receipt_id}", status_code=204)
-async def delete_receipt(request: Request, receipt_id: int):
+async def delete_receipt(
+    request: Request,
+    receipt_id: int,
+    delete_linked_cash: bool = Query(
+        False,
+        description=(
+            "When true and the receipt is attached to a manual cash "
+            "transaction, that transaction is removed in the same DB "
+            "transaction. Bank-imported transactions are never deleted "
+            "by this path — Plaid is the source of truth."
+        ),
+    ),
+):
     user_id = _user_id(request)
-    if not await get_bot_repo().delete_receipt(user_id, receipt_id):
+    if not await get_bot_repo().delete_receipt(
+        user_id, receipt_id, delete_linked_cash=delete_linked_cash
+    ):
         raise HTTPException(status_code=404, detail="Receipt not found")
+
+
+@router.patch("/receipts/{receipt_id}", response_model=ReceiptOut)
+async def update_receipt(
+    request: Request,
+    receipt_id: int,
+    patch: ReceiptUpdate,
+):
+    """Edit OCR-derived header fields when the model got something wrong.
+
+    Pydantic's ``model_dump(exclude_unset=True)`` keeps the SQL UPDATE
+    surgical: a request that only sets ``total_cents`` won't blank out
+    the merchant.
+    """
+    user_id = _user_id(request)
+    diff = patch.model_dump(exclude_unset=True)
+    receipt = await get_bot_repo().update_receipt(user_id, receipt_id, diff)
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+    return receipt
+
+
+@router.put("/receipts/{receipt_id}/lines", response_model=ReceiptOut)
+async def replace_receipt_lines(
+    request: Request,
+    receipt_id: int,
+    body: ReceiptLinesReplace,
+):
+    """Replace the entire line-items list (delete + re-insert).
+
+    Replace-all is intentional — the FE always edits the whole list at
+    once, and avoiding per-line PATCH endpoints keeps the API surface
+    small. ``line_number`` is rebuilt from array position so reordering
+    works for free.
+    """
+    user_id = _user_id(request)
+    lines = [line.model_dump() for line in body.lines]
+    receipt = await get_bot_repo().replace_receipt_lines(user_id, receipt_id, lines)
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+    return receipt
+
+
+@router.get("/receipts/by-transaction/{transaction_id}", response_model=ReceiptOut)
+async def get_receipt_by_transaction(request: Request, transaction_id: int):
+    """Look up the receipt attached to a specific transaction.
+
+    Used by the transactions detail modal to surface the receipt
+    breakdown next to the bank line. Returns 404 if no receipt is
+    linked. Schema permits multiple receipts per tx but we return the
+    most recent — real-world flows are 1:1 today.
+    """
+    user_id = _user_id(request)
+    receipt = await get_bot_repo().get_receipt_by_transaction(user_id, transaction_id)
+    if not receipt:
+        raise HTTPException(status_code=404, detail="No receipt for this transaction")
+    return receipt
 
 
 @router.patch("/receipts/{receipt_id}/link", response_model=ReceiptOut)
@@ -396,6 +469,15 @@ async def link_receipt(
     receipt_id: int,
     transaction_id: Optional[int] = Query(
         None, description="Pass null/omit to detach the receipt."
+    ),
+    delete_linked_cash: bool = Query(
+        False,
+        description=(
+            "When detaching a receipt that was previously attached to a "
+            "manual cash transaction, also delete that cash row. "
+            "Prevents the 'log as cash → re-attach to Plaid → cash row "
+            "stuck in wallet' double-counting pattern."
+        ),
     ),
 ):
     """Attach (or detach with ``transaction_id=null``) a receipt to a tx.
@@ -409,12 +491,12 @@ async def link_receipt(
     if transaction_id is not None:
         # Verify the target transaction exists at all (gives a friendly 404
         # instead of a silent no-op when the user pastes the wrong id).
-        from web.transactions.repo import TransactionsRepository
-
         txn = await TransactionsRepository().get_transaction(int(transaction_id))
         if not txn:
             raise HTTPException(status_code=404, detail="Transaction not found")
-    receipt = await get_bot_repo().link_receipt(user_id, receipt_id, transaction_id)
+    receipt = await get_bot_repo().link_receipt(
+        user_id, receipt_id, transaction_id, delete_linked_cash=delete_linked_cash
+    )
     if not receipt:
         raise HTTPException(status_code=404, detail="Receipt not found")
     return receipt

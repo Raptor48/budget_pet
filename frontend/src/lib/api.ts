@@ -1020,6 +1020,12 @@ export interface ReceiptRow {
   created_at: string;
   image_mime?: string | null;
   has_image: boolean;
+  /**
+   * True when the linked transaction is one we created via "Log as cash"
+   * on a manual (non-Plaid) account. Drives the "also delete the cash
+   * transaction" affordance in the receipt-delete / detach flows.
+   */
+  linked_is_manual_cash: boolean;
   lines: ReceiptLine[];
 }
 
@@ -1181,15 +1187,76 @@ export const botApi = {
     }
     return response.blob();
   },
-  deleteReceipt: (id: number): Promise<void> =>
-    apiRequest(`/api/bot/receipts/${id}`, { method: 'DELETE' }),
-  linkReceipt: (id: number, transactionId: number | null): Promise<ReceiptRow> => {
-    const qs =
-      transactionId == null
-        ? ''
-        : `?transaction_id=${encodeURIComponent(String(transactionId))}`;
+  deleteReceipt: (
+    id: number,
+    opts?: { deleteLinkedCash?: boolean },
+  ): Promise<void> => {
+    const qs = opts?.deleteLinkedCash ? '?delete_linked_cash=true' : '';
+    return apiRequest(`/api/bot/receipts/${id}${qs}`, { method: 'DELETE' });
+  },
+  linkReceipt: (
+    id: number,
+    transactionId: number | null,
+    opts?: { deleteLinkedCash?: boolean },
+  ): Promise<ReceiptRow> => {
+    const params = new URLSearchParams();
+    if (transactionId != null) {
+      params.set('transaction_id', String(transactionId));
+    }
+    if (opts?.deleteLinkedCash) {
+      params.set('delete_linked_cash', 'true');
+    }
+    const qs = params.toString() ? `?${params.toString()}` : '';
     return apiRequest(`/api/bot/receipts/${id}/link${qs}`, { method: 'PATCH' });
   },
+  /**
+   * Edit OCR-derived header fields on a receipt. Pass only the keys you
+   * want to change — Pydantic's ``exclude_unset`` keeps the SQL UPDATE
+   * surgical. To clear ``merchant_name`` send an empty string (the
+   * backend stores it as-is); to clear ``receipt_date`` you currently
+   * have to delete the receipt and reupload — there's no schema-level
+   * "unset date" today.
+   */
+  updateReceipt: (
+    id: number,
+    patch: {
+      merchant_name?: string | null;
+      receipt_date?: string | null;
+      total_cents?: number;
+      tax_cents?: number | null;
+      currency?: string;
+    },
+  ): Promise<ReceiptRow> =>
+    apiRequest(`/api/bot/receipts/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  /**
+   * Replace the entire line-items array. The backend wipes existing rows
+   * and re-inserts in array order (line_number = idx + 1) so reordering
+   * works for free.
+   */
+  replaceReceiptLines: (
+    id: number,
+    lines: {
+      description: string;
+      quantity?: number | null;
+      unit_price_cents?: number | null;
+      total_cents: number;
+    }[],
+  ): Promise<ReceiptRow> =>
+    apiRequest(`/api/bot/receipts/${id}/lines`, {
+      method: 'PUT',
+      body: JSON.stringify({ lines }),
+    }),
+  /**
+   * Look up the receipt attached to a specific transaction. Returns
+   * 404 (caught as ApiError) when no receipt is linked — call sites
+   * should gate this on ``transaction.has_receipt`` to avoid spurious
+   * 404 noise in error toasts.
+   */
+  getReceiptByTransaction: (transactionId: number): Promise<ReceiptRow> =>
+    apiRequest(`/api/bot/receipts/by-transaction/${transactionId}`),
   logReceiptAsCash: (id: number): Promise<ReceiptRow> =>
     apiRequest(`/api/bot/receipts/${id}/log-as-cash`, { method: 'POST' }),
 

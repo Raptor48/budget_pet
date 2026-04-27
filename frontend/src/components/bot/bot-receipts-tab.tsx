@@ -6,36 +6,55 @@
  * never see). Receipts arrive unlinked by default; the bot now waits for
  * the user to either run the cash flow or attach to an imported tx.
  *
- * The receipt's image bytes live in Postgres (BYTEA). The frontend just
- * issues a GET /api/bot/receipts/:id/image which authenticates against
- * the session cookie before streaming the bytes back. If the image fails
- * to load (404, network) we surface a placeholder rather than an empty
- * frame so the user can still see the line items + totals.
+ * The receipt's image bytes live in Postgres (BYTEA). Images are fetched
+ * via the auth-aware ``botApi.fetchReceiptImageBlob`` helper which carries
+ * the same Bearer/cookie that every other ``/api/bot/*`` call uses — a
+ * naïve ``<img src="…">`` would fail cross-origin on Railway because the
+ * session cookie isn't sent and ``<img>`` can't add custom headers.
+ *
+ * Edit mode (V2.3) lets the user fix anything OCR got wrong — merchant
+ * name, date, total, tax, currency, and the line items. Replaces the
+ * whole lines array on save (see web/bot_api/repo.py replace_receipt_lines
+ * for why "PATCH per line" was rejected).
+ *
+ * Smart delete/detach: when the receipt is attached to a manual cash
+ * transaction we created via "Log as cash", the confirm dialog offers to
+ * delete that cash row in the same operation. Prevents the
+ * "log as cash → re-attach to Plaid → cash row stuck in wallet → spend
+ * double-counted" trap. Plaid-imported transactions are never offered for
+ * deletion through this surface — Plaid is the source of truth.
  */
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
   Camera,
+  Check,
   CircleDashed,
   ImageOff,
   Link2,
   Link2Off,
   Loader2,
+  Pencil,
+  Plus,
   Receipt as ReceiptIcon,
   Search,
   Trash2,
   Wallet,
+  X,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -47,8 +66,17 @@ import {
 } from "@/lib/api";
 import type { Transaction } from "@/types/v2";
 import { confirm, notify, onMutationError } from "@/lib/notify";
+import { useAuthedReceiptImage } from "@/lib/use-receipt-image";
 
 import { formatCents, formatDate } from "./bot-helpers";
+
+interface DeleteRequest {
+  receipt: ReceiptRow;
+}
+
+interface DetachRequest {
+  receipt: ReceiptRow;
+}
 
 export function BotReceiptsTab() {
   const qc = useQueryClient();
@@ -58,12 +86,30 @@ export function BotReceiptsTab() {
   });
   const [openId, setOpenId] = useState<number | null>(null);
 
+  // Smart confirm dialogs sit at the parent level so they survive when
+  // the detail modal closes after a successful mutation. Each holds a
+  // snapshot of the receipt — we never read mutation.variables to derive
+  // labels (that's stale after settle).
+  const [deleteRequest, setDeleteRequest] = useState<DeleteRequest | null>(null);
+  const [detachRequest, setDetachRequest] = useState<DetachRequest | null>(null);
+
   const drop = useMutation({
-    mutationFn: (id: number) => botApi.deleteReceipt(id),
-    onSuccess: () => {
+    mutationFn: ({ id, deleteLinkedCash }: { id: number; deleteLinkedCash: boolean }) =>
+      botApi.deleteReceipt(id, { deleteLinkedCash }),
+    onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["bot", "receipts"] });
+      // Cash-tx deletion ripples into the transactions list + reports.
+      if (vars.deleteLinkedCash) {
+        qc.invalidateQueries({ queryKey: ["transactions"] });
+        qc.invalidateQueries({ queryKey: ["reports"] });
+      }
       setOpenId(null);
-      notify.success("Receipt deleted.");
+      setDeleteRequest(null);
+      notify.success(
+        vars.deleteLinkedCash
+          ? "Receipt and linked cash transaction deleted."
+          : "Receipt deleted.",
+      );
     },
     onError: onMutationError("Couldn't delete that receipt."),
   });
@@ -74,17 +120,35 @@ export function BotReceiptsTab() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["bot", "receipts"] });
       qc.invalidateQueries({ queryKey: ["bot", "receipt"] });
+      qc.invalidateQueries({ queryKey: ["transaction"] });
+      qc.invalidateQueries({ queryKey: ["transactions"] });
       notify.success("Receipt linked.");
     },
     onError: onMutationError("Couldn't link the receipt."),
   });
 
   const unlink = useMutation({
-    mutationFn: (id: number) => botApi.linkReceipt(id, null),
-    onSuccess: () => {
+    mutationFn: ({
+      id,
+      deleteLinkedCash,
+    }: {
+      id: number;
+      deleteLinkedCash: boolean;
+    }) => botApi.linkReceipt(id, null, { deleteLinkedCash }),
+    onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["bot", "receipts"] });
       qc.invalidateQueries({ queryKey: ["bot", "receipt"] });
-      notify.success("Receipt detached.");
+      qc.invalidateQueries({ queryKey: ["transaction"] });
+      if (vars.deleteLinkedCash) {
+        qc.invalidateQueries({ queryKey: ["transactions"] });
+        qc.invalidateQueries({ queryKey: ["reports"] });
+      }
+      setDetachRequest(null);
+      notify.success(
+        vars.deleteLinkedCash
+          ? "Receipt detached and cash transaction deleted."
+          : "Receipt detached.",
+      );
     },
     onError: onMutationError("Couldn't detach the receipt."),
   });
@@ -102,16 +166,35 @@ export function BotReceiptsTab() {
 
   const [pickerForId, setPickerForId] = useState<number | null>(null);
 
-  const requestDelete = async (id: number, name: string | null | undefined) => {
-    const ok = await confirm({
-      title: "Delete receipt?",
-      description: name
-        ? `${name} — the linked cash transaction stays put; only the photo + lines are removed.`
-        : "The linked cash transaction stays put; only the photo + lines are removed.",
-      destructive: true,
-      confirmLabel: "Delete",
-    });
-    if (ok) drop.mutate(id);
+  // Delete entry-point — receipt is the in-memory snapshot from the
+  // detail modal so we know whether linked_is_manual_cash is true and
+  // can render the smart confirm with the cash-tx amount inline.
+  const requestDelete = (receipt: ReceiptRow) => {
+    if (receipt.linked_is_manual_cash) {
+      setDeleteRequest({ receipt });
+      return;
+    }
+    // Non-cash linked or fully unlinked → normal one-shot confirm.
+    void (async () => {
+      const ok = await confirm({
+        title: "Delete receipt?",
+        description: receipt.merchant_name
+          ? `${receipt.merchant_name} — only the photo + parsed lines are removed.`
+          : "Only the photo + parsed lines are removed.",
+        destructive: true,
+        confirmLabel: "Delete",
+      });
+      if (ok) drop.mutate({ id: receipt.id, deleteLinkedCash: false });
+    })();
+  };
+
+  const requestDetach = (receipt: ReceiptRow) => {
+    if (receipt.linked_is_manual_cash) {
+      setDetachRequest({ receipt });
+      return;
+    }
+    // Plaid-imported tx — just detach. The Plaid row stays untouched.
+    unlink.mutate({ id: receipt.id, deleteLinkedCash: false });
   };
 
   return (
@@ -210,12 +293,12 @@ export function BotReceiptsTab() {
       <ReceiptDetail
         id={openId}
         onClose={() => setOpenId(null)}
-        onDelete={(name) => openId && requestDelete(openId, name)}
-        onUnlink={() => openId && unlink.mutate(openId)}
+        onDelete={requestDelete}
+        onDetach={requestDetach}
         onLogAsCash={() => openId && logAsCash.mutate(openId)}
         onAttachClick={() => openId && setPickerForId(openId)}
-        deleting={drop.isPending}
-        unlinking={unlink.isPending}
+        deleting={drop.isPending || deleteRequest != null}
+        unlinking={unlink.isPending || detachRequest != null}
         loggingCash={logAsCash.isPending}
       />
 
@@ -236,62 +319,242 @@ export function BotReceiptsTab() {
           }
         }}
       />
+
+      <DeleteReceiptDialog
+        request={deleteRequest}
+        onCancel={() => setDeleteRequest(null)}
+        onConfirm={(deleteLinkedCash) =>
+          deleteRequest &&
+          drop.mutate({ id: deleteRequest.receipt.id, deleteLinkedCash })
+        }
+        pending={drop.isPending}
+      />
+
+      <DetachReceiptDialog
+        request={detachRequest}
+        onCancel={() => setDetachRequest(null)}
+        onConfirm={(deleteLinkedCash) =>
+          detachRequest &&
+          unlink.mutate({ id: detachRequest.receipt.id, deleteLinkedCash })
+        }
+        pending={unlink.isPending}
+      />
     </div>
   );
 }
 
-/**
- * Fetch + cache a receipt image as an in-memory blob URL. The naive
- * ``<img src="…/image">`` works only same-origin — once frontend and
- * backend deploy to different hosts (Railway in production), the
- * session cookie isn't sent and the Bearer-token fallback in
- * :func:`apiRequest` can't ride along on an ``<img>`` tag (no custom
- * headers). Fetching here and using ``URL.createObjectURL`` solves both.
- */
-function useAuthedReceiptImage(receiptId: number | null, hasImage: boolean) {
-  const [src, setSrc] = useState<string | null>(null);
-  const [error, setError] = useState(false);
-  const [loading, setLoading] = useState(false);
+// ---------------------------------------------------------------------------
+// Smart confirm dialogs — used when the receipt is attached to a manual
+// cash transaction we created via "Log as cash". Both follow the same
+// shape: a checkbox lets the user co-delete the orphan cash row in the
+// same operation, defaulted ON because that's almost always what they
+// want (avoiding the double-counting trap).
+// ---------------------------------------------------------------------------
 
+function DeleteReceiptDialog({
+  request,
+  onCancel,
+  onConfirm,
+  pending,
+}: {
+  request: DeleteRequest | null;
+  onCancel: () => void;
+  onConfirm: (deleteLinkedCash: boolean) => void;
+  pending: boolean;
+}) {
+  const [alsoDelete, setAlsoDelete] = useState(true);
+  // Reset the toggle each time a new dialog opens so the user's previous
+  // choice doesn't sneakily carry over to a different receipt.
   useEffect(() => {
-    setSrc(null);
-    setError(false);
-    if (!receiptId || !hasImage) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    let cancelled = false;
-    let blobUrl: string | null = null;
-    botApi
-      .fetchReceiptImageBlob(receiptId)
-      .then((blob) => {
-        if (cancelled) return;
-        blobUrl = URL.createObjectURL(blob);
-        setSrc(blobUrl);
-        setLoading(false);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setError(true);
-        setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-      // Free the blob even if the user closes the modal mid-fetch — we
-      // don't want a few hundred KB hanging on per receipt opened.
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
-    };
-  }, [receiptId, hasImage]);
+    if (request) setAlsoDelete(true);
+  }, [request]);
 
-  return { src, error, loading };
+  if (!request) return null;
+  const r = request.receipt;
+  const amount = r.total_cents != null ? formatCents(r.total_cents) : "the cash";
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onCancel()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete receipt?</DialogTitle>
+          <DialogDescription>
+            {r.merchant_name
+              ? `${r.merchant_name} — the photo and parsed lines will be removed.`
+              : "The photo and parsed lines will be removed."}
+          </DialogDescription>
+        </DialogHeader>
+        <label className="flex items-start gap-2.5 rounded-md border bg-muted/30 p-3 text-sm">
+          <Switch
+            checked={alsoDelete}
+            onCheckedChange={setAlsoDelete}
+            aria-label="Also delete the linked cash transaction"
+            className="mt-0.5"
+          />
+          <span className="flex flex-col gap-0.5">
+            <span className="font-medium">
+              Also delete the linked {amount} cash transaction
+            </span>
+            <span className="text-xs text-muted-foreground">
+              You logged this receipt as cash — leaving it standing would
+              keep the spend in your wallet without any photo to back it up.
+            </span>
+          </span>
+        </label>
+        <DialogFooter className="gap-2 sm:gap-2">
+          <Button variant="outline" onClick={onCancel} disabled={pending}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={() => onConfirm(alsoDelete)}
+            disabled={pending}
+          >
+            {pending ? (
+              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+            ) : (
+              <Trash2 className="mr-1 h-4 w-4" />
+            )}
+            Delete
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DetachReceiptDialog({
+  request,
+  onCancel,
+  onConfirm,
+  pending,
+}: {
+  request: DetachRequest | null;
+  onCancel: () => void;
+  onConfirm: (deleteLinkedCash: boolean) => void;
+  pending: boolean;
+}) {
+  const [alsoDelete, setAlsoDelete] = useState(true);
+  useEffect(() => {
+    if (request) setAlsoDelete(true);
+  }, [request]);
+
+  if (!request) return null;
+  const r = request.receipt;
+  const amount = r.total_cents != null ? formatCents(r.total_cents) : "the cash";
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onCancel()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Detach receipt?</DialogTitle>
+          <DialogDescription>
+            The receipt becomes unlinked. You can re-attach it to any
+            transaction later.
+          </DialogDescription>
+        </DialogHeader>
+        <label className="flex items-start gap-2.5 rounded-md border bg-muted/30 p-3 text-sm">
+          <Switch
+            checked={alsoDelete}
+            onCheckedChange={setAlsoDelete}
+            aria-label="Also delete the linked cash transaction"
+            className="mt-0.5"
+          />
+          <span className="flex flex-col gap-0.5">
+            <span className="font-medium">
+              Also delete the linked {amount} cash transaction
+            </span>
+            <span className="text-xs text-muted-foreground">
+              Re-attaching this receipt to a real bank transaction without
+              removing the cash row would count the same spend twice.
+            </span>
+          </span>
+        </label>
+        <DialogFooter className="gap-2 sm:gap-2">
+          <Button variant="outline" onClick={onCancel} disabled={pending}>
+            Cancel
+          </Button>
+          <Button onClick={() => onConfirm(alsoDelete)} disabled={pending}>
+            {pending ? (
+              <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+            ) : (
+              <Link2Off className="mr-1 h-4 w-4" />
+            )}
+            Detach
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Edit-mode form state. We model lines as plain objects with a stable
+// ``localKey`` so React keys stay sensible even after add/remove (DB id
+// would be undefined for newly-added rows).
+// ---------------------------------------------------------------------------
+
+interface EditLineDraft {
+  localKey: string;
+  description: string;
+  quantity: string;
+  unit_price: string;
+  total: string;
+}
+
+interface EditFormState {
+  merchant_name: string;
+  receipt_date: string;
+  total: string;
+  tax: string;
+  currency: string;
+  lines: EditLineDraft[];
+}
+
+function buildInitialEditForm(r: ReceiptRow): EditFormState {
+  return {
+    merchant_name: r.merchant_name ?? "",
+    receipt_date: r.receipt_date ?? "",
+    total: r.total_cents != null ? (r.total_cents / 100).toFixed(2) : "",
+    tax: r.tax_cents != null ? (r.tax_cents / 100).toFixed(2) : "",
+    currency: r.currency || "USD",
+    lines: r.lines.map((l, i) => ({
+      localKey: `db-${l.id}-${i}`,
+      description: l.description,
+      quantity: l.quantity != null ? String(l.quantity) : "",
+      unit_price:
+        l.unit_price_cents != null
+          ? (l.unit_price_cents / 100).toFixed(2)
+          : "",
+      total: (l.total_cents / 100).toFixed(2),
+    })),
+  };
+}
+
+// Centralise the dollars→cents parse so empty / garbage input becomes
+// ``null`` predictably (the API treats missing fields as "no change",
+// so we only send keys the user actually touched).
+function parseDollars(value: string): number | null {
+  const trimmed = value.replace(/[$,\s]/g, "");
+  if (!trimmed) return null;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n)) return null;
+  return Math.round(n * 100);
+}
+
+function parseQuantity(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
 }
 
 function ReceiptDetail({
   id,
   onClose,
   onDelete,
-  onUnlink,
+  onDetach,
   onLogAsCash,
   onAttachClick,
   deleting,
@@ -300,14 +563,15 @@ function ReceiptDetail({
 }: {
   id: number | null;
   onClose: () => void;
-  onDelete: (name: string | null | undefined) => void;
-  onUnlink: () => void;
+  onDelete: (receipt: ReceiptRow) => void;
+  onDetach: (receipt: ReceiptRow) => void;
   onLogAsCash: () => void;
   onAttachClick: () => void;
   deleting: boolean;
   unlinking: boolean;
   loggingCash: boolean;
 }) {
+  const qc = useQueryClient();
   const detail = useQuery({
     queryKey: ["bot", "receipt", id],
     queryFn: () => (id ? botApi.getReceipt(id) : Promise.resolve(null)),
@@ -317,14 +581,122 @@ function ReceiptDetail({
   const open = id != null;
   const image = useAuthedReceiptImage(id, !!r?.has_image);
 
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState<EditFormState | null>(null);
+
+  // Reset edit state whenever the open receipt changes — closing one
+  // modal and immediately opening another should never leak the old
+  // draft across rows.
+  useEffect(() => {
+    setEditing(false);
+    setForm(null);
+  }, [id]);
+
+  const startEdit = () => {
+    if (!r) return;
+    setForm(buildInitialEditForm(r));
+    setEditing(true);
+  };
+
+  const cancelEdit = () => {
+    setEditing(false);
+    setForm(null);
+  };
+
+  const saveHeader = useMutation({
+    mutationFn: (patch: Parameters<typeof botApi.updateReceipt>[1]) =>
+      botApi.updateReceipt(id!, patch),
+    onError: onMutationError("Couldn't save those changes."),
+  });
+
+  const saveLines = useMutation({
+    mutationFn: (lines: Parameters<typeof botApi.replaceReceiptLines>[1]) =>
+      botApi.replaceReceiptLines(id!, lines),
+    onError: onMutationError("Couldn't save the line items."),
+  });
+
+  // Composite save — header first, then lines, then a single toast.
+  // Sequencing on the FE keeps the API simple (no bulk endpoint needed)
+  // and lets us roll back the dialog state only when both succeeded.
+  const submitEdit = async () => {
+    if (!form || !id || !r) return;
+
+    const headerPatch: Parameters<typeof botApi.updateReceipt>[1] = {};
+    const merchant = form.merchant_name.trim();
+    if (merchant !== (r.merchant_name ?? "")) {
+      headerPatch.merchant_name = merchant || null;
+    }
+    if (form.receipt_date && form.receipt_date !== (r.receipt_date ?? "")) {
+      headerPatch.receipt_date = form.receipt_date;
+    }
+    const totalCents = parseDollars(form.total);
+    if (totalCents != null && totalCents !== r.total_cents) {
+      headerPatch.total_cents = totalCents;
+    }
+    const taxCents = parseDollars(form.tax);
+    if (taxCents !== (r.tax_cents ?? null) && form.tax.trim() !== "") {
+      headerPatch.tax_cents = taxCents ?? undefined;
+    }
+    const currency = form.currency.trim().toUpperCase().slice(0, 3);
+    if (currency && currency !== r.currency) {
+      headerPatch.currency = currency;
+    }
+
+    // Lines are always shipped as a full replacement when the user opens
+    // edit mode — the diff isn't worth it for short lists, and the
+    // backend's PUT endpoint expects the canonical array anyway.
+    const linesPayload = form.lines
+      .map((line) => {
+        const desc = line.description.trim();
+        const totalCentsLine = parseDollars(line.total);
+        if (!desc || totalCentsLine == null) return null;
+        return {
+          description: desc,
+          quantity: parseQuantity(line.quantity),
+          unit_price_cents: parseDollars(line.unit_price),
+          total_cents: totalCentsLine,
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+
+    if (Object.keys(headerPatch).length > 0) {
+      await saveHeader.mutateAsync(headerPatch);
+    }
+    // Detect whether lines actually changed — avoids a noop write that
+    // bumps timestamps for nothing.
+    const linesChanged = (() => {
+      if (linesPayload.length !== r.lines.length) return true;
+      for (let i = 0; i < linesPayload.length; i++) {
+        const a = linesPayload[i];
+        const b = r.lines[i];
+        if (a.description !== b.description) return true;
+        if (a.total_cents !== b.total_cents) return true;
+        if ((a.quantity ?? null) !== (b.quantity ?? null)) return true;
+        if ((a.unit_price_cents ?? null) !== (b.unit_price_cents ?? null))
+          return true;
+      }
+      return false;
+    })();
+    if (linesChanged) {
+      await saveLines.mutateAsync(linesPayload);
+    }
+
+    qc.invalidateQueries({ queryKey: ["bot", "receipt", id] });
+    qc.invalidateQueries({ queryKey: ["bot", "receipts"] });
+    qc.invalidateQueries({ queryKey: ["transaction"] });
+    notify.success("Receipt updated.");
+    setEditing(false);
+    setForm(null);
+  };
+
+  const isSaving = saveHeader.isPending || saveLines.isPending;
+
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       {/*
-        max-h + flex column lets the body scroll while the header and the
-        action footer stay anchored. Without this the image (often a tall
-        portrait shot of a paper receipt) would push the Delete / Attach
-        buttons below the viewport and the user couldn't reach them
-        without zooming the browser out.
+        max-h + flex column: body scrolls, header + footer pinned. Without
+        this a tall portrait receipt would push the action footer (and
+        therefore Delete) below the viewport.
       */}
       <DialogContent className="flex max-h-[90vh] max-w-2xl flex-col gap-0 p-0">
         <DialogHeader className="flex-row items-center justify-between gap-3 border-b px-5 py-3">
@@ -333,26 +705,33 @@ function ReceiptDetail({
             <span className="truncate">{r?.merchant_name || "Receipt"}</span>
           </DialogTitle>
           {/*
-            Delete moved into the header so it's always reachable, even on
-            tall receipts where the body scrolls. The dialog's close button
-            sits to the right of this via Radix's built-in.
+            Edit / Cancel sits next to the title. mr-6 keeps it clear of
+            Radix's built-in close button (top-right). Delete moved to the
+            footer where it can't be mis-tapped on the way to closing.
           */}
           {r ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => onDelete(r.merchant_name)}
-              disabled={deleting}
-              className="mr-6 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              title="Delete receipt"
-            >
-              {deleting ? (
-                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-              ) : (
-                <Trash2 className="mr-1 h-4 w-4" />
-              )}
-              Delete
-            </Button>
+            editing ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={cancelEdit}
+                disabled={isSaving}
+                className="mr-6 shrink-0"
+              >
+                <X className="mr-1 h-4 w-4" />
+                Cancel
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={startEdit}
+                className="mr-6 shrink-0"
+              >
+                <Pencil className="mr-1 h-4 w-4" />
+                Edit
+              </Button>
+            )
           ) : null}
         </DialogHeader>
 
@@ -384,12 +763,6 @@ function ReceiptDetail({
                   <img
                     src={image.src}
                     alt="Receipt"
-                    /*
-                      object-contain + capped height keeps tall portrait
-                      receipts inside the viewport and never crops their
-                      content; the user can still see the whole photo.
-                      Width is full-card so landscape receipts also fit.
-                    */
                     className="max-h-[60vh] w-full object-contain"
                   />
                 )
@@ -403,112 +776,355 @@ function ReceiptDetail({
               )}
             </div>
             <div className="flex min-w-0 flex-col gap-3">
-              <dl className="grid grid-cols-2 gap-y-1.5 text-sm">
-                <dt className="text-muted-foreground">Total</dt>
-                <dd className="text-right font-mono font-medium">
-                  {r.total_cents != null ? formatCents(r.total_cents) : "—"}
-                </dd>
-                {r.tax_cents != null ? (
-                  <>
-                    <dt className="text-muted-foreground">Tax</dt>
-                    <dd className="text-right font-mono">
-                      {formatCents(r.tax_cents)}
-                    </dd>
-                  </>
-                ) : null}
-                <dt className="text-muted-foreground">Date</dt>
-                <dd className="text-right">{formatDate(r.receipt_date)}</dd>
-              </dl>
-              <div>
-                <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Lines
-                </h3>
-                {r.lines.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    No line items captured.
-                  </p>
-                ) : (
-                  <ul className="space-y-1 rounded-md border bg-muted/20 p-2 text-sm">
-                    {r.lines.map((l) => (
-                      <li
-                        key={l.id}
-                        className="flex items-baseline justify-between gap-2"
-                      >
-                        <span className="truncate">{l.description}</span>
-                        <span className="font-mono text-xs">
-                          {formatCents(l.total_cents)}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
+              {editing && form ? (
+                <ReceiptEditPanel
+                  form={form}
+                  setForm={setForm}
+                  saving={isSaving}
+                />
+              ) : (
+                <ReceiptViewPanel receipt={r} />
+              )}
             </div>
           </div>
         )}
 
-        {/*
-          Sticky footer for the link/unlink/log-as-cash actions. Always
-          visible regardless of body scroll position so the primary action
-          on an unlinked receipt ("Attach" / "Log as cash") is one tap
-          away.
-        */}
         {r ? (
-          <div className="border-t bg-muted/20 px-5 py-3 text-sm">
-            {r.transaction_id ? (
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Link2 className="h-3.5 w-3.5 text-emerald-500" />
-                  <span>Linked to transaction #{r.transaction_id}</span>
-                </div>
+          <div className="flex flex-col gap-2 border-t bg-muted/20 px-5 py-3 text-sm">
+            {editing ? (
+              <div className="flex justify-end gap-2">
                 <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={onUnlink}
-                  disabled={unlinking}
+                  variant="outline"
+                  onClick={cancelEdit}
+                  disabled={isSaving}
                 >
-                  {unlinking ? (
-                    <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                  Cancel
+                </Button>
+                <Button onClick={submitEdit} disabled={isSaving}>
+                  {isSaving ? (
+                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
                   ) : (
-                    <Link2Off className="mr-1 h-3.5 w-3.5" />
+                    <Check className="mr-1 h-4 w-4" />
                   )}
-                  Detach
+                  Save changes
                 </Button>
               </div>
             ) : (
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-amber-600 dark:text-amber-400">
-                  Not linked to a transaction yet.
-                </span>
-                <div className="flex gap-1">
+              <>
+                {/* Link / detach / log-as-cash row */}
+                {r.transaction_id ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Link2 className="h-3.5 w-3.5 text-emerald-500" />
+                      <span>
+                        Linked to transaction #{r.transaction_id}
+                      </span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onDetach(r)}
+                      disabled={unlinking}
+                    >
+                      {unlinking ? (
+                        <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Link2Off className="mr-1 h-3.5 w-3.5" />
+                      )}
+                      Detach
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-amber-600 dark:text-amber-400">
+                      Not linked to a transaction yet.
+                    </span>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={onAttachClick}
+                      >
+                        <Link2 className="mr-1 h-3.5 w-3.5" />
+                        Attach…
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={onLogAsCash}
+                        disabled={loggingCash}
+                      >
+                        {loggingCash ? (
+                          <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Wallet className="mr-1 h-3.5 w-3.5" />
+                        )}
+                        Log as cash
+                      </Button>
+                    </div>
+                  </div>
+                )}
+                {/*
+                  Delete in its own row, far from the Radix close button
+                  in the header — earlier feedback called the previous
+                  placement "dangerously close" to dismiss.
+                */}
+                <div className="flex justify-end border-t pt-2">
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="sm"
-                    onClick={onAttachClick}
+                    onClick={() => onDelete(r)}
+                    disabled={deleting}
+                    className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                   >
-                    <Link2 className="mr-1 h-3.5 w-3.5" />
-                    Attach…
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={onLogAsCash}
-                    disabled={loggingCash}
-                  >
-                    {loggingCash ? (
-                      <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                    {deleting ? (
+                      <Loader2 className="mr-1 h-4 w-4 animate-spin" />
                     ) : (
-                      <Wallet className="mr-1 h-3.5 w-3.5" />
+                      <Trash2 className="mr-1 h-4 w-4" />
                     )}
-                    Log as cash
+                    Delete receipt
                   </Button>
                 </div>
-              </div>
+              </>
             )}
           </div>
         ) : null}
       </DialogContent>
     </Dialog>
+  );
+}
+
+function ReceiptViewPanel({ receipt }: { receipt: ReceiptRow }) {
+  return (
+    <>
+      <dl className="grid grid-cols-2 gap-y-1.5 text-sm">
+        <dt className="text-muted-foreground">Total</dt>
+        <dd className="text-right font-mono font-medium">
+          {receipt.total_cents != null
+            ? formatCents(receipt.total_cents)
+            : "—"}
+        </dd>
+        {receipt.tax_cents != null ? (
+          <>
+            <dt className="text-muted-foreground">Tax</dt>
+            <dd className="text-right font-mono">
+              {formatCents(receipt.tax_cents)}
+            </dd>
+          </>
+        ) : null}
+        <dt className="text-muted-foreground">Date</dt>
+        <dd className="text-right">{formatDate(receipt.receipt_date)}</dd>
+        <dt className="text-muted-foreground">Currency</dt>
+        <dd className="text-right font-mono text-xs">{receipt.currency}</dd>
+      </dl>
+      <div>
+        <h3 className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Lines
+        </h3>
+        {receipt.lines.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No line items captured.
+          </p>
+        ) : (
+          <ul className="space-y-1 rounded-md border bg-muted/20 p-2 text-sm">
+            {receipt.lines.map((l) => (
+              <li
+                key={l.id}
+                className="flex items-baseline justify-between gap-2"
+              >
+                <span className="truncate">{l.description}</span>
+                <span className="font-mono text-xs">
+                  {formatCents(l.total_cents)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </>
+  );
+}
+
+function ReceiptEditPanel({
+  form,
+  setForm,
+  saving,
+}: {
+  form: EditFormState;
+  setForm: (next: EditFormState | null | ((prev: EditFormState | null) => EditFormState | null)) => void;
+  saving: boolean;
+}) {
+  const updateLine = (idx: number, patch: Partial<EditLineDraft>) =>
+    setForm((prev) =>
+      prev
+        ? {
+            ...prev,
+            lines: prev.lines.map((l, i) => (i === idx ? { ...l, ...patch } : l)),
+          }
+        : prev,
+    );
+  const removeLine = (idx: number) =>
+    setForm((prev) =>
+      prev ? { ...prev, lines: prev.lines.filter((_, i) => i !== idx) } : prev,
+    );
+  const addLine = () =>
+    setForm((prev) =>
+      prev
+        ? {
+            ...prev,
+            lines: [
+              ...prev.lines,
+              {
+                localKey: `new-${Date.now()}-${prev.lines.length}`,
+                description: "",
+                quantity: "",
+                unit_price: "",
+                total: "",
+              },
+            ],
+          }
+        : prev,
+    );
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-2 gap-2 text-sm">
+        <div className="col-span-2 grid gap-1">
+          <Label htmlFor="r-merchant" className="text-xs">
+            Merchant
+          </Label>
+          <Input
+            id="r-merchant"
+            value={form.merchant_name}
+            disabled={saving}
+            onChange={(e) =>
+              setForm((p) => (p ? { ...p, merchant_name: e.target.value } : p))
+            }
+          />
+        </div>
+        <div className="grid gap-1">
+          <Label htmlFor="r-date" className="text-xs">
+            Date
+          </Label>
+          <Input
+            id="r-date"
+            type="date"
+            value={form.receipt_date}
+            disabled={saving}
+            onChange={(e) =>
+              setForm((p) => (p ? { ...p, receipt_date: e.target.value } : p))
+            }
+          />
+        </div>
+        <div className="grid gap-1">
+          <Label htmlFor="r-currency" className="text-xs">
+            Currency
+          </Label>
+          <Input
+            id="r-currency"
+            value={form.currency}
+            maxLength={3}
+            disabled={saving}
+            onChange={(e) =>
+              setForm((p) =>
+                p ? { ...p, currency: e.target.value.toUpperCase() } : p,
+              )
+            }
+            className="font-mono uppercase"
+          />
+        </div>
+        <div className="grid gap-1">
+          <Label htmlFor="r-total" className="text-xs">
+            Total
+          </Label>
+          <Input
+            id="r-total"
+            inputMode="decimal"
+            value={form.total}
+            disabled={saving}
+            onChange={(e) =>
+              setForm((p) => (p ? { ...p, total: e.target.value } : p))
+            }
+            className="text-right font-mono"
+          />
+        </div>
+        <div className="grid gap-1">
+          <Label htmlFor="r-tax" className="text-xs">
+            Tax
+          </Label>
+          <Input
+            id="r-tax"
+            inputMode="decimal"
+            value={form.tax}
+            disabled={saving}
+            onChange={(e) =>
+              setForm((p) => (p ? { ...p, tax: e.target.value } : p))
+            }
+            className="text-right font-mono"
+          />
+        </div>
+      </div>
+      <div>
+        <div className="mb-1.5 flex items-center justify-between">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Lines
+          </h3>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={addLine}
+            disabled={saving}
+            className="h-7 px-2 text-xs"
+          >
+            <Plus className="mr-1 h-3.5 w-3.5" />
+            Add line
+          </Button>
+        </div>
+        {form.lines.length === 0 ? (
+          <p className="rounded-md border border-dashed py-4 text-center text-xs text-muted-foreground">
+            No line items. Add one to itemise the receipt.
+          </p>
+        ) : (
+          <ul className="space-y-2 rounded-md border bg-muted/20 p-2">
+            {form.lines.map((l, idx) => (
+              <li
+                key={l.localKey}
+                className="grid grid-cols-[1fr,80px,40px] items-center gap-1.5 text-sm"
+              >
+                <Input
+                  value={l.description}
+                  placeholder="Description"
+                  disabled={saving}
+                  onChange={(e) =>
+                    updateLine(idx, { description: e.target.value })
+                  }
+                  className="h-8 text-sm"
+                />
+                <Input
+                  value={l.total}
+                  placeholder="0.00"
+                  inputMode="decimal"
+                  disabled={saving}
+                  onChange={(e) => updateLine(idx, { total: e.target.value })}
+                  className="h-8 text-right font-mono text-xs"
+                />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => removeLine(idx)}
+                  disabled={saving}
+                  className="h-8 w-8 p-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  title="Remove line"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span className="sr-only">Remove</span>
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
   );
 }
 

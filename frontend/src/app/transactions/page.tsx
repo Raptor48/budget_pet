@@ -31,6 +31,7 @@ import {
   Info,
   Loader2,
   MapPin,
+  Receipt,
   Settings,
   StickyNote,
   Store,
@@ -42,6 +43,7 @@ import {
 } from "lucide-react";
 
 import { AddCashTransactionDialog } from "@/app/transactions/_components/add-cash-transaction-dialog";
+import { TransactionReceiptSection } from "@/app/transactions/_components/transaction-receipt-section";
 import { CreateRuleFromTransactionButton } from "@/app/transactions/_components/create-rule-from-transaction-button";
 import { InternalTransferSettingsDialog } from "@/app/transactions/_components/internal-transfer-settings-dialog";
 import { RenameMerchantPopover } from "@/app/transactions/_components/rename-merchant-popover";
@@ -699,6 +701,16 @@ function TransactionDetailsDialog({
                       Pending
                     </Badge>
                   ) : null}
+                  {transaction.has_receipt ? (
+                    <Badge
+                      variant="outline"
+                      className="gap-1 text-[10px] uppercase tracking-wide"
+                      title="A scanned receipt is attached. Expand the Receipt section below to see line items."
+                    >
+                      <Receipt className="size-3" />
+                      Receipt
+                    </Badge>
+                  ) : null}
                 </div>
                 <div className="-ml-1 pt-1">
                   <RenameMerchantPopover tx={transaction} />
@@ -940,6 +952,12 @@ function TransactionDetailsDialog({
                   className="flex-1"
                 />
               </div>
+              {transaction.has_receipt ? (
+                <TransactionReceiptSection
+                  transactionId={transaction.id}
+                  hasReceipt={transaction.has_receipt}
+                />
+              ) : null}
             </div>
             {syncedAgo ? (
               <p className="px-5 pb-3 text-[10px] text-muted-foreground/70">
@@ -2176,6 +2194,12 @@ function FragmentRow({
                 >
                   Pending
                 </Badge>
+              ) : null}
+              {tx.has_receipt ? (
+                <Receipt
+                  className="size-3.5 shrink-0 text-muted-foreground"
+                  aria-label="Receipt attached"
+                />
               ) : null}
               {tx.is_private ? (
                 <TooltipProvider delayDuration={200}>

@@ -269,6 +269,12 @@ export interface Transaction {
   updated_at: string;
   tags: Tag[];
   has_splits: boolean;
+  /**
+   * True when a receipt is attached to this transaction. Drives the
+   * receipt-icon affordance in the list + an expandable lines breakdown
+   * in the detail modal. The receipt payload itself is fetched on demand.
+   */
+  has_receipt: boolean;
   splits: TransactionSplit[];
   /** Joined from accounts table */
   account_name: string | null;

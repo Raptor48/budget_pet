@@ -12,6 +12,7 @@ UX rules:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import date, datetime, timedelta
@@ -774,7 +775,19 @@ async def on_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     bio = _io.BytesIO()
     await file.download_to_memory(out=bio)
-    image_bytes = bio.getvalue()
+    raw_bytes = bio.getvalue()
+
+    # Resize + JPEG-recompress before storage AND before OCR. iPhone shots
+    # are 3-4 MB at 3024×4032; trimming to 1600 px max edge produces
+    # ~350 KB with no OCR-relevant quality loss (gpt-4o-mini tiles at
+    # 512 px). Smaller bytes = smaller Postgres footprint, faster OpenAI
+    # upload, and EXIF (GPS!) gets stripped as a privacy bonus.
+    from web.telegram.image_processing import normalise_receipt_image
+
+    image_bytes, image_mime = await asyncio.to_thread(
+        normalise_receipt_image, raw_bytes
+    )
+
     await update.message.reply_text("📸 Scanning receipt…")
     try:
         from web.telegram.ocr import extract_receipt
@@ -812,7 +825,7 @@ async def on_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     receipt = await get_bot_repo().create_receipt(
         user_id=user["id"],
         image_data=image_bytes,
-        image_mime="image/jpeg",
+        image_mime=image_mime,
         merchant_name=parsed.get("merchant_name"),
         receipt_date=parsed.get("date"),
         total_cents=total_cents,

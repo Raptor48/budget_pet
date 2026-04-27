@@ -206,7 +206,8 @@ class TransactionsRepository:
                        a.mask     AS account_mask,
                        u.username AS owner_username,
                        ma.display_name AS merchant_alias,
-                       EXISTS(SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id) AS has_splits
+                       EXISTS(SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id) AS has_splits,
+                       EXISTS(SELECT 1 FROM receipts r WHERE r.transaction_id = t.id) AS has_receipt
                 FROM transactions t
             """
         else:
@@ -216,7 +217,8 @@ class TransactionsRepository:
                        a.mask     AS account_mask,
                        u.username AS owner_username,
                        ma.display_name AS merchant_alias,
-                       EXISTS(SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id) AS has_splits
+                       EXISTS(SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id) AS has_splits,
+                       EXISTS(SELECT 1 FROM receipts r WHERE r.transaction_id = t.id) AS has_receipt
                 FROM transactions t
             """
 
@@ -302,7 +304,8 @@ class TransactionsRepository:
                        u.username AS owner_username,
                        a.user_id  AS account_user_id,
                        ma.display_name AS merchant_alias,
-                       EXISTS(SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id) AS has_splits
+                       EXISTS(SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id) AS has_splits,
+                       EXISTS(SELECT 1 FROM receipts r WHERE r.transaction_id = t.id) AS has_receipt
                 FROM transactions t
                 LEFT JOIN accounts a ON a.id = t.account_id
                 LEFT JOIN users u ON a.user_id = u.id

@@ -213,7 +213,53 @@ class ReceiptOut(BaseModel):
     created_at: datetime
     image_mime: Optional[str] = None
     has_image: bool = True
+    # True iff the receipt is attached to a manual-source transaction on a
+    # non-Plaid account (i.e. one we created via "Log as cash"). The FE
+    # uses this to gate the "also delete the linked cash transaction"
+    # checkbox on delete/detach so we never offer to delete a Plaid row.
+    linked_is_manual_cash: bool = False
     lines: List[ReceiptLineOut] = []
+
+
+class ReceiptUpdate(BaseModel):
+    """Editable header fields on a receipt.
+
+    All fields optional — Pydantic skips ``None`` so the SQL UPDATE only
+    touches what the client actually sent. ``currency`` is constrained to
+    3 alpha chars to mirror the OCR sanitiser.
+    """
+
+    merchant_name: Optional[str] = Field(None, max_length=200)
+    receipt_date: Optional[date] = None
+    total_cents: Optional[int] = Field(None, ge=0)
+    tax_cents: Optional[int] = Field(None, ge=0)
+    currency: Optional[str] = Field(None, min_length=1, max_length=3)
+
+    @field_validator("currency")
+    @classmethod
+    def _upper_currency(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        cleaned = "".join(ch for ch in v if ch.isalpha()).upper()[:3]
+        return cleaned or None
+
+
+class ReceiptLineUpdate(BaseModel):
+    """One row in a receipt's line-items list, used by ``replace_receipt_lines``.
+
+    ``id`` is intentionally omitted — replace_receipt_lines wipes existing
+    rows and re-inserts in order. The FE rebuilds line_number from array
+    position so reordering also works without a separate endpoint.
+    """
+
+    description: str = Field(..., min_length=1, max_length=200)
+    quantity: Optional[float] = Field(None, ge=0)
+    unit_price_cents: Optional[int] = None
+    total_cents: int
+
+
+class ReceiptLinesReplace(BaseModel):
+    lines: List[ReceiptLineUpdate]
 
 
 # ---------------------------------------------------------------------------

@@ -949,28 +949,178 @@ class BotRepository:
             )
 
     async def link_receipt(
-        self, user_id: int, receipt_id: int, transaction_id: Optional[int]
+        self,
+        user_id: int,
+        receipt_id: int,
+        transaction_id: Optional[int],
+        *,
+        delete_linked_cash: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """Link or unlink a receipt to a transaction.
 
         Caller scopes by ``user_id`` so a partner can only manage their own
         receipts. Pass ``transaction_id=None`` to detach.
+
+        When detaching (``transaction_id=None``) AND
+        ``delete_linked_cash=True`` AND the receipt was previously
+        attached to a manual cash transaction, the now-orphan cash row
+        is deleted in the same DB transaction. This prevents the
+        common "log as cash → re-attach to Plaid tx → cash row stuck
+        in wallet, money double-counted" pattern.
+        """
+        pool = await self._pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                prev = await conn.fetchrow(
+                    """
+                    SELECT r.transaction_id AS prev_txn_id,
+                           t.source,
+                           a.plaid_account_id IS NOT NULL AS is_bank_tx
+                    FROM receipts r
+                    LEFT JOIN transactions t ON t.id = r.transaction_id
+                    LEFT JOIN accounts a ON a.id = t.account_id
+                    WHERE r.id = $1 AND r.user_id = $2
+                    """,
+                    receipt_id,
+                    user_id,
+                )
+                if not prev:
+                    return None
+                row = await conn.fetchrow(
+                    """
+                    UPDATE receipts SET transaction_id = $3
+                    WHERE id = $1 AND user_id = $2
+                    RETURNING id
+                    """,
+                    receipt_id,
+                    user_id,
+                    transaction_id,
+                )
+                if not row:
+                    return None
+                detaching = transaction_id is None
+                prev_was_manual_cash = (
+                    prev["prev_txn_id"]
+                    and prev["source"] == "manual"
+                    and not prev["is_bank_tx"]
+                )
+                if detaching and delete_linked_cash and prev_was_manual_cash:
+                    await conn.execute(
+                        "DELETE FROM transactions WHERE id = $1",
+                        int(prev["prev_txn_id"]),
+                    )
+        return await self.get_receipt(user_id, receipt_id)
+
+    async def update_receipt(
+        self,
+        user_id: int,
+        receipt_id: int,
+        patch: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        """Patch the editable header fields of a receipt.
+
+        Only keys present in ``patch`` are applied — Pydantic on the
+        route filters None-valued fields out of ``model_dump`` for us.
+        Returns the refreshed row (with lines) or None if the receipt
+        doesn't belong to ``user_id``.
+        """
+        allowed = {
+            "merchant_name",
+            "receipt_date",
+            "total_cents",
+            "tax_cents",
+            "currency",
+        }
+        cols = [k for k in patch.keys() if k in allowed]
+        if not cols:
+            return await self.get_receipt(user_id, receipt_id)
+        set_sql = ", ".join(f"{c} = ${i + 3}" for i, c in enumerate(cols))
+        values = [patch[c] for c in cols]
+        pool = await self._pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"UPDATE receipts SET {set_sql} "
+                "WHERE id = $1 AND user_id = $2 RETURNING id",
+                receipt_id,
+                user_id,
+                *values,
+            )
+        if not row:
+            return None
+        return await self.get_receipt(user_id, receipt_id)
+
+    async def replace_receipt_lines(
+        self,
+        user_id: int,
+        receipt_id: int,
+        lines: List[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """Wipe + re-insert all line items for a receipt.
+
+        Replace-all is intentional — letting the FE PATCH individual rows
+        means line_number drift, partial failures, and a much wider API
+        surface for what is fundamentally a small list. The user always
+        edits the whole list at once anyway.
+        """
+        pool = await self._pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                owned = await conn.fetchval(
+                    "SELECT 1 FROM receipts WHERE id = $1 AND user_id = $2",
+                    receipt_id,
+                    user_id,
+                )
+                if not owned:
+                    return None
+                await conn.execute(
+                    "DELETE FROM receipt_lines WHERE receipt_id = $1",
+                    receipt_id,
+                )
+                for idx, line in enumerate(lines, start=1):
+                    await conn.execute(
+                        """
+                        INSERT INTO receipt_lines (
+                            receipt_id, line_number, description,
+                            quantity, unit_price_cents, total_cents
+                        ) VALUES ($1,$2,$3,$4,$5,$6)
+                        """,
+                        receipt_id,
+                        idx,
+                        line["description"],
+                        line.get("quantity"),
+                        line.get("unit_price_cents"),
+                        line["total_cents"],
+                    )
+        return await self.get_receipt(user_id, receipt_id)
+
+    async def get_receipt_by_transaction(
+        self,
+        user_id: int,
+        transaction_id: int,
+    ) -> Optional[Dict[str, Any]]:
+        """Find the receipt attached to a specific transaction (with lines).
+
+        Used by the transactions detail modal to show a receipt
+        breakdown next to the Plaid transaction. Scoped by ``user_id``
+        (matches the privacy + auth model used everywhere else).
+        Returns the first match — schema permits multiple receipts per
+        tx, but real-world flows always link 1:1 today.
         """
         pool = await self._pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                UPDATE receipts SET transaction_id = $3
-                WHERE id = $1 AND user_id = $2
-                RETURNING id
+                SELECT id FROM receipts
+                WHERE transaction_id = $1 AND user_id = $2
+                ORDER BY created_at DESC
+                LIMIT 1
                 """,
-                receipt_id,
-                user_id,
                 transaction_id,
+                user_id,
             )
         if not row:
             return None
-        return await self.get_receipt(user_id, receipt_id)
+        return await self.get_receipt(user_id, int(row["id"]))
 
     async def list_unlinked_receipts(
         self, user_id: int, *, older_than_days: Optional[int] = None
@@ -1020,15 +1170,30 @@ class BotRepository:
     ) -> Optional[Dict[str, Any]]:
         pool = await self._pool()
         cols = (
-            "id, transaction_id, merchant_name, receipt_date, total_cents, "
-            "tax_cents, currency, parse_status, image_mime, created_at, "
-            "(image_data IS NOT NULL) AS has_image"
+            "r.id, r.transaction_id, r.merchant_name, r.receipt_date, "
+            "r.total_cents, r.tax_cents, r.currency, r.parse_status, "
+            "r.image_mime, r.created_at, "
+            "(r.image_data IS NOT NULL) AS has_image, "
+            # ``linked_is_manual_cash`` tells the FE whether the smart
+            # confirm-dialog should ask "also delete the linked cash
+            # transaction?". The flag is only true when the receipt is
+            # attached to a manual-source transaction on a non-Plaid
+            # account — so Plaid-imported transactions are never offered
+            # for deletion through this surface.
+            "(t.id IS NOT NULL AND t.source = 'manual' "
+            " AND a.plaid_account_id IS NULL) AS linked_is_manual_cash"
         )
         if with_image:
-            cols += ", image_data"
+            cols += ", r.image_data"
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                f"SELECT {cols} FROM receipts WHERE id = $1 AND user_id = $2",
+                f"""
+                SELECT {cols}
+                FROM receipts r
+                LEFT JOIN transactions t ON t.id = r.transaction_id
+                LEFT JOIN accounts a ON a.id = t.account_id
+                WHERE r.id = $1 AND r.user_id = $2
+                """,
                 receipt_id,
                 user_id,
             )
@@ -1048,15 +1213,62 @@ class BotRepository:
         out["lines"] = [dict(line) for line in lines]
         return out
 
-    async def delete_receipt(self, user_id: int, receipt_id: int) -> bool:
+    async def delete_receipt(
+        self,
+        user_id: int,
+        receipt_id: int,
+        *,
+        delete_linked_cash: bool = False,
+    ) -> bool:
+        """Delete a receipt (and its lines via ON DELETE CASCADE).
+
+        When ``delete_linked_cash=True`` and the receipt is linked to a
+        manual cash transaction (``source = 'manual'`` on a non-Plaid
+        account), the cash transaction is removed in the same DB
+        transaction so the user doesn't end up with an orphaned spend
+        line in their wallet. Plaid-imported transactions are NEVER
+        deleted by this path — Plaid is the source of truth and the row
+        will reappear on next sync anyway. The receipt's
+        ``transaction_id`` column has ``ON DELETE SET NULL``, which would
+        otherwise leave the cash row standing without any trace of where
+        it came from.
+        """
         pool = await self._pool()
         async with pool.acquire() as conn:
-            res = await conn.execute(
-                "DELETE FROM receipts WHERE id = $1 AND user_id = $2",
-                receipt_id,
-                user_id,
-            )
-        return res.endswith(" 1")
+            async with conn.transaction():
+                row = await conn.fetchrow(
+                    """
+                    SELECT r.transaction_id,
+                           t.source,
+                           a.plaid_account_id IS NOT NULL AS is_bank_tx
+                    FROM receipts r
+                    LEFT JOIN transactions t ON t.id = r.transaction_id
+                    LEFT JOIN accounts a ON a.id = t.account_id
+                    WHERE r.id = $1 AND r.user_id = $2
+                    """,
+                    receipt_id,
+                    user_id,
+                )
+                if not row:
+                    return False
+                res = await conn.execute(
+                    "DELETE FROM receipts WHERE id = $1 AND user_id = $2",
+                    receipt_id,
+                    user_id,
+                )
+                if not res.endswith(" 1"):
+                    return False
+                if (
+                    delete_linked_cash
+                    and row["transaction_id"]
+                    and row["source"] == "manual"
+                    and not row["is_bank_tx"]
+                ):
+                    await conn.execute(
+                        "DELETE FROM transactions WHERE id = $1",
+                        int(row["transaction_id"]),
+                    )
+        return True
 
     # ------------------------------------------------------------------
     # Couple leaderboard

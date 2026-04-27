@@ -57,6 +57,11 @@ python-telegram-bot==22.3
 
 # --- Receipt OCR (vision) ----------------------------------------------------
 openai==1.55.3
+# Pillow shrinks Telegram-uploaded receipts before storage + OCR — a 4 MB
+# iPhone shot becomes ~350 KB at 1600 px max edge with no OCR quality loss
+# (gpt-4o-mini handles 1024 px tiles natively). Saves ~10x on Postgres
+# BYTEA size and trims OpenAI upload latency.
+Pillow==11.0.0
 
 # --- Utilities ---------------------------------------------------------------
 python-dateutil==2.9.0.post0
