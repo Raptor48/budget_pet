@@ -1442,6 +1442,17 @@ export default function TransactionsPage() {
     highlightIdRaw != null && highlightIdRaw !== "" && Number.isFinite(Number(highlightIdRaw))
       ? Number(highlightIdRaw)
       : null;
+  // ``?open=N`` auto-opens the transaction details modal for row N (used
+  // by the Settings → Data quality page to deep-link straight into the
+  // row that needs review). Pairs with ``?highlight=N`` so the user
+  // sees the row in the list once they close the modal.
+  const openIdRaw = searchParams.get("open");
+  const openIdParam =
+    openIdRaw != null && openIdRaw !== "" && Number.isFinite(Number(openIdRaw))
+      ? Number(openIdRaw)
+      : null;
+  const monthParam = searchParams.get("month");
+  const openInternalTransfersParam = searchParams.get("openInternalTransfers");
 
   const [month, setMonth] = useState(currentMonth);
   const [accountId, setAccountId] = useState<string>(ALL);
@@ -1487,6 +1498,40 @@ export default function TransactionsPage() {
 
   detailTxIdRef.current = detailTxId;
   splitTxRef.current = splitTx;
+
+  // Bootstrap from URL params on first mount: deep-link from the Data
+  // quality page passes ``?month=&open=&openInternalTransfers=``. We
+  // apply once and strip the params so a refresh / navigation back
+  // doesn't re-fire the modals (and so users can change month freely
+  // without the URL trying to drag them back).
+  const bootstrappedRef = useRef(false);
+  useEffect(() => {
+    if (bootstrappedRef.current) return;
+    bootstrappedRef.current = true;
+    let touched = false;
+    if (monthParam && /^\d{4}-\d{2}$/.test(monthParam)) {
+      setMonth(monthParam);
+      touched = true;
+    }
+    if (openIdParam != null) {
+      setDetailTxId(openIdParam);
+      setDetailOpen(true);
+      touched = true;
+    }
+    if (openInternalTransfersParam) {
+      setInternalTransferSettingsOpen(true);
+      touched = true;
+    }
+    if (touched && typeof window !== "undefined" && window.history?.replaceState) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("open");
+      url.searchParams.delete("month");
+      url.searchParams.delete("openInternalTransfers");
+      const next =
+        url.pathname + (url.searchParams.toString() ? `?${url.searchParams}` : "");
+      window.history.replaceState(null, "", next);
+    }
+  }, [monthParam, openIdParam, openInternalTransfersParam]);
 
   const listFilters: TransactionFilters = useMemo(
     () => ({

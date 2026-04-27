@@ -387,7 +387,7 @@ function UnmatchedTransfersSection({ rows, month }: SectionProps) {
           a matching pair on another account. Three usual causes: the partner
           hasn&apos;t synced yet, the counterparty isn&apos;t in your{" "}
           <Link
-            href="/settings"
+            href="/transactions?openInternalTransfers=1"
             className="underline underline-offset-2 hover:text-foreground"
           >
             internal-transfer names list
@@ -611,7 +611,7 @@ function RowItem({
         )}
         <Button asChild size="sm" variant="ghost">
           <Link
-            href={`/transactions?highlight=${row.id}`}
+            href={`/transactions?month=${month}&open=${row.id}&highlight=${row.id}`}
             className="inline-flex items-center gap-1"
             aria-label={`Open ${rowLabel(row)}`}
           >
