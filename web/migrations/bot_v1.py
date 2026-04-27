@@ -14,7 +14,6 @@ Tables added here:
 * user_streaks                      — generic counters (audit_weeks, under_budget …)
 * user_milestones                   — configurable net-worth thresholds per user
 * transaction_mood                  — 👍/👎/🤷 reactions on big purchases
-* transaction_gifts                 — secret-gift hide-from-spouse flags
 * merchant_seen                     — tracks "first time at merchant" detection
 * recurring_price_snapshots         — price history for subscription creep alerts
 * notifications_queue               — outbound bot pushes (P0/P1/P2 priority)
@@ -178,20 +177,10 @@ CREATE TABLE IF NOT EXISTS transaction_mood (
 )
 """
 
-# ---------------------------------------------------------------------------
-# Gift mode — hide a transaction from a specific partner until visible_at
-# ---------------------------------------------------------------------------
-
-CREATE_TRANSACTION_GIFTS = """
-CREATE TABLE IF NOT EXISTS transaction_gifts (
-    transaction_id    INTEGER PRIMARY KEY REFERENCES transactions(id) ON DELETE CASCADE,
-    gift_for_user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    gifter_user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    note              TEXT,
-    visible_at        TIMESTAMPTZ,
-    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
-)
-"""
+# Gift mode is the existing transactions.is_private flag (see
+# `web/transactions/repo.py`). Toggle it on a transaction → it is hidden
+# from anyone who isn't the owner of the underlying account. The bot
+# producers below honour the same invariant; no extra table needed.
 
 # ---------------------------------------------------------------------------
 # Merchant-seen log — fires "first time at merchant" alert exactly once
@@ -339,6 +328,13 @@ WHERE NOT EXISTS (SELECT 1 FROM chores WHERE name = 'Floors');
 """
 
 
+# Drop the short-lived transaction_gifts table — gift mode is the existing
+# transactions.is_private flag; the redundant table never had any code paths.
+DROP_TRANSACTION_GIFTS = """
+DROP TABLE IF EXISTS transaction_gifts
+"""
+
+
 ALL_STATEMENTS = [
     ALTER_USERS_TELEGRAM,
     USERS_TELEGRAM_UNIQUE_IDX,
@@ -350,7 +346,7 @@ ALL_STATEMENTS = [
     CREATE_USER_STREAKS,
     CREATE_USER_MILESTONES,
     CREATE_TRANSACTION_MOOD,
-    CREATE_TRANSACTION_GIFTS,
+    DROP_TRANSACTION_GIFTS,
     CREATE_MERCHANT_SEEN,
     CREATE_RECURRING_PRICE_SNAPSHOTS,
     RECURRING_PRICE_SNAPSHOTS_IDX,

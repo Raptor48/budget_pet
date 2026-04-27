@@ -1030,6 +1030,10 @@ class BotRepository:
                     LEFT JOIN plaid_items pi ON pi.item_id = a.plaid_item_id
                     WHERE t.date >= $1 AND t.date < $2
                       AND COALESCE(t.transaction_class, 'expense') = 'expense'
+                      -- Private transactions are excluded from the shared
+                      -- leaderboard; the partner who didn't make the purchase
+                      -- shouldn't see it surface in totals here either.
+                      AND NOT t.is_private
                 ),
                 ranked AS (
                     SELECT o.user_id, c.id AS category_id, c.name AS category_name,

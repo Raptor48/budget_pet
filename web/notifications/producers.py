@@ -183,7 +183,9 @@ async def detect_plaid_reauth() -> int:
 
 
 # ---------------------------------------------------------------------------
-# New merchant — fired exactly once per merchant_key
+# New merchant — fired once per merchant_key, scanned per user so a private
+# transaction (transactions.is_private=true) can't surface its merchant to
+# the partner who doesn't own that account.
 # ---------------------------------------------------------------------------
 
 
@@ -192,21 +194,29 @@ async def detect_new_merchants() -> int:
     repo = get_bot_repo()
     fired = 0
     async with pool.acquire() as conn:
-        # Last 24h transactions with merchants we've never alerted on before.
-        rows = await conn.fetch(
-            """
-            SELECT DISTINCT ON (lower(merchant_name))
-                   merchant_name, amount_cents, date
-            FROM transactions
-            WHERE merchant_name IS NOT NULL
-              AND merchant_name <> ''
-              AND date >= CURRENT_DATE - INTERVAL '2 days'
-              AND COALESCE(transaction_class, 'expense') = 'expense'
-            ORDER BY lower(merchant_name), date DESC
-            """,
-        )
         users = await conn.fetch(
             "SELECT id FROM users WHERE telegram_chat_id IS NOT NULL"
+        )
+        if not users:
+            return 0
+        # Build a per-merchant view of who owns the underlying account, so we
+        # can decide which users may legitimately see the alert.
+        rows = await conn.fetch(
+            """
+            SELECT DISTINCT ON (lower(t.merchant_name))
+                   t.merchant_name,
+                   t.amount_cents,
+                   t.date,
+                   t.is_private,
+                   a.user_id AS account_owner_id
+            FROM transactions t
+            JOIN accounts a ON a.id = t.account_id
+            WHERE t.merchant_name IS NOT NULL
+              AND t.merchant_name <> ''
+              AND t.date >= CURRENT_DATE - INTERVAL '2 days'
+              AND COALESCE(t.transaction_class, 'expense') = 'expense'
+            ORDER BY lower(t.merchant_name), t.date DESC
+            """,
         )
     for r in rows:
         merchant = (r["merchant_name"] or "").strip()
@@ -217,8 +227,16 @@ async def detect_new_merchants() -> int:
         if not sighting.get("new"):
             continue
         await repo.mark_merchant_notified(key)
-        for u in users:
-            uid = int(u["id"])
+        # If the source transaction is private, the only user allowed to be
+        # alerted is whoever owns the account it's on. Otherwise everyone
+        # with a linked Telegram chat may see it.
+        is_private = bool(r["is_private"])
+        owner_id = r["account_owner_id"]
+        if is_private:
+            target_ids = [int(owner_id)] if owner_id is not None else []
+        else:
+            target_ids = [int(u["id"]) for u in users]
+        for uid in target_ids:
             if not await repo.is_alert_enabled(uid, "new_merchant"):
                 continue
             new_id = await enqueue_notification(
@@ -229,7 +247,7 @@ async def detect_new_merchants() -> int:
                     "merchant_name": merchant,
                     "amount_cents": int(r["amount_cents"] or 0),
                 },
-                dedup_key=dedup_key_for("new_merchant", key),
+                dedup_key=dedup_key_for("new_merchant", key, uid),
             )
             if new_id:
                 fired += 1
@@ -367,20 +385,28 @@ async def detect_mood_check() -> int:
             threshold = int(settings.get("mood_threshold_cents") or 0)
             if threshold <= 0:
                 continue
+            # Only ask the user about transactions on accounts they own —
+            # otherwise we'd nudge the partner about a purchase they didn't
+            # make (and possibly leak a private one). is_private is enforced
+            # by the same account-ownership join.
             row = await conn.fetchrow(
                 """
                 SELECT t.id, t.amount_cents,
                        COALESCE(t.display_title, t.name) AS name
                 FROM transactions t
+                JOIN accounts a ON a.id = t.account_id
                 LEFT JOIN transaction_mood m ON m.transaction_id = t.id
                 WHERE m.transaction_id IS NULL
                   AND t.amount_cents >= $1
                   AND COALESCE(t.transaction_class, 'expense') = 'expense'
                   AND t.date >= CURRENT_DATE - INTERVAL '2 days'
+                  AND a.user_id = $2
+                  AND (NOT t.is_private OR a.user_id = $2)
                 ORDER BY t.amount_cents DESC, t.id DESC
                 LIMIT 1
                 """,
                 threshold,
+                uid,
             )
             if not row:
                 continue
