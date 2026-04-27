@@ -9,10 +9,11 @@
 
 | File | Description |
 |------|-------------|
-| [architecture.md](./architecture.md) | System architecture, stack, module structure, data flow, Railway envs, encryption-at-rest, Plaid SDK timeouts |
+| [architecture.md](./architecture.md) | System architecture, stack, module structure, data flow, Railway envs, encryption-at-rest, Plaid SDK timeouts, in-process Telegram bot |
 | [api.md](./api.md) | All API endpoints reference |
-| [data-model.md](./data-model.md) | Database schema — all V2 tables with field descriptions (incl. `plaid_items.access_token_encrypted`) |
+| [data-model.md](./data-model.md) | Database schema — all V2 tables with field descriptions (incl. `plaid_items.access_token_encrypted` and the bot v1 tables) |
 | [plaid.md](./plaid.md) | Plaid integration: products, sync flow, field mapping, sandbox, access-token encryption |
+| [bot.md](./bot.md) | Telegram bot — surface, architecture, config, webhook setup, DB tables |
 | [reports-math.md](./reports-math.md) | Source of truth for income / expense / internal_transfer classification |
 | [insights-math.md](./insights-math.md) | Insights feed math |
 | [categorization-precedence.md](./categorization-precedence.md) | Single source of truth for which mechanism wins when PFC mapping, merchant rules, manual edits, splits, classifier, aliases, and tags collide |

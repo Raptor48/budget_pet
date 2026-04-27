@@ -1,0 +1,245 @@
+"""
+Notification dispatcher.
+
+Runs every minute via APScheduler. For each user with a Telegram chat:
+
+* P0 rows are sent immediately (skipping quiet hours).
+* P1 rows accumulate and are flushed as ONE morning brief at the user's
+  configured ``morning_brief_local`` time. Outside the brief window, P1
+  rows simply wait — they are never sent piecemeal.
+* P2 rows accumulate and are flushed once a week as the Sunday brief
+  (composed alongside the morning brief on Sunday).
+
+The whole loop is idempotent: ``mark_sent`` flips ``sent_at`` so the row
+is excluded from the next pass, and ``mark_bundled`` removes child rows
+from future considerations once they've been folded into a brief.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+from datetime import datetime, time, timedelta, timezone
+from typing import Any, Dict, List, Optional
+
+from web.bot_api.repo import get_bot_repo
+from web.notifications import builders
+from web.notifications.queue import (
+    list_pending_for_user,
+    mark_bundled,
+    mark_failed,
+    mark_sent,
+)
+
+logger = logging.getLogger(__name__)
+
+_JOB_ID = "notifications_dispatch"
+_BRIEF_WINDOW_MINUTES = 15  # window within which a brief is considered "due"
+_scheduler = None
+
+
+# ---------------------------------------------------------------------------
+# TZ helpers — best-effort, no external dependency. Falls back to UTC if the
+# user provided a bogus timezone string.
+# ---------------------------------------------------------------------------
+
+
+def _user_now(tz_name: str) -> datetime:
+    try:
+        from zoneinfo import ZoneInfo
+
+        return datetime.now(ZoneInfo(tz_name))
+    except Exception:
+        return datetime.now(timezone.utc)
+
+
+def _is_in_quiet_hours(now_local: datetime, start: time, end: time) -> bool:
+    """Quiet hours can wrap past midnight (e.g. 22:00–08:00)."""
+    cur = now_local.time()
+    if start == end:
+        return False
+    if start < end:
+        return start <= cur < end
+    return cur >= start or cur < end
+
+
+def _within_brief_window(now_local: datetime, brief_local: time) -> bool:
+    today_brief = datetime.combine(
+        now_local.date(), brief_local, tzinfo=now_local.tzinfo
+    )
+    delta = (now_local - today_brief).total_seconds() / 60
+    return 0 <= delta < _BRIEF_WINDOW_MINUTES
+
+
+# ---------------------------------------------------------------------------
+# Telegram delivery
+# ---------------------------------------------------------------------------
+
+
+async def _send_to_chat(
+    chat_id: int,
+    text: str,
+    keyboard: Optional[List[List[Any]]] = None,
+) -> None:
+    """Push a single message via the running bot. Raises on failure."""
+    from web.telegram.runtime import get_bot_app
+
+    app = get_bot_app()
+    if app is None:
+        raise RuntimeError("Telegram bot not initialised")
+    reply_markup = None
+    if keyboard:
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+        reply_markup = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton(text=t, callback_data=cb) for t, cb in row]
+                for row in keyboard
+            ]
+        )
+    await app.bot.send_message(
+        chat_id=chat_id,
+        text=text,
+        parse_mode="HTML",
+        reply_markup=reply_markup,
+        disable_web_page_preview=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Drain
+# ---------------------------------------------------------------------------
+
+
+async def _drain_user(user_row: Dict[str, Any]) -> None:
+    repo = get_bot_repo()
+    user_id = user_row["id"]
+    chat_id = user_row["telegram_chat_id"]
+    settings = await repo.get_couple_settings(user_id)
+    tz_name = settings["morning_brief_tz"]
+    now_local = _user_now(tz_name)
+
+    # ------------------------------- P0: immediate
+    p0 = await list_pending_for_user(user_id, priorities=["P0"])
+    for n in p0:
+        try:
+            text, keyboard = builders.build_single(n)
+            await _send_to_chat(chat_id, text, keyboard)
+            await mark_sent([n["id"]])
+        except Exception as exc:
+            logger.exception("Failed to send P0 notification %s", n["id"])
+            await mark_failed(n["id"], str(exc)[:300])
+
+    # ------------------------------- Briefs (P1, optionally P2)
+    is_brief_due = _within_brief_window(now_local, settings["morning_brief_local"])
+    in_quiet = _is_in_quiet_hours(
+        now_local, settings["quiet_hours_start"], settings["quiet_hours_end"]
+    )
+    if not is_brief_due or in_quiet:
+        return
+
+    is_sunday = now_local.weekday() == 6
+    priorities = ["P1"]
+    if is_sunday and settings.get("sunday_brief_enabled", True):
+        priorities.append("P2")
+    pending = await list_pending_for_user(user_id, priorities=priorities)
+    if not pending and not is_sunday:
+        return
+
+    streak_summary = None
+    audit_invite = None
+    title = "Morning brief"
+    if is_sunday and settings.get("sunday_brief_enabled", True):
+        title = "Sunday brief"
+        streak_summary = await repo.list_streaks(user_id)
+        audit_invite = {"local_time": settings["morning_brief_local"].strftime("%H:%M")}
+        # Bump the audit_weeks streak when we send the Sunday brief.
+        try:
+            await repo.bump_streak(user_id, "audit_weeks")
+        except Exception:
+            logger.exception("Failed to bump audit_weeks streak for user=%s", user_id)
+
+    text, keyboard = builders.build_brief(
+        title=title,
+        notifications=pending,
+        streak_summary=streak_summary,
+        audit_invite=audit_invite,
+    )
+    if not text:
+        return
+    try:
+        await _send_to_chat(chat_id, text, keyboard)
+        # Treat the brief itself as a fresh queue row so we can dedup on it.
+        await mark_bundled([n["id"] for n in pending], parent_id=0)
+    except Exception as exc:
+        logger.exception("Failed to send brief for user=%s", user_id)
+        # Don't fail the bundle — leave the rows untouched so we retry next
+        # tick. Future improvement: exponential backoff.
+        for n in pending:
+            await mark_failed(n["id"], str(exc)[:300])
+
+
+async def _drain_once() -> None:
+    repo = get_bot_repo()
+    try:
+        users = await repo.list_users_with_chat()
+    except Exception:
+        logger.exception("Failed to list users with chat ids")
+        return
+    for user in users:
+        try:
+            await _drain_user(user)
+        except Exception:
+            logger.exception("Drain failed for user=%s", user.get("id"))
+
+
+# ---------------------------------------------------------------------------
+# Scheduler bootstrap
+# ---------------------------------------------------------------------------
+
+
+async def _hourly_producers() -> None:
+    """Top-up scan in case Plaid sync didn't run recently."""
+    try:
+        from web.notifications.producers import run_all_producers
+
+        await run_all_producers()
+    except Exception:
+        logger.exception("Hourly producers tick failed")
+
+
+def start_dispatcher():
+    """Start the per-minute dispatcher + hourly producer top-up.
+
+    Idempotent: if called twice (rare in tests with reload), the second call
+    just adds a unique-ID job and APScheduler dedups via ``replace_existing``.
+    """
+    global _scheduler
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from apscheduler.triggers.interval import IntervalTrigger
+
+    if _scheduler is None:
+        _scheduler = AsyncIOScheduler(timezone="UTC")
+        _scheduler.start()
+    _scheduler.add_job(
+        _drain_once,
+        trigger=IntervalTrigger(minutes=1),
+        id=_JOB_ID,
+        coalesce=True,
+        max_instances=1,
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        _hourly_producers,
+        trigger=IntervalTrigger(hours=1),
+        id="notifications_producers_hourly",
+        coalesce=True,
+        max_instances=1,
+        replace_existing=True,
+    )
+    logger.info("Notification dispatcher running every 60s")
+    return _scheduler
+
+
+async def trigger_drain_now() -> None:
+    """Manually drain (used by tests + the scheduler `force-sync` path)."""
+    await _drain_once()

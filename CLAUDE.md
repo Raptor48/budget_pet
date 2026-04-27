@@ -23,15 +23,17 @@ web/                      FastAPI service (Python 3.12, asyncpg)
   plaid/                  Link, sync, scheduler, crypto.py
   accounts categories tags transactions recurring budgets investments
   reports insights internal_transfers app_settings audit
+  bot_api/                REST API for the frontend "Bot" section
+  notifications/          queue + dispatcher + producers + builders
+  telegram/               in-process Telegram bot (webhook mode)
 frontend/                 Next.js 15 + React 19 + TS strict + Tailwind
-  src/app/                pages
-  src/components/         UI components
+  src/app/                pages (incl. /bot)
+  src/components/         UI components (incl. /bot/*)
   src/lib/                api client, helpers
   src/types/v2.ts         shared types (mirrors backend models)
 docs/                     authoritative specs — read these
-  README.md architecture.md api.md data-model.md plaid.md
+  README.md architecture.md api.md data-model.md plaid.md bot.md
   reports-math.md insights-math.md archive/v1/
-bot.py services/          DEPRECATED Telegram bot — do not extend
 tests/v2/                 pytest-asyncio test surface (~50 files)
 pyproject.toml            ruff (E/F/W/B) + pytest config; bot.py excluded
 .env.template             env-var docs (kept current)
@@ -53,8 +55,9 @@ of writing. Workflow: commit to `V2.3` → PR into `main` → merge → producti
 deploy. The `demo` branch lags behind on purpose; sync it explicitly when
 you want reviewers to see new things.
 
-Services on Railway: `FastAPI`, `Next.js (Web UI)`, `Postgres DB`,
-`telegram bot` (the last one is for the deprecated bot).
+Services on Railway: `FastAPI`, `Next.js (Web UI)`, `Postgres DB`. The
+old `telegram bot` worker has been retired — V2.3+ runs the bot
+in-process inside FastAPI (`web/telegram/`, webhook mode).
 
 ## Things that are easy to break — read before touching
 
@@ -137,8 +140,10 @@ Family-app concept, not a security boundary. Every repo that reads
   `Intl.NumberFormat`.
 - **Frontend toasts**: only via `notify.success/error/info` from
   `frontend/src/lib/notify.ts`. Never `window.alert`/`window.confirm`.
-- **Telegram bot is deprecated.** `bot.py` and `services/` are excluded
-  from `ruff` and not in scope. Don't extend them.
+- **Telegram bot** lives in-process under `web/telegram/`. New bot
+  features go through `web/bot_api/` (REST mirror) + `web/telegram/`
+  (commands/menus). All bot writes share the main Postgres DB — the
+  bot has no separate datastore. See [`docs/bot.md`](docs/bot.md).
 
 ## Common commands
 
@@ -180,6 +185,12 @@ railway ssh                           # interactive shell into a linked service
    `pytest`, `tsc --noEmit`, `npm run lint`, `npm run build` on PRs.
 6. **Optional `git filter-repo`** to strip the leaked `.env` from history
    (already-rotated secrets, not a security blocker — purely cosmetic).
+7. **Bot phase 2**: voice cash entry (Whisper), receipt OCR with
+   line-level split per partner, gift-mode UI, pinned KPI message that
+   auto-edits with latest balances, anniversary countdown push one week
+   before. See `docs/bot.md` for the deferred list.
+8. **Retire Railway `telegram bot` service** — the in-process webhook is
+   the new home. Stop the worker and remove its env vars.
 
 ## Recent context (2026-04-25)
 

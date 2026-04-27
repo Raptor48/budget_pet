@@ -885,6 +885,288 @@ export const auditApi = {
 export type { AuditEntry, AuditListResponse, AutosyncConfig, AutosyncConfigUpdate };
 
 // ---------------------------------------------------------------------------
+// Bot (/api/bot/*) — settings, chores, audit, milestones, mood, receipts
+// ---------------------------------------------------------------------------
+
+export interface TelegramLinkStatus {
+  linked: boolean;
+  chat_id?: number | null;
+  telegram_username?: string | null;
+  pending_code?: string | null;
+  pending_expires_at?: string | null;
+}
+
+export interface TelegramLinkCode {
+  code: string;
+  expires_at: string;
+  bot_username?: string | null;
+}
+
+export interface CoupleSettings {
+  user_id: number;
+  anniversary_date?: string | null;
+  partner_user_id?: number | null;
+  partner_username?: string | null;
+  mood_threshold_cents: number;
+  leaderboard_enabled: boolean;
+  morning_brief_local: string;
+  morning_brief_tz: string;
+  quiet_hours_start: string;
+  quiet_hours_end: string;
+  sunday_brief_enabled: boolean;
+}
+
+export interface CoupleSettingsUpdate {
+  anniversary_date?: string | null;
+  partner_user_id?: number | null;
+  mood_threshold_cents?: number;
+  leaderboard_enabled?: boolean;
+  morning_brief_local?: string;
+  morning_brief_tz?: string;
+  quiet_hours_start?: string;
+  quiet_hours_end?: string;
+  sunday_brief_enabled?: boolean;
+}
+
+export interface NotificationPref {
+  alert_type: string;
+  enabled: boolean;
+  label: string;
+  description?: string | null;
+}
+
+export interface ChoreRow {
+  id: number;
+  name: string;
+  icon?: string | null;
+  rotation: 'weekly' | 'biweekly' | 'fixed';
+  fixed_user_id?: number | null;
+  sort_order: number;
+  is_active: boolean;
+}
+
+export interface ChoreCreatePayload {
+  name: string;
+  icon?: string | null;
+  rotation?: 'weekly' | 'biweekly' | 'fixed';
+  fixed_user_id?: number | null;
+  sort_order?: number;
+}
+
+export interface ChoreAssignment {
+  chore_id: number;
+  chore_name: string;
+  chore_icon?: string | null;
+  week_start: string;
+  user_id: number;
+  username: string;
+  completed_at?: string | null;
+}
+
+export interface AuditSession {
+  id: number;
+  week_start: string;
+  host_user_id?: number | null;
+  host_username?: string | null;
+  snack?: string | null;
+  tea_choice?: string | null;
+  notes?: string | null;
+  completed_at?: string | null;
+}
+
+export interface MilestoneRow {
+  id: number;
+  threshold_cents: number;
+  label?: string | null;
+  reached_at?: string | null;
+}
+
+export interface StreakRow {
+  streak_type: string;
+  label: string;
+  current_count: number;
+  longest_count: number;
+  last_event_at?: string | null;
+}
+
+export interface MoodEntry {
+  transaction_id: number;
+  mood: 'happy' | 'meh' | 'regret';
+  note?: string | null;
+  created_at: string;
+  transaction_amount_cents: number;
+  transaction_name: string;
+  transaction_date: string;
+}
+
+export interface ReceiptLine {
+  id: number;
+  line_number: number;
+  description: string;
+  quantity?: number | null;
+  unit_price_cents?: number | null;
+  total_cents: number;
+}
+
+export interface ReceiptRow {
+  id: number;
+  transaction_id?: number | null;
+  merchant_name?: string | null;
+  receipt_date?: string | null;
+  total_cents?: number | null;
+  tax_cents?: number | null;
+  currency: string;
+  parse_status: string;
+  created_at: string;
+  image_mime?: string | null;
+  has_image: boolean;
+  lines: ReceiptLine[];
+}
+
+export interface LeaderboardEntry {
+  user_id: number;
+  username: string;
+  category_id: number;
+  category_name: string;
+  amount_cents: number;
+}
+
+export interface LeaderboardOut {
+  week_start: string;
+  entries: LeaderboardEntry[];
+}
+
+export const botApi = {
+  // Telegram link
+  telegramStatus: (): Promise<TelegramLinkStatus> =>
+    apiRequest('/api/bot/telegram/status'),
+  generateLinkCode: (): Promise<TelegramLinkCode> =>
+    apiRequest('/api/bot/telegram/link', { method: 'POST' }),
+  unlinkTelegram: (): Promise<void> =>
+    apiRequest('/api/bot/telegram/link', { method: 'DELETE' }),
+
+  // Settings
+  getSettings: (): Promise<CoupleSettings> => apiRequest('/api/bot/settings'),
+  updateSettings: (patch: CoupleSettingsUpdate): Promise<CoupleSettings> =>
+    apiRequest('/api/bot/settings', {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
+
+  // Notifications
+  listNotificationPrefs: (): Promise<NotificationPref[]> =>
+    apiRequest('/api/bot/notifications'),
+  setNotificationPref: (
+    alertType: string,
+    enabled: boolean,
+  ): Promise<NotificationPref> =>
+    apiRequest(`/api/bot/notifications/${encodeURIComponent(alertType)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    }),
+
+  // Chores
+  listChores: (): Promise<ChoreRow[]> => apiRequest('/api/bot/chores'),
+  createChore: (body: ChoreCreatePayload): Promise<ChoreRow> =>
+    apiRequest('/api/bot/chores', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateChore: (
+    id: number,
+    patch: Partial<ChoreRow>,
+  ): Promise<ChoreRow> =>
+    apiRequest(`/api/bot/chores/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  deleteChore: (id: number): Promise<void> =>
+    apiRequest(`/api/bot/chores/${id}`, { method: 'DELETE' }),
+  listChoreAssignments: (
+    weekStart?: string,
+  ): Promise<ChoreAssignment[]> =>
+    apiRequest(
+      `/api/bot/chores/assignments${weekStart ? `?week_start=${weekStart}` : ''}`,
+    ),
+  reassignChore: (
+    choreId: number,
+    weekStart: string,
+    userId: number,
+  ): Promise<ChoreAssignment> =>
+    apiRequest(
+      `/api/bot/chores/${choreId}/assignments/${weekStart}?user_id=${userId}`,
+      { method: 'PUT' },
+    ),
+  setChoreCompleted: (
+    choreId: number,
+    weekStart: string,
+    completed: boolean,
+  ): Promise<ChoreAssignment> =>
+    apiRequest(`/api/bot/chores/${choreId}/assignments/${weekStart}/completed`, {
+      method: 'PUT',
+      body: JSON.stringify({ completed }),
+    }),
+
+  // Audit
+  currentAudit: (): Promise<AuditSession> =>
+    apiRequest('/api/bot/audit/current'),
+  updateAudit: (
+    weekStart: string,
+    patch: Partial<AuditSession> & { completed?: boolean },
+  ): Promise<AuditSession> =>
+    apiRequest(`/api/bot/audit/${weekStart}`, {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
+  listAudit: (limit = 26): Promise<AuditSession[]> =>
+    apiRequest(`/api/bot/audit?limit=${limit}`),
+
+  // Streaks
+  listStreaks: (): Promise<StreakRow[]> => apiRequest('/api/bot/streaks'),
+
+  // Milestones
+  listMilestones: (): Promise<MilestoneRow[]> =>
+    apiRequest('/api/bot/milestones'),
+  addMilestone: (
+    thresholdCents: number,
+    label?: string | null,
+  ): Promise<MilestoneRow> =>
+    apiRequest('/api/bot/milestones', {
+      method: 'POST',
+      body: JSON.stringify({ threshold_cents: thresholdCents, label }),
+    }),
+  deleteMilestone: (id: number): Promise<void> =>
+    apiRequest(`/api/bot/milestones/${id}`, { method: 'DELETE' }),
+
+  // Mood
+  listRecentMoods: (limit = 50): Promise<MoodEntry[]> =>
+    apiRequest(`/api/bot/mood/recent?limit=${limit}`),
+  upsertMood: (
+    transactionId: number,
+    mood: 'happy' | 'meh' | 'regret',
+    note?: string,
+  ): Promise<unknown> =>
+    apiRequest(`/api/bot/mood/${transactionId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ mood, note }),
+    }),
+
+  // Receipts
+  listReceipts: (limit = 40): Promise<ReceiptRow[]> =>
+    apiRequest(`/api/bot/receipts?limit=${limit}`),
+  getReceipt: (id: number): Promise<ReceiptRow> =>
+    apiRequest(`/api/bot/receipts/${id}`),
+  receiptImageUrl: (id: number): string =>
+    `${getApiBaseUrl()}/api/bot/receipts/${id}/image`,
+  deleteReceipt: (id: number): Promise<void> =>
+    apiRequest(`/api/bot/receipts/${id}`, { method: 'DELETE' }),
+
+  // Leaderboard
+  weeklyLeaderboard: (): Promise<LeaderboardOut> =>
+    apiRequest('/api/bot/leaderboard'),
+};
+
+// ---------------------------------------------------------------------------
 // Health
 // ---------------------------------------------------------------------------
 

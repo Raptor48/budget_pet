@@ -23,7 +23,7 @@ Working with this codebase via Claude / agents: see [`CLAUDE.md`](CLAUDE.md).
 | API | Python 3.12, FastAPI, Uvicorn |
 | Web UI | Next.js 15, React 19, TypeScript, Tailwind CSS 4, TanStack Query |
 | DB | PostgreSQL, asyncpg |
-| Hosting | Railway (FastAPI + Next.js + optional Telegram bot) |
+| Hosting | Railway (FastAPI hosts the in-process Telegram bot too + Next.js + Postgres) |
 
 ## Local development
 
@@ -66,8 +66,5 @@ The project (`protective-clarity` on Railway) hosts two environments:
 Per service:
 
 - **FastAPI**: `DATABASE_URL=${{Postgres-DB.DATABASE_URL}}` (templated — required so `POSTGRES_PASSWORD` rotations propagate). Set `ADMIN_LOGIN`, `ADMIN_PASSWORD`, session-related vars per [`docs/architecture.md`](docs/architecture.md). Plaid: `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV`. Encryption: `PLAID_ENCRYPTION_KEY` (generate once with `Fernet.generate_key()`, never rotate — see [`docs/plaid.md#access-token-encryption-at-rest`](docs/plaid.md#access-token-encryption-at-rest)). Optional: `PLAID_SDK_TIMEOUT` (default 90s), `PLAID_WEBHOOK_URL`.
+- **Telegram bot** (optional): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `OPENAI_API_KEY` (for receipt OCR). Bot runs in-process inside FastAPI — there is no separate worker. See [`docs/bot.md`](docs/bot.md) for `setWebhook` instructions.
 - **Next.js**: `NEXT_PUBLIC_API_URL` pointed at the FastAPI public URL. `CORS_ORIGINS` on FastAPI must include this origin (cookies + credentials).
-
-## Out of scope in this README
-
-Telegram bot (`bot.py`, `services/`) is **deprecated** — kept in the tree for reference but excluded from `ruff` and not touched by recent work. Don't extend it; migrate the remaining functionality into the FastAPI surface if needed.

@@ -73,6 +73,8 @@ from web.insights import insights_router  # noqa: E402
 from web.app_settings import app_settings_router  # noqa: E402
 from web.internal_transfers import internal_transfers_router  # noqa: E402
 from web.audit import audit_router  # noqa: E402
+from web.bot_api import router as bot_router  # noqa: E402
+from web.telegram import router as telegram_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(accounts_router)
@@ -91,6 +93,8 @@ app.include_router(insights_router)
 app.include_router(app_settings_router)
 app.include_router(internal_transfers_router)
 app.include_router(audit_router)
+app.include_router(bot_router)
+app.include_router(telegram_router)
 
 # ---------------------------------------------------------------------------
 # Startup
@@ -121,7 +125,12 @@ async def startup_event():
     await run_v2_migrations(pool)
     logger.info("V2 schema migrations applied")
 
-    # 5. Ensure plaid_items + plaid_sync_log tables exist
+    # 5. Bot v1 migrations — telegram link, chores, notifications, receipts.
+    #    Idempotent; safe to run on every startup.
+    from web.migrations.bot_v1 import run_bot_migrations
+    await run_bot_migrations(pool)
+
+    # 6. Ensure plaid_items + plaid_sync_log tables exist
     if os.getenv("PLAID_CLIENT_ID"):
         from web.plaid.repo import get_plaid_repo
         await get_plaid_repo().init_tables()
@@ -131,9 +140,28 @@ async def startup_event():
     else:
         logger.info("Plaid not configured — skipping Plaid setup")
 
+    # 7. Telegram bot — webhook mode, runs in-process via FastAPI.
+    if os.getenv("TELEGRAM_BOT_TOKEN"):
+        from web.telegram.runtime import start_bot_runtime
+        await start_bot_runtime()
+        logger.info("Telegram bot runtime initialized")
+    else:
+        logger.info("Telegram bot not configured — skipping bot startup")
+
+    # 8. Notification dispatcher — drains notifications_queue every minute.
+    from web.notifications.dispatcher import start_dispatcher
+    start_dispatcher()
+    logger.info("Notification dispatcher started")
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
+    if os.getenv("TELEGRAM_BOT_TOKEN"):
+        try:
+            from web.telegram.runtime import stop_bot_runtime
+            await stop_bot_runtime()
+        except Exception:
+            logger.exception("Failed to stop Telegram bot runtime cleanly")
     from web.db import close_pool
     await close_pool()
     logger.info("Shutdown complete")
@@ -141,4 +169,4 @@ async def shutdown_event():
 
 @app.get("/healthz")
 async def health_check():
-    return {"ok": True, "version": "V2.2"}
+    return {"ok": True, "version": "V2.3"}

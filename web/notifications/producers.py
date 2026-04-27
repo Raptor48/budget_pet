@@ -1,0 +1,471 @@
+"""
+Notification producers — each function detects an alert condition and
+``enqueue_notification`` it. They are deliberately read-only against the
+domain repositories and write only to ``notifications_queue`` (+ a couple
+of bot-only state tables for dedup/state).
+
+Wired into the scheduler in :mod:`web.notifications.scheduler`.
+"""
+from __future__ import annotations
+
+import logging
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Dict, List
+
+from web.bot_api.repo import get_bot_repo
+from web.db import get_pool
+from web.notifications.queue import dedup_key_for, enqueue_notification
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Budget threshold — fire when category crosses 100% of the monthly budget
+# ---------------------------------------------------------------------------
+
+
+async def detect_budget_thresholds() -> int:
+    """Returns count of alerts enqueued."""
+    pool = await get_pool()
+    repo = get_bot_repo()
+    today_month = date.today().strftime("%Y-%m")
+    fired = 0
+    async with pool.acquire() as conn:
+        users = await conn.fetch(
+            "SELECT id FROM users WHERE telegram_chat_id IS NOT NULL"
+        )
+        if not users:
+            return 0
+        rows = await conn.fetch(
+            """
+            WITH txn_totals AS (
+                SELECT t.category_id,
+                       SUM(t.amount_cents) AS spent_cents
+                FROM transactions t
+                WHERE TO_CHAR(t.date, 'YYYY-MM') = $1
+                  AND COALESCE(t.transaction_class, 'expense') = 'expense'
+                GROUP BY t.category_id
+            )
+            SELECT cb.category_id,
+                   c.name AS category_name,
+                   cb.budget_cents,
+                   COALESCE(tt.spent_cents, 0) AS spent_cents
+            FROM category_budgets cb
+            JOIN categories c ON c.id = cb.category_id
+            LEFT JOIN txn_totals tt ON tt.category_id = cb.category_id
+            WHERE cb.month = $1
+            """,
+            today_month,
+        )
+    for r in rows:
+        budget = int(r["budget_cents"] or 0)
+        spent = int(r["spent_cents"] or 0)
+        if budget <= 0 or spent < budget:
+            continue
+        pct = (spent / budget) * 100
+        over = spent - budget
+        for u in users:
+            uid = int(u["id"])
+            if not await repo.is_alert_enabled(uid, "budget_threshold"):
+                continue
+            new_id = await enqueue_notification(
+                user_id=uid,
+                type="budget_threshold",
+                priority="P1",
+                payload={
+                    "category_name": r["category_name"],
+                    "category_id": int(r["category_id"]),
+                    "percent_used": pct,
+                    "over_cents": over,
+                    "budget_cents": budget,
+                    "spent_cents": spent,
+                    "month": today_month,
+                },
+                dedup_key=dedup_key_for(
+                    "budget", today_month, int(r["category_id"])
+                ),
+            )
+            if new_id:
+                fired += 1
+    return fired
+
+
+# ---------------------------------------------------------------------------
+# Recurring tomorrow — heads-up about a recurring charge tomorrow
+# ---------------------------------------------------------------------------
+
+
+async def detect_recurring_tomorrow() -> int:
+    pool = await get_pool()
+    repo = get_bot_repo()
+    target = date.today() + timedelta(days=1)
+    fired = 0
+    async with pool.acquire() as conn:
+        users = await conn.fetch(
+            "SELECT id FROM users WHERE telegram_chat_id IS NOT NULL"
+        )
+        if not users:
+            return 0
+        rows = await conn.fetch(
+            """
+            SELECT id, description, average_amount_cents,
+                   (last_date + INTERVAL '1 month')::date AS next_date
+            FROM recurring_streams
+            WHERE is_active = TRUE
+              AND user_status = 'active'
+              AND last_date IS NOT NULL
+              AND last_date >= NOW() - INTERVAL '60 days'
+            """,
+        )
+    for r in rows:
+        if r["next_date"] != target:
+            continue
+        for u in users:
+            uid = int(u["id"])
+            if not await repo.is_alert_enabled(uid, "recurring_tomorrow"):
+                continue
+            new_id = await enqueue_notification(
+                user_id=uid,
+                type="recurring_tomorrow",
+                priority="P1",
+                payload={
+                    "name": r["description"],
+                    "amount_cents": int(r["average_amount_cents"] or 0),
+                    "due_date": str(target),
+                },
+                dedup_key=dedup_key_for("recurring_tomorrow", int(r["id"]), target),
+            )
+            if new_id:
+                fired += 1
+    return fired
+
+
+# ---------------------------------------------------------------------------
+# Plaid reauth — fire when an item flips to login_required
+# ---------------------------------------------------------------------------
+
+
+async def detect_plaid_reauth() -> int:
+    pool = await get_pool()
+    repo = get_bot_repo()
+    fired = 0
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT pi.item_id, pi.institution_name, pi.user_id
+            FROM plaid_items pi
+            WHERE pi.item_login_required = TRUE
+            """,
+        )
+        users = await conn.fetch(
+            "SELECT id FROM users WHERE telegram_chat_id IS NOT NULL"
+        )
+    for r in rows:
+        target_user_ids = (
+            [int(r["user_id"])] if r["user_id"] else [int(u["id"]) for u in users]
+        )
+        for uid in target_user_ids:
+            if not await repo.is_alert_enabled(uid, "plaid_reauth"):
+                continue
+            new_id = await enqueue_notification(
+                user_id=uid,
+                type="plaid_reauth",
+                priority="P0",
+                payload={
+                    "item_id": r["item_id"],
+                    "institution_name": r["institution_name"] or "Bank",
+                },
+                dedup_key=dedup_key_for("reauth", r["item_id"]),
+            )
+            if new_id:
+                fired += 1
+    return fired
+
+
+# ---------------------------------------------------------------------------
+# New merchant — fired exactly once per merchant_key
+# ---------------------------------------------------------------------------
+
+
+async def detect_new_merchants() -> int:
+    pool = await get_pool()
+    repo = get_bot_repo()
+    fired = 0
+    async with pool.acquire() as conn:
+        # Last 24h transactions with merchants we've never alerted on before.
+        rows = await conn.fetch(
+            """
+            SELECT DISTINCT ON (lower(merchant_name))
+                   merchant_name, amount_cents, date
+            FROM transactions
+            WHERE merchant_name IS NOT NULL
+              AND merchant_name <> ''
+              AND date >= CURRENT_DATE - INTERVAL '2 days'
+              AND COALESCE(transaction_class, 'expense') = 'expense'
+            ORDER BY lower(merchant_name), date DESC
+            """,
+        )
+        users = await conn.fetch(
+            "SELECT id FROM users WHERE telegram_chat_id IS NOT NULL"
+        )
+    for r in rows:
+        merchant = (r["merchant_name"] or "").strip()
+        if not merchant:
+            continue
+        key = merchant.lower()
+        sighting = await repo.remember_merchant(key)
+        if not sighting.get("new"):
+            continue
+        await repo.mark_merchant_notified(key)
+        for u in users:
+            uid = int(u["id"])
+            if not await repo.is_alert_enabled(uid, "new_merchant"):
+                continue
+            new_id = await enqueue_notification(
+                user_id=uid,
+                type="new_merchant",
+                priority="P1",
+                payload={
+                    "merchant_name": merchant,
+                    "amount_cents": int(r["amount_cents"] or 0),
+                },
+                dedup_key=dedup_key_for("new_merchant", key),
+            )
+            if new_id:
+                fired += 1
+    return fired
+
+
+# ---------------------------------------------------------------------------
+# Subscription creep + price hike — leverage recurring_price_snapshots
+# ---------------------------------------------------------------------------
+
+
+async def detect_subscription_changes() -> int:
+    pool = await get_pool()
+    repo = get_bot_repo()
+    fired = 0
+    async with pool.acquire() as conn:
+        streams = await conn.fetch(
+            """
+            SELECT id, description, last_amount_cents
+            FROM recurring_streams
+            WHERE is_active = TRUE AND user_status = 'active'
+              AND last_amount_cents IS NOT NULL
+            """,
+        )
+        users = await conn.fetch(
+            "SELECT id FROM users WHERE telegram_chat_id IS NOT NULL"
+        )
+    for s in streams:
+        history = await repo.get_recurring_price_history(int(s["id"]), limit=2)
+        prev_amount = None
+        if history:
+            # Most recent snapshot (history[0]) is the current; check if there
+            # is an earlier one to compare against.
+            if len(history) >= 2:
+                prev_amount = int(history[1]["amount_cents"])
+        # Always record the current price; helper is no-op when unchanged.
+        await repo.record_recurring_amount(
+            int(s["id"]), int(s["last_amount_cents"])
+        )
+        # Brand-new stream → "subscription_creep" with prev=None.
+        # Existing stream that just changed → "subscription_creep" with prev set.
+        if prev_amount == int(s["last_amount_cents"]):
+            continue
+        for u in users:
+            uid = int(u["id"])
+            if not await repo.is_alert_enabled(uid, "subscription_creep"):
+                continue
+            new_id = await enqueue_notification(
+                user_id=uid,
+                type="subscription_creep",
+                priority="P1",
+                payload={
+                    "name": s["description"],
+                    "amount_cents": int(s["last_amount_cents"]),
+                    "previous_amount_cents": prev_amount,
+                    "stream_id": int(s["id"]),
+                },
+                dedup_key=dedup_key_for(
+                    "subscription_creep",
+                    int(s["id"]),
+                    int(s["last_amount_cents"]),
+                ),
+            )
+            if new_id:
+                fired += 1
+    return fired
+
+
+# ---------------------------------------------------------------------------
+# Net-worth milestones — fires once per (user, threshold)
+# ---------------------------------------------------------------------------
+
+
+async def detect_milestones() -> int:
+    pool = await get_pool()
+    repo = get_bot_repo()
+    fired = 0
+    async with pool.acquire() as conn:
+        snapshot = await conn.fetchrow(
+            "SELECT net_worth_cents FROM net_worth_snapshots ORDER BY snapshot_date DESC LIMIT 1"
+        )
+    if not snapshot:
+        return 0
+    net = int(snapshot["net_worth_cents"])
+    async with pool.acquire() as conn:
+        users = await conn.fetch(
+            "SELECT id FROM users WHERE telegram_chat_id IS NOT NULL"
+        )
+    for u in users:
+        uid = int(u["id"])
+        if not await repo.is_alert_enabled(uid, "milestone"):
+            continue
+        for m in await repo.list_milestones(uid):
+            if m["reached_at"]:
+                continue
+            if net < int(m["threshold_cents"]):
+                continue
+            await repo.mark_milestone_reached(uid, int(m["threshold_cents"]))
+            new_id = await enqueue_notification(
+                user_id=uid,
+                type="milestone",
+                priority="P1",
+                payload={
+                    "threshold_cents": int(m["threshold_cents"]),
+                    "label": m.get("label"),
+                    "current_cents": net,
+                },
+                dedup_key=dedup_key_for("milestone", uid, int(m["threshold_cents"])),
+            )
+            if new_id:
+                fired += 1
+    return fired
+
+
+# ---------------------------------------------------------------------------
+# Mood check — bundled into morning brief, never wakes the user
+# ---------------------------------------------------------------------------
+
+
+async def detect_mood_check() -> int:
+    pool = await get_pool()
+    repo = get_bot_repo()
+    fired = 0
+    async with pool.acquire() as conn:
+        users = await conn.fetch(
+            "SELECT id FROM users WHERE telegram_chat_id IS NOT NULL"
+        )
+        if not users:
+            return 0
+        for u in users:
+            uid = int(u["id"])
+            if not await repo.is_alert_enabled(uid, "mood_check"):
+                continue
+            settings = await repo.get_couple_settings(uid)
+            threshold = int(settings.get("mood_threshold_cents") or 0)
+            if threshold <= 0:
+                continue
+            row = await conn.fetchrow(
+                """
+                SELECT t.id, t.amount_cents,
+                       COALESCE(t.display_title, t.name) AS name
+                FROM transactions t
+                LEFT JOIN transaction_mood m ON m.transaction_id = t.id
+                WHERE m.transaction_id IS NULL
+                  AND t.amount_cents >= $1
+                  AND COALESCE(t.transaction_class, 'expense') = 'expense'
+                  AND t.date >= CURRENT_DATE - INTERVAL '2 days'
+                ORDER BY t.amount_cents DESC, t.id DESC
+                LIMIT 1
+                """,
+                threshold,
+            )
+            if not row:
+                continue
+            new_id = await enqueue_notification(
+                user_id=uid,
+                type="mood_check",
+                priority="P1",
+                payload={
+                    "transaction_id": int(row["id"]),
+                    "transaction_name": row["name"],
+                    "amount_cents": int(row["amount_cents"]),
+                },
+                dedup_key=dedup_key_for("mood_check", uid, int(row["id"])),
+            )
+            if new_id:
+                fired += 1
+    return fired
+
+
+# ---------------------------------------------------------------------------
+# Couple leaderboard — Sunday morning P2
+# ---------------------------------------------------------------------------
+
+
+async def emit_weekly_leaderboard() -> int:
+    pool = await get_pool()
+    repo = get_bot_repo()
+    fired = 0
+    board = await repo.get_weekly_leaderboard()
+    if not board.get("entries"):
+        return 0
+    async with pool.acquire() as conn:
+        users = await conn.fetch(
+            "SELECT id FROM users WHERE telegram_chat_id IS NOT NULL"
+        )
+    week_key = str(board["week_start"])
+    for u in users:
+        uid = int(u["id"])
+        if not await repo.is_alert_enabled(uid, "leaderboard"):
+            continue
+        new_id = await enqueue_notification(
+            user_id=uid,
+            type="leaderboard",
+            priority="P2",
+            payload={
+                "week_start": week_key,
+                "entries": board["entries"],
+            },
+            dedup_key=dedup_key_for("leaderboard", week_key),
+        )
+        if new_id:
+            fired += 1
+    return fired
+
+
+# ---------------------------------------------------------------------------
+# Master "scan everything" — called from APScheduler hourly + after Plaid sync
+# ---------------------------------------------------------------------------
+
+
+async def run_all_producers() -> Dict[str, int]:
+    results: Dict[str, int] = {}
+    for name, fn in [
+        ("budget_threshold", detect_budget_thresholds),
+        ("recurring_tomorrow", detect_recurring_tomorrow),
+        ("plaid_reauth", detect_plaid_reauth),
+        ("new_merchant", detect_new_merchants),
+        ("subscription_creep", detect_subscription_changes),
+        ("milestone", detect_milestones),
+        ("mood_check", detect_mood_check),
+    ]:
+        try:
+            results[name] = await fn()
+        except Exception as exc:
+            logger.exception("Producer %s failed: %s", name, exc)
+            results[name] = -1
+    return results
+
+
+async def run_sunday_producers() -> Dict[str, int]:
+    """Producers that should only fire on Sundays (or after weekly Plaid sync)."""
+    results: Dict[str, int] = {}
+    try:
+        results["leaderboard"] = await emit_weekly_leaderboard()
+    except Exception:
+        logger.exception("Leaderboard producer failed")
+        results["leaderboard"] = -1
+    return results

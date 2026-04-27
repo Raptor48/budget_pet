@@ -15,9 +15,6 @@ extend-exclude = [
     ".next",
     "frontend",
     ".claude",
-    # Deprecated Telegram bot — not part of the V2 surface, do not lint.
-    "bot.py",
-    "services",
 ]
 
 [tool.ruff.lint]
