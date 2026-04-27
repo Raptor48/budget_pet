@@ -683,6 +683,60 @@ function BreakdownColumn({
   );
 }
 
+/**
+ * Pick the cleanest display name for an account.
+ *
+ * Plaid sometimes returns a generic ``name`` ("CREDIT CARD", "CHECKING")
+ * for institutions that don't customize per-product labels (Chase is the
+ * canonical case). When that happens and a longer ``official_name`` is
+ * available, we prefer it. Otherwise the user-visible ``name`` wins —
+ * it's what they see in the bank's own app.
+ *
+ * The list of "generic" labels is intentionally small and conservative
+ * — we'd rather under-replace than rename "CHECKING" to a noisy
+ * official_name like "STAGE CHK 0001 OVERDRAFT XYZ". Title-case
+ * normalization happens here too so "CREDIT CARD" → "Credit Card"
+ * matches the rest of the UI.
+ */
+const _GENERIC_ACCOUNT_NAMES = new Set<string>([
+  "credit card",
+  "credit",
+  "checking",
+  "savings",
+  "checking account",
+  "savings account",
+  "total checking",
+  "account",
+  "card",
+]);
+
+function pickAccountTitle(row: NetWorthAccountRow): string {
+  const raw = (row.name ?? "").trim();
+  const isGeneric = _GENERIC_ACCOUNT_NAMES.has(raw.toLowerCase());
+  const better = (row.official_name ?? "").trim();
+  if (isGeneric && better && better.toLowerCase() !== raw.toLowerCase()) {
+    return toTitleCase(better);
+  }
+  // Even when not "generic", title-case ALL CAPS labels for visual
+  // consistency with custom account names.
+  if (raw === raw.toUpperCase() && raw.length > 3) {
+    return toTitleCase(raw);
+  }
+  return raw;
+}
+
+function toTitleCase(s: string): string {
+  return s
+    .toLowerCase()
+    .split(/(\s+)/)
+    .map((tok) =>
+      tok.length > 0 && /\w/.test(tok)
+        ? tok[0].toUpperCase() + tok.slice(1)
+        : tok,
+    )
+    .join("");
+}
+
 function BreakdownRow({
   row,
   share,
@@ -694,20 +748,38 @@ function BreakdownRow({
 }) {
   const pct = Math.round(share * 100);
   const barColor = tone === "asset" ? "bg-emerald-500" : "bg-rose-500";
+  const title = pickAccountTitle(row);
+
+  // Subtitle composes the bank + last-four mask. Skip the bank when it
+  // duplicates the title (e.g. "PayPal" account on PayPal institution
+  // — saying "PayPal · PayPal" is just noise).
+  const showInstitution =
+    !!row.institution_name &&
+    row.institution_name.toLowerCase() !== title.toLowerCase();
+  const subtitleParts = [
+    showInstitution ? row.institution_name : null,
+    row.mask ? `•••• ${row.mask}` : null,
+  ].filter((p): p is string => Boolean(p));
+
   return (
     <Link
       href="/accounts"
-      className="group flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-muted/40"
+      className="group flex items-start gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-muted/40"
     >
       <AccountAvatar row={row} />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
-          <p className="truncate text-sm font-medium">{row.name}</p>
+          <p className="truncate text-sm font-medium">{title}</p>
           <p className="shrink-0 text-sm font-semibold tabular-nums">
             {formatUsd(row.balance_cents)}
           </p>
         </div>
-        <div className="mt-1 flex items-center gap-2">
+        {subtitleParts.length > 0 && (
+          <p className="text-muted-foreground truncate text-[11px] leading-tight">
+            {subtitleParts.join(" · ")}
+          </p>
+        )}
+        <div className="mt-1.5 flex items-center gap-2">
           <div className="h-1 flex-1 overflow-hidden rounded-full bg-muted/60">
             <div
               className={cn(
@@ -726,6 +798,18 @@ function BreakdownRow({
   );
 }
 
+/** Deterministic HSL background per username so the same person always
+ * paints the same color across the app. Cheap string hash → hue; the
+ * lightness/saturation are fixed so the colors stay legible on both
+ * dark and light surfaces. */
+function ownerColor(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  }
+  return `hsl(${hash % 360} 65% 52%)`;
+}
+
 function AccountAvatar({ row }: { row: NetWorthAccountRow }) {
   // Per CLAUDE.md / docs/data-model.md: ``institution_logo`` is stored as
   // **bare** base64 PNG bytes (no data: URL prefix). Other components
@@ -733,37 +817,62 @@ function AccountAvatar({ row }: { row: NetWorthAccountRow }) {
   // we follow the same convention here. ``next/image`` would treat the
   // bare base64 string as an unreachable URL and render the broken-image
   // placeholder — that was the "?" icons users saw on the Net Worth tab.
+  const owner = (row.owner_username ?? "").trim();
+  const ownerInitial = owner ? owner[0].toUpperCase() : null;
+
+  let inner: React.ReactNode;
   if (row.institution_logo) {
-    return (
+    inner = (
       // eslint-disable-next-line @next/next/no-img-element -- base64 data URL stored in DB
       <img
         src={`data:image/png;base64,${row.institution_logo}`}
         alt=""
         width={36}
         height={36}
-        className="size-9 shrink-0 rounded-lg bg-white object-contain p-0.5"
+        className="size-9 rounded-lg bg-white object-contain p-0.5"
       />
     );
+  } else {
+    // Fallback when there's no institution branding (Cash wallet, manual
+    // accounts, items missing logos). Use a meaningful icon per role
+    // instead of two-letter initials — "TO" for "TOTAL CHECKING" reads
+    // as garbage. ``role`` is the best signal we have at this point.
+    const isCash = row.is_cash_wallet;
+    const Icon = isCash ? Banknote : row.role === "debt" ? CreditCard : Landmark;
+    inner = (
+      <div
+        className={cn(
+          "flex size-9 items-center justify-center rounded-lg",
+          isCash
+            ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300"
+            : row.role === "debt"
+              ? "bg-rose-500/10 text-rose-600 dark:text-rose-300"
+              : "bg-muted text-muted-foreground",
+        )}
+        aria-label={row.name}
+      >
+        <Icon className="size-4" aria-hidden />
+      </div>
+    );
   }
-  // Fallback when there's no institution branding (Cash wallet, manual
-  // accounts, items missing logos). Use a meaningful icon per role
-  // instead of two-letter initials — "TO" for "TOTAL CHECKING" reads as
-  // garbage. ``role`` is the best signal we have at this point.
-  const isCash = row.is_cash_wallet;
-  const Icon = isCash ? Banknote : row.role === "debt" ? CreditCard : Landmark;
+
+  // Wrap in a relative container so the owner badge can overlap the
+  // bottom-right corner. The ``ring-2 ring-background`` cleanly
+  // separates the badge from the underlying logo edge — same trick
+  // chat apps use for online-status dots.
   return (
-    <div
-      className={cn(
-        "flex size-9 shrink-0 items-center justify-center rounded-lg",
-        isCash
-          ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300"
-          : row.role === "debt"
-            ? "bg-rose-500/10 text-rose-600 dark:text-rose-300"
-            : "bg-muted text-muted-foreground",
+    <div className="relative size-9 shrink-0">
+      {inner}
+      {ownerInitial && (
+        <span
+          className="absolute -bottom-0.5 -right-0.5 flex size-3.5 items-center justify-center rounded-full text-[8px] font-bold text-white ring-2 ring-background motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-75 motion-safe:duration-300"
+          style={{ background: ownerColor(owner) }}
+          title={owner}
+          aria-label={`Owned by ${owner}`}
+        >
+          {ownerInitial}
+        </span>
       )}
-      aria-label={row.name}
-    >
-      <Icon className="size-4" aria-hidden />
     </div>
   );
 }
