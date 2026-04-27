@@ -787,19 +787,34 @@ class PlaidRepository:
                 )
                 imported += 1
 
-            # Run the unified classifier over the last 7 days so freshly
-            # synced rows get the correct ``transaction_class`` immediately
-            # — no manual rescan needed. This covers both the classic
-            # TRANSFER_OUT/IN pair (savings ↔ checking, same amount across
-            # spouses) and the cash ↔ debt case (checking pays off a
-            # credit card; the depository side tagged LOAN_PAYMENTS never
-            # made it into the old pair matcher). 7 days is long enough for
-            # ACH settlement + weekends; the full-history rescan remains an
-            # explicit endpoint for cleanup passes.
+            # Run the unified classifier over the **full** history so every
+            # freshly imported row gets a correct ``transaction_class``,
+            # not just the last 7 days. The previous 7-day window only
+            # mattered for incremental syncs of an existing item — but
+            # when a Plaid item is freshly added, ``transactions/sync``
+            # returns the entire available history (often 30+ days, often
+            # years). Anything older than 7 days was being inserted with
+            # the default ``transaction_class = 'uncategorized'`` while
+            # the legacy mirror ``is_internal_transfer`` was set correctly
+            # at INSERT time — producing rows whose list pill said
+            # "INTERNAL" but whose modal class dropdown said
+            # "Auto (uncategorized)", and which leaked into Income
+            # aggregates because nothing classified them as
+            # internal_transfer. See ``docs/categorization-precedence.md``
+            # for why we keep transaction_class as the single source of
+            # truth.
+            #
+            # Full rescan is cheap: ~5k rows/batch, all in-process Python
+            # against a couple of pre-aggregated SQL queries. Sub-second
+            # for typical family histories (<50k rows). The trade-off
+            # (a tiny bit more work per sync) is worth the math
+            # consistency guarantee. Manual-class-override rows are
+            # always preserved by ``classify_row`` rule 1, so user
+            # decisions are sacred.
             try:
                 from web.classification.classifier import rescan_all
 
-                stats = await rescan_all(conn, horizon_days=7)
+                stats = await rescan_all(conn, horizon_days=None)
                 if stats.changed:
                     logger.info(
                         "Plaid import: reclassified %d rows (paired=%d)",

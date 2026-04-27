@@ -1085,6 +1085,61 @@ async def _migrate_transactions_transaction_class(conn) -> None:
             )
 
 
+async def _migrate_fix_internal_transfer_class_drift(conn) -> None:
+    """One-shot fix for rows where ``is_internal_transfer`` (legacy boolean)
+    and ``transaction_class`` (modern 4-class column) disagree.
+
+    Background: ``import_transactions`` writes the legacy boolean inline
+    (counterparty match) but never sets ``transaction_class`` on INSERT —
+    that's left to the post-import rescan. Until 2026-04-27 the rescan
+    used a 7-day horizon, so any rows older than that imported during a
+    fresh-account sync stayed at ``transaction_class = 'uncategorized'``
+    while the mirror flag was already TRUE.
+
+    The fix-forward in ``web/plaid/repo.py`` makes future imports run a
+    full rescan; this migration cleans up the historical drift in DBs
+    that already accumulated mismatched rows from the old code path.
+    Manual-class-override rows are always skipped by
+    ``classify_row`` rule 1, so user decisions stay sacred.
+
+    Idempotent: only fires when at least one drifted row exists. On a
+    fresh install or a DB that's already consistent, this is a single
+    ``EXISTS`` probe and a fast return. On a DB with drift, it triggers
+    one full ``rescan_all`` — same path the manual "Re-scan all history"
+    button calls.
+    """
+    # Probe both directions of drift:
+    # - is_internal_transfer=TRUE but class != 'internal_transfer'
+    #   (the symptom we observed in production: "INTERNAL" pill + "Auto
+    #   (uncategorized)" modal).
+    # - is_internal_transfer=FALSE but class = 'internal_transfer'
+    #   (theoretical asymmetry; the classifier mirror-update should
+    #   prevent it but we still check defensively).
+    has_drift = await conn.fetchval(
+        """
+        SELECT EXISTS(
+            SELECT 1 FROM transactions
+            WHERE manual_class_override IS NULL
+              AND is_internal_transfer_manual = FALSE
+              AND is_internal_transfer <> (transaction_class = 'internal_transfer')
+        )
+        """
+    )
+    if not has_drift:
+        return
+
+    from web.classification.classifier import rescan_all
+
+    stats = await rescan_all(conn, horizon_days=None)
+    logger.info(
+        "internal-transfer drift backfill done: changed=%d total=%d paired=%d by_class=%s",
+        stats.changed,
+        stats.total,
+        stats.paired,
+        stats.by_class,
+    )
+
+
 async def _migrate_insights_persistence(conn) -> None:
     """Create persistence tables for the Insights feed (V2.1 Phase 4).
 
@@ -1169,5 +1224,6 @@ async def run_v2_migrations(pool) -> None:
         await _migrate_merchant_aliases(conn)
         await _migrate_transactions_display_title_backfill(conn)
         await _migrate_transactions_transaction_class(conn)
+        await _migrate_fix_internal_transfer_class_drift(conn)
         await _migrate_insights_persistence(conn)
     logger.info("V2 database migrations completed successfully.")
