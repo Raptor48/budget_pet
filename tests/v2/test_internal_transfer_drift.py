@@ -62,45 +62,87 @@ class _ConnMock:
 
 class TestDriftBackfillMigration:
     @pytest.mark.asyncio
-    async def test_no_drift_short_circuits(self):
-        """Clean DB (no mismatched rows) → migration does a single EXISTS
-        probe and returns. No expensive rescan. Critical for app startup
-        cost on healthy installs."""
+    async def test_first_run_forces_full_rescan_even_without_drift(self):
+        """Critical: the column-drift probe alone misses rows whose
+        legacy + modern columns are self-consistent but where the
+        modern class is stale (e.g. rule 5.5 fired on a previous rescan
+        and tagged a counterparty-bearing TRANSFER_IN as ``income``).
+        On the first deploy of this fix the sentinel
+        ``app_settings.itr_v2_rescan_done`` is FALSE → we force a full
+        rescan unconditionally, then flip the flag so subsequent
+        startups don't repeat the work."""
         conn = _ConnMock()
-        conn.fetchval_returns = [False]  # has_drift = False
+        # fetchval order: itr_v2_rescan_done (FALSE → first run),
+        #                 has_drift (FALSE → no column drift, but we
+        #                                    rescan anyway because of the flag)
+        conn.fetchval_returns = [False, False]
 
-        mock_rescan = AsyncMock()
-        with patch(
-            "web.classification.classifier.rescan_all", mock_rescan,
-        ):
+        async def fake_ddl(_conn, sql):
+            pass
+
+        mock_rescan = AsyncMock(return_value=MagicMock(
+            total=10, changed=3, paired=0, by_class={"internal_transfer": 3},
+        ))
+        with patch("web.migrations.v2_init._ddl", side_effect=fake_ddl), \
+             patch("web.classification.classifier.rescan_all", mock_rescan):
             await _migrate_fix_internal_transfer_class_drift(conn)
 
-        # The probe ran once.
-        assert len(conn.fetchval_queries) == 1
-        # The rescan was NOT called — drift backfill is a no-op when the
-        # invariant already holds.
+        # Rescan ran with full history.
+        mock_rescan.assert_awaited_once()
+        assert mock_rescan.await_args.kwargs.get("horizon_days") is None
+        # Sentinel was flipped to TRUE so the next startup skips.
+        assert any(
+            "UPDATE app_settings SET itr_v2_rescan_done = TRUE" in s
+            for s in conn.executed_sql
+        )
+
+    @pytest.mark.asyncio
+    async def test_steady_state_no_rescan(self):
+        """After the first-run rescan has fired and there's no column
+        drift, subsequent startups must skip the rescan to keep boot
+        cost minimal. Two cheap fetchvals (sentinel + drift probe)
+        and we're done."""
+        conn = _ConnMock()
+        # itr_v2_rescan_done = TRUE, has_drift = FALSE
+        conn.fetchval_returns = [True, False]
+
+        async def fake_ddl(_conn, sql):
+            pass
+
+        mock_rescan = AsyncMock()
+        with patch("web.migrations.v2_init._ddl", side_effect=fake_ddl), \
+             patch("web.classification.classifier.rescan_all", mock_rescan):
+            await _migrate_fix_internal_transfer_class_drift(conn)
+
         mock_rescan.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_drift_present_triggers_full_rescan(self):
-        """When the EXISTS probe finds at least one mismatched row,
-        ``rescan_all`` is invoked with ``horizon_days=None`` so the entire
-        history is re-classified — that's the point of the backfill."""
+    async def test_drift_after_flag_set_still_triggers_rescan(self):
+        """Even with the one-shot sentinel TRUE, a future drift
+        (e.g. a regression that re-introduces the INSERT-skips-class
+        bug) must re-trigger the rescan. The drift probe is the
+        permanent safety net."""
         conn = _ConnMock()
-        conn.fetchval_returns = [True]  # has_drift = True
+        # itr_v2_rescan_done = TRUE, has_drift = TRUE
+        conn.fetchval_returns = [True, True]
+
+        async def fake_ddl(_conn, sql):
+            pass
 
         mock_rescan = AsyncMock(return_value=MagicMock(
             total=42, changed=3, paired=0, by_class={"internal_transfer": 3},
         ))
-        with patch(
-            "web.classification.classifier.rescan_all", mock_rescan,
-        ):
+        with patch("web.migrations.v2_init._ddl", side_effect=fake_ddl), \
+             patch("web.classification.classifier.rescan_all", mock_rescan):
             await _migrate_fix_internal_transfer_class_drift(conn)
 
         mock_rescan.assert_awaited_once()
-        kwargs = mock_rescan.await_args.kwargs
-        # Full history, not horizon-limited.
-        assert kwargs.get("horizon_days") is None
+        # When triggered by drift (not first-run), the sentinel UPDATE
+        # is NOT issued — it's already TRUE.
+        assert not any(
+            "UPDATE app_settings SET itr_v2_rescan_done = TRUE" in s
+            for s in conn.executed_sql
+        )
 
     @pytest.mark.asyncio
     async def test_drift_probe_excludes_manual_overrides(self):
@@ -109,13 +151,18 @@ class TestDriftBackfillMigration:
         explicitly pinned those, so any "drift" between the legacy and
         modern columns reflects user intent and must not be touched."""
         conn = _ConnMock()
-        conn.fetchval_returns = [False]
-        with patch("web.classification.classifier.rescan_all", AsyncMock()):
+        # flag TRUE so we go straight to the drift probe path
+        conn.fetchval_returns = [True, False]
+
+        async def fake_ddl(_conn, sql):
+            pass
+
+        with patch("web.migrations.v2_init._ddl", side_effect=fake_ddl), \
+             patch("web.classification.classifier.rescan_all", AsyncMock()):
             await _migrate_fix_internal_transfer_class_drift(conn)
 
-        probe_sql = conn.fetchval_queries[0]
-        # The two guards must both appear; if either is missing the
-        # backfill could re-classify a manual decision.
+        # Drift probe is the second fetchval after the sentinel read.
+        probe_sql = conn.fetchval_queries[1]
         assert "manual_class_override IS NULL" in probe_sql
         assert "is_internal_transfer_manual = FALSE" in probe_sql
 
@@ -123,15 +170,17 @@ class TestDriftBackfillMigration:
     async def test_drift_probe_checks_both_directions(self):
         """The mismatch predicate uses ``<>`` so both
         (legacy=TRUE, class != internal) AND
-        (legacy=FALSE, class = internal) are caught. The first form is
-        the symptom we observed in production; the second is theoretical
-        but the symmetric check is one keystroke and protects against
-        future regressions."""
+        (legacy=FALSE, class = internal) are caught."""
         conn = _ConnMock()
-        conn.fetchval_returns = [False]
-        with patch("web.classification.classifier.rescan_all", AsyncMock()):
+        conn.fetchval_returns = [True, False]
+
+        async def fake_ddl(_conn, sql):
+            pass
+
+        with patch("web.migrations.v2_init._ddl", side_effect=fake_ddl), \
+             patch("web.classification.classifier.rescan_all", AsyncMock()):
             await _migrate_fix_internal_transfer_class_drift(conn)
-        probe_sql = conn.fetchval_queries[0]
+        probe_sql = conn.fetchval_queries[1]
         assert "is_internal_transfer <> (transaction_class = 'internal_transfer')" in probe_sql
 
 
