@@ -290,8 +290,6 @@ async def _on_menu(query, user, parts):
             parse_mode=ParseMode.HTML,
         )
     elif section == "today":
-        from web.bot_api.repo import get_bot_repo
-
         snapshot = await _today_snapshot(user["id"])
         await query.edit_message_text(
             snapshot, reply_markup=_back_kb(), parse_mode=ParseMode.HTML
@@ -923,7 +921,28 @@ async def _post_cash_transaction(
 # ---------------------------------------------------------------------------
 
 
+async def _on_error(update, context: ContextTypes.DEFAULT_TYPE):
+    """Global handler — log the exception and tell the user something broke.
+
+    Without this, PTB swallows handler exceptions into a single warning line
+    in the logs and the user sees nothing — UX-fatal for bot menus where
+    every tap is a separate update.
+    """
+    logger.exception("Bot handler crashed", exc_info=context.error)
+    chat = getattr(update, "effective_chat", None)
+    if chat is None:
+        return
+    try:
+        await context.bot.send_message(
+            chat_id=chat.id,
+            text="Something broke on my side. Try again — the error is logged.",
+        )
+    except Exception:
+        logger.exception("Failed to send error notice to chat=%s", chat.id)
+
+
 def register_handlers(application: Application) -> None:
+    application.add_error_handler(_on_error)
     application.add_handler(CommandHandler("start", cmd_start))
     application.add_handler(CommandHandler("menu", cmd_menu))
     application.add_handler(CommandHandler("link", cmd_link))
