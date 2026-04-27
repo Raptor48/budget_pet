@@ -20,6 +20,7 @@ from web.transactions.repo import TransactionsRepository
 from .models import (
     AuditSessionOut,
     AuditSessionUpdate,
+    BotActivityEntry,
     ChoreAssignmentOut,
     ChoreCompletionUpdate,
     ChoreCreate,
@@ -496,6 +497,80 @@ async def _create_cash_for_receipt(
 async def get_leaderboard(request: Request):
     _user_id(request)
     return await get_bot_repo().get_weekly_leaderboard()
+
+
+# ---------------------------------------------------------------------------
+# Bot activity log — surfaced in the frontend Bot → Activity tab so the
+# user doesn't need to read Railway logs to diagnose a misbehaving bot.
+# ---------------------------------------------------------------------------
+
+@router.get("/activity", response_model=List[BotActivityEntry])
+async def list_bot_activity(
+    request: Request,
+    limit: int = Query(100, ge=1, le=500),
+    severity: Optional[str] = Query(
+        None,
+        regex=r"^(info|warn|error)$",
+        description="Filter to one severity bucket.",
+    ),
+    kind_prefix: Optional[str] = Query(
+        None,
+        max_length=40,
+        description=(
+            "Filter to a kind prefix, e.g. `error`, `outgoing.`, `ocr.`, "
+            "`incoming.`."
+        ),
+    ),
+):
+    """Recent bot events. ``user_id IS NULL`` rows (errors from unlinked
+    chats) are returned to every authenticated user — they're rare and
+    everyone benefits from seeing the bot exploded somewhere."""
+    user_id = _user_id(request)
+    from web.telegram.activity import list_activity
+
+    rows = await list_activity(
+        limit=limit,
+        severity=severity,
+        kind_prefix=kind_prefix,
+        user_id=user_id,
+    )
+    return rows
+
+
+@router.delete("/activity", status_code=204)
+async def clear_bot_activity(
+    request: Request,
+    older_than_days: int = Query(
+        0,
+        ge=0,
+        le=365,
+        description=(
+            "Delete rows older than N days (0 = clear ALL the caller's "
+            "activity history)."
+        ),
+    ),
+):
+    """Manual prune. Daily auto-prune at 30 days runs in the dispatcher."""
+    user_id = _user_id(request)
+    from web.db import get_pool
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        if older_than_days == 0:
+            await conn.execute(
+                "DELETE FROM bot_activity_log WHERE user_id = $1 OR user_id IS NULL",
+                user_id,
+            )
+        else:
+            await conn.execute(
+                """
+                DELETE FROM bot_activity_log
+                WHERE (user_id = $1 OR user_id IS NULL)
+                  AND created_at < NOW() - make_interval(days => $2)
+                """,
+                user_id,
+                int(older_than_days),
+            )
 
 
 # ---------------------------------------------------------------------------

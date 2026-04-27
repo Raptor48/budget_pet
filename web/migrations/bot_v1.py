@@ -334,6 +334,42 @@ DROP_TRANSACTION_GIFTS = """
 DROP TABLE IF EXISTS transaction_gifts
 """
 
+# ---------------------------------------------------------------------------
+# Bot activity log — visible in the frontend Bot → Activity tab so the user
+# doesn't have to dig through Railway logs to see if the bot is failing.
+# ---------------------------------------------------------------------------
+
+CREATE_BOT_ACTIVITY_LOG = """
+CREATE TABLE IF NOT EXISTS bot_activity_log (
+    id          BIGSERIAL PRIMARY KEY,
+    user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    chat_id     BIGINT,
+    kind        TEXT NOT NULL,
+    severity    TEXT NOT NULL DEFAULT 'info'
+                CHECK (severity IN ('info', 'warn', 'error')),
+    summary     TEXT NOT NULL,
+    payload     JSONB NOT NULL DEFAULT '{}'::jsonb,
+    error       TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)
+"""
+
+BOT_ACTIVITY_LOG_USER_IDX = """
+CREATE INDEX IF NOT EXISTS bot_activity_log_user_idx
+    ON bot_activity_log(user_id, created_at DESC)
+"""
+
+BOT_ACTIVITY_LOG_SEVERITY_IDX = """
+CREATE INDEX IF NOT EXISTS bot_activity_log_severity_idx
+    ON bot_activity_log(severity, created_at DESC)
+    WHERE severity <> 'info'
+"""
+
+BOT_ACTIVITY_LOG_KIND_IDX = """
+CREATE INDEX IF NOT EXISTS bot_activity_log_kind_idx
+    ON bot_activity_log(kind, created_at DESC)
+"""
+
 
 ALL_STATEMENTS = [
     ALTER_USERS_TELEGRAM,
@@ -358,6 +394,10 @@ ALL_STATEMENTS = [
     CREATE_RECEIPT_LINES,
     RECEIPTS_USER_IDX,
     RECEIPTS_TRANSACTION_IDX,
+    CREATE_BOT_ACTIVITY_LOG,
+    BOT_ACTIVITY_LOG_USER_IDX,
+    BOT_ACTIVITY_LOG_SEVERITY_IDX,
+    BOT_ACTIVITY_LOG_KIND_IDX,
     SEED_DEFAULT_CHORES,
     SEED_DEFAULT_CHORES_2,
     SEED_DEFAULT_CHORES_3,

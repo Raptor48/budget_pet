@@ -230,6 +230,15 @@ async def cmd_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await repo.attach_telegram_chat(
         user["id"], chat.id, telegram_username=getattr(tg_user, "username", None)
     )
+    from web.telegram.activity import log_bot_activity
+
+    await log_bot_activity(
+        kind="link.attached",
+        summary=f"Linked Telegram chat to user {user['username']}",
+        user_id=int(user["id"]),
+        chat_id=int(chat.id),
+        payload={"telegram_username": getattr(tg_user, "username", None)},
+    )
     await update.message.reply_text(
         f"Linked ✅ Welcome, {user['username']}!", reply_markup=_main_menu_kb()
     )
@@ -254,6 +263,20 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data or ""
     parts = data.split(":", 3)
     head = parts[0]
+
+    # Activity log — record only "action" callbacks (mood, tea, chore done,
+    # receipt action, reauth deep-link). Menu navigation taps are skipped
+    # to keep the log readable.
+    if head in {"mood", "tea", "chore", "receipt", "reauth"}:
+        from web.telegram.activity import log_bot_activity
+
+        await log_bot_activity(
+            kind="incoming.callback",
+            summary=f"Callback: {data}"[:280],
+            user_id=int(user["id"]),
+            chat_id=int(query.message.chat_id) if query.message else None,
+            payload={"data": data},
+        )
     if head == "menu":
         await _on_menu(query, user, parts)
     elif head == "alerts":
@@ -662,9 +685,12 @@ async def cmd_upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def on_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    from web.telegram.activity import log_bot_activity
+
     user = await _ensure_linked(update)
     if not user:
         return
+    chat_id = update.effective_chat.id if update.effective_chat else None
     txt = (update.message.text or "").strip()
     if not txt:
         return
@@ -679,8 +705,26 @@ async def on_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         result = await _post_cash_transaction(user, amount_cents, name)
     except RuntimeError as exc:
+        await log_bot_activity(
+            kind="incoming.text",
+            severity="warn",
+            summary=f"Cash entry rejected: {exc}",
+            user_id=user["id"],
+            chat_id=chat_id,
+            payload={"raw": txt[:200]},
+        )
         await update.message.reply_text(str(exc))
         return
+    await log_bot_activity(
+        kind="incoming.text",
+        summary=f"Cash entry: {name} · {_money(amount_cents)}",
+        user_id=user["id"],
+        chat_id=chat_id,
+        payload={
+            "transaction_id": int(result["id"]),
+            "amount_cents": amount_cents,
+        },
+    )
     await update.message.reply_text(
         f"💸 Logged <b>{result['name']}</b> {_money(amount_cents)}",
         parse_mode=ParseMode.HTML,
@@ -709,9 +753,18 @@ async def on_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     The Insights feed nags the user 7 days later if a receipt is still
     unlinked.
     """
+    from web.telegram.activity import log_bot_activity
+
     user = await _ensure_linked(update)
     if not user:
         return
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    await log_bot_activity(
+        kind="incoming.photo",
+        summary="Receipt photo received",
+        user_id=user["id"],
+        chat_id=chat_id,
+    )
     photo = update.message.photo[-1]  # largest
     file = await context.bot.get_file(photo.file_id)
     # PTB's download_to_memory writes via .write(), so a file-like buffer
@@ -729,9 +782,25 @@ async def on_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parsed = await extract_receipt(image_bytes)
     except Exception as exc:
         logger.exception("OCR failed")
+        await log_bot_activity(
+            kind="ocr.failure",
+            severity="error",
+            summary=f"OCR failed: {exc}"[:280],
+            user_id=user["id"],
+            chat_id=chat_id,
+            error=exc,
+        )
         await update.message.reply_text(f"OCR failed: {exc}")
         return
     if not parsed or not parsed.get("total_cents"):
+        await log_bot_activity(
+            kind="ocr.failure",
+            severity="warn",
+            summary="OCR returned no total",
+            user_id=user["id"],
+            chat_id=chat_id,
+            payload={"parsed": parsed},
+        )
         await update.message.reply_text(
             "Couldn't read a total off this receipt. Try a clearer photo."
         )
@@ -750,6 +819,18 @@ async def on_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tax_cents=parsed.get("tax_cents"),
         raw_ocr_json=parsed,
         lines=parsed.get("lines"),
+    )
+    await log_bot_activity(
+        kind="ocr.success",
+        summary=f"OCR parsed: {name} · {_money(total_cents)}",
+        user_id=user["id"],
+        chat_id=chat_id,
+        payload={
+            "receipt_id": receipt["id"],
+            "merchant": parsed.get("merchant_name"),
+            "total_cents": total_cents,
+            "line_count": len(parsed.get("lines") or []),
+        },
     )
 
     keyboard = InlineKeyboardMarkup(
@@ -1206,12 +1287,44 @@ async def _on_error(update, context: ContextTypes.DEFAULT_TYPE):
     """
     logger.exception("Bot handler crashed", exc_info=context.error)
     chat = getattr(update, "effective_chat", None)
+    chat_id = chat.id if chat is not None else None
+
+    # Best-effort linked user lookup so the error shows up scoped to the
+    # right user_id in the Activity tab.
+    user_id = None
+    if chat_id is not None:
+        try:
+            linked = await get_bot_repo().find_user_by_chat_id(chat_id)
+            if linked:
+                user_id = int(linked["id"])
+        except Exception:
+            pass
+
+    from web.telegram.activity import log_bot_activity
+
+    summary = "Bot handler crashed"
+    err = context.error
+    if err is not None:
+        summary = f"{type(err).__name__}: {err}"[:300]
+    await log_bot_activity(
+        kind="error",
+        severity="error",
+        summary=summary,
+        user_id=user_id,
+        chat_id=chat_id,
+        error=err if isinstance(err, BaseException) else None,
+    )
+
     if chat is None:
         return
     try:
         await context.bot.send_message(
             chat_id=chat.id,
-            text="Something broke on my side. Try again — the error is logged.",
+            text=(
+                "Something broke on my side. Try again — the error is "
+                "logged in <b>Bot → Activity</b> on the web app."
+            ),
+            parse_mode=ParseMode.HTML,
         )
     except Exception:
         logger.exception("Failed to send error notice to chat=%s", chat.id)

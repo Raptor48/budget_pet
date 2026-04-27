@@ -1175,7 +1175,38 @@ export const botApi = {
   // Leaderboard
   weeklyLeaderboard: (): Promise<LeaderboardOut> =>
     apiRequest('/api/bot/leaderboard'),
+
+  // Activity log — recent bot events visible in the Bot → Activity tab.
+  listActivity: (
+    params: {
+      limit?: number;
+      severity?: 'info' | 'warn' | 'error';
+      kind_prefix?: string;
+    } = {},
+  ): Promise<BotActivityEntry[]> => {
+    const qs = new URLSearchParams();
+    qs.set('limit', String(params.limit ?? 200));
+    if (params.severity) qs.set('severity', params.severity);
+    if (params.kind_prefix) qs.set('kind_prefix', params.kind_prefix);
+    return apiRequest(`/api/bot/activity?${qs.toString()}`);
+  },
+  clearActivity: (olderThanDays = 0): Promise<void> =>
+    apiRequest(`/api/bot/activity?older_than_days=${olderThanDays}`, {
+      method: 'DELETE',
+    }),
 };
+
+export interface BotActivityEntry {
+  id: number;
+  user_id?: number | null;
+  chat_id?: number | null;
+  kind: string;
+  severity: 'info' | 'warn' | 'error';
+  summary: string;
+  payload: Record<string, unknown>;
+  error?: string | null;
+  created_at: string;
+}
 
 // ---------------------------------------------------------------------------
 // Health

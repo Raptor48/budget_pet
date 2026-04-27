@@ -231,3 +231,19 @@ class LeaderboardEntry(BaseModel):
 class LeaderboardOut(BaseModel):
     week_start: date
     entries: List[LeaderboardEntry]
+
+
+# ---------------------------------------------------------------------------
+# Bot activity log
+# ---------------------------------------------------------------------------
+
+class BotActivityEntry(BaseModel):
+    id: int
+    user_id: Optional[int] = None
+    chat_id: Optional[int] = None
+    kind: str
+    severity: str
+    summary: str
+    payload: dict = {}
+    error: Optional[str] = None
+    created_at: datetime

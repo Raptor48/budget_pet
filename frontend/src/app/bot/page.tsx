@@ -13,6 +13,7 @@
  */
 import { useMemo, useState } from "react";
 import {
+  Activity,
   Bell,
   Bot as BotIcon,
   CheckSquare,
@@ -40,6 +41,7 @@ import { BotChoresTab } from "@/components/bot/bot-chores-tab";
 import { BotFamilyTab } from "@/components/bot/bot-family-tab";
 import { BotGoalsTab } from "@/components/bot/bot-goals-tab";
 import { BotReceiptsTab } from "@/components/bot/bot-receipts-tab";
+import { BotActivityTab } from "@/components/bot/bot-activity-tab";
 
 interface TabSpec {
   value: string;
@@ -55,6 +57,7 @@ const TABS: TabSpec[] = [
   { value: "family", label: "Family", icon: Heart },
   { value: "goals", label: "Goals", icon: Target },
   { value: "receipts", label: "Receipts", icon: ReceiptText },
+  { value: "activity", label: "Activity", icon: Activity },
 ];
 
 export default function BotPage() {
@@ -136,6 +139,12 @@ export default function BotPage() {
               className="m-0 outline-none data-[state=active]:animate-in data-[state=active]:fade-in-50 data-[state=active]:slide-in-from-bottom-1 data-[state=active]:duration-300"
             >
               <BotReceiptsTab />
+            </TabsContent>
+            <TabsContent
+              value="activity"
+              className="m-0 outline-none data-[state=active]:animate-in data-[state=active]:fade-in-50 data-[state=active]:slide-in-from-bottom-1 data-[state=active]:duration-300"
+            >
+              <BotActivityTab />
             </TabsContent>
           </Card>
         </Tabs>

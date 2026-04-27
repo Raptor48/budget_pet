@@ -118,6 +118,8 @@ async def _drain_user(user_row: Dict[str, Any]) -> None:
     tz_name = settings["morning_brief_tz"]
     now_local = _user_now(tz_name)
 
+    from web.telegram.activity import log_bot_activity
+
     # ------------------------------- P0: immediate
     p0 = await list_pending_for_user(user_id, priorities=["P0"])
     for n in p0:
@@ -125,9 +127,25 @@ async def _drain_user(user_row: Dict[str, Any]) -> None:
             text, keyboard = builders.build_single(n)
             await _send_to_chat(chat_id, text, keyboard)
             await mark_sent([n["id"]])
+            await log_bot_activity(
+                kind="outgoing.push",
+                summary=f"Sent P0 {n['type']}",
+                user_id=user_id,
+                chat_id=chat_id,
+                payload={"queue_id": int(n["id"]), "type": n["type"]},
+            )
         except Exception as exc:
             logger.exception("Failed to send P0 notification %s", n["id"])
             await mark_failed(n["id"], str(exc)[:300])
+            await log_bot_activity(
+                kind="outgoing.push",
+                severity="error",
+                summary=f"Failed to send P0 {n['type']}: {exc}"[:280],
+                user_id=user_id,
+                chat_id=chat_id,
+                payload={"queue_id": int(n["id"]), "type": n["type"]},
+                error=exc,
+            )
 
     # ------------------------------- Briefs (P1, optionally P2)
     is_brief_due = _within_brief_window(now_local, settings["morning_brief_local"])
@@ -170,12 +188,31 @@ async def _drain_user(user_row: Dict[str, Any]) -> None:
         await _send_to_chat(chat_id, text, keyboard)
         # Treat the brief itself as a fresh queue row so we can dedup on it.
         await mark_bundled([n["id"] for n in pending], parent_id=0)
+        await log_bot_activity(
+            kind="outgoing.push",
+            summary=f"Sent {title} ({len(pending)} item{'s' if len(pending) != 1 else ''})",
+            user_id=user_id,
+            chat_id=chat_id,
+            payload={
+                "title": title,
+                "bundled_ids": [int(n["id"]) for n in pending],
+            },
+        )
     except Exception as exc:
         logger.exception("Failed to send brief for user=%s", user_id)
         # Don't fail the bundle — leave the rows untouched so we retry next
         # tick. Future improvement: exponential backoff.
         for n in pending:
             await mark_failed(n["id"], str(exc)[:300])
+        await log_bot_activity(
+            kind="outgoing.push",
+            severity="error",
+            summary=f"Failed to send {title}: {exc}"[:280],
+            user_id=user_id,
+            chat_id=chat_id,
+            payload={"queued_ids": [int(n["id"]) for n in pending]},
+            error=exc,
+        )
 
 
 async def _drain_once() -> None:
@@ -236,8 +273,29 @@ def start_dispatcher():
         max_instances=1,
         replace_existing=True,
     )
+    # Daily prune of bot_activity_log — caps storage at ~30 days so the
+    # log stays useful for debugging without growing forever.
+    _scheduler.add_job(
+        _daily_prune_activity,
+        trigger=IntervalTrigger(hours=24),
+        id="bot_activity_log_prune",
+        coalesce=True,
+        max_instances=1,
+        replace_existing=True,
+    )
     logger.info("Notification dispatcher running every 60s")
     return _scheduler
+
+
+async def _daily_prune_activity() -> None:
+    try:
+        from web.telegram.activity import prune_activity
+
+        deleted = await prune_activity(older_than_days=30)
+        if deleted:
+            logger.info("bot_activity_log: pruned %d rows older than 30d", deleted)
+    except Exception:
+        logger.exception("bot_activity_log prune failed")
 
 
 async def trigger_drain_now() -> None:
