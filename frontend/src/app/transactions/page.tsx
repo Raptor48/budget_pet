@@ -2149,7 +2149,19 @@ function FragmentRow({
                   </Tooltip>
                 </TooltipProvider>
               ) : null}
-              {tx.is_internal_transfer ? (
+              {/*
+                Source of truth for "is this internal" is the modern
+                ``transaction_class`` column. The legacy
+                ``is_internal_transfer`` boolean is kept in sync by the
+                classifier on every rescan, but on a row that hasn't been
+                rescanned yet (e.g. just-imported historical rows from a
+                fresh-account sync), the two can briefly disagree —
+                showing INTERNAL in the list while the modal/aggregates
+                still report uncategorized. Reading from
+                ``transaction_class`` keeps this pill consistent with
+                what Income/Expense/By Category actually count.
+              */}
+              {tx.transaction_class === "internal_transfer" ? (
                 <TooltipProvider delayDuration={200}>
                   <Tooltip>
                     <TooltipTrigger asChild>

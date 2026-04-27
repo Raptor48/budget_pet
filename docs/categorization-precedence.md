@@ -117,6 +117,56 @@ These are the surprising-but-correct combinations that have caused
 confusion in the past. Each one has either a UI guard or a documented
 expected behavior.
 
+### `transaction_class` is the only "is this internal" source of truth
+
+The `transactions.is_internal_transfer BOOLEAN` column predates the
+4-class model and is kept in the schema as a mirror only — every classifier
+update (`rescan_all`, `classify_one_on_insert`, manual override) writes
+both columns in lockstep:
+
+```sql
+UPDATE transactions SET
+  transaction_class    = $2,
+  is_internal_transfer = ($2 = 'internal_transfer'),
+  ...
+```
+
+**All UI code must read from `transaction_class`, not `is_internal_transfer`.**
+Until 2026-04-27 the desktop and mobile transaction list rows rendered
+the "INTERNAL" pill straight off the legacy boolean. That worked in the
+steady state but produced a visible inconsistency for a few seconds (or
+permanently, until a manual full rescan) on rows that were INSERTed
+with `is_internal_transfer = TRUE` (counterparty-name match at write
+time) but whose `transaction_class` was still the default
+`'uncategorized'` because the post-import rescan only covered the last
+7 days. See "Post-import rescan covers full history" below.
+
+### Post-import rescan covers full history
+
+`web/plaid/repo.py::import_transactions` runs `rescan_all(conn,
+horizon_days=None)` after every Plaid import, not just the last 7 days
+as it did before 2026-04-27. The 7-day window was a perf shortcut for
+incremental syncs of an existing item, but `transactions/sync` returns
+the full available history on the **first** sync of a freshly-added
+item — often 30+ days. Rows older than the 7-day window were being
+inserted with the legacy mirror set correctly but `transaction_class`
+left at the default `'uncategorized'`, so they leaked into the
+inconsistent state described above and into the wrong aggregates
+(Income would pick them up via classifier rule 5.5 — orphan TRANSFER_IN
+on a depository account → income — once the rescan finally ran
+without the horizon).
+
+A full rescan completes in under a second for typical family histories
+(~50k rows). Manual class overrides are always preserved by classifier
+rule 1, so user decisions stay sacred.
+
+`_migrate_fix_internal_transfer_class_drift` is a one-shot, idempotent
+backfill that runs on app startup. It probes for any row where the
+legacy boolean and the modern class disagree (and the row has no
+manual override) and triggers a full rescan when drift is detected.
+On a fresh DB or a DB that's already consistent it's a single
+`EXISTS` check and a fast return.
+
 ### `transaction_class = 'internal_transfer'` AND `category_id IS NOT NULL`
 
 The category is **set but not used** in spending aggregates. Cash Flow,
