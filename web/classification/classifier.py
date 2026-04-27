@@ -227,28 +227,34 @@ async def match_pairs(
     Find internal-transfer pairs across family accounts and return the set
     of transaction ids that should be classified as ``internal_transfer``.
 
-    Three queries are combined (first two are cent-exact, third is a
-    fee-tolerant fallback):
+    Four queries are combined — first two are cent-exact, last two are
+    fee-tolerant fallbacks:
 
     1. **Cash ↔ debt (exact)** — the common credit-card-bill / loan-payment
        case. Source is an outflow (``amount > 0``) on a ``depository``
        account with ``pfc_primary IN ('LOAN_PAYMENTS', 'TRANSFER_OUT')``.
        Sink is the opposite sign on a ``credit`` or ``loan`` account
-       within ±3 days. Both accounts must belong to the same family (any
-       identifiable owner is enough).
+       within ±3 days. Both legs must belong to the same family member
+       (``owner_uid`` equality, not just non-NULL).
     2. **Depository ↔ depository (exact)** — the classic Plaid
        TRANSFER_OUT / TRANSFER_IN pair (savings ↔ checking, PayPal →
-       Chase …) with matching cents within ±3 days.
+       Chase …) with matching cents within ±3 days. Same-owner only.
     3. **Depository ↔ depository (tolerant)** — same shape as #2 but the
        counterparties' amounts may differ by up to
-       ``max(500¢, 1% of the outflow)`` and the date window is tighter
-       (±1 day). Catches PayPal Instant Transfer fees, small wire fees
+       ``max($25 floor, 2% of outflow)`` and the date window is tighter
+       (±2 days). Catches PayPal Instant Transfer fees, small wire fees
        and sub-dollar FX rounding where Plaid posts the net on one side.
-       Runs **after** the exact matchers and **excludes** rows they
-       already paired, so exact matches always win. Tie-breaking in
-       ROW_NUMBER prefers the smallest amount delta first, then the
-       smallest date delta, so an outflow with a fee-adjusted candidate
-       and a cent-exact candidate still pairs with the cent-exact one.
+    4. **Cash ↔ debt (tolerant)** — symmetric to #3 but the sink is on a
+       credit / loan account. Catches the case of paying a credit card
+       bill via PayPal Instant Transfer (1.75% fee) or wiring a payment
+       to a loan with a flat fee. Same fee tolerance as #3.
+
+    Both tolerant passes run **after** the exact matchers and
+    **exclude** rows they already paired (via the ``$2::int[]`` array
+    parameter), so exact matches always win. Tie-breaking in ROW_NUMBER
+    prefers the smallest amount delta first, then the smallest date
+    delta, so an outflow with a fee-adjusted candidate and a cent-exact
+    candidate still pairs with the cent-exact one.
 
     ``horizon_days=None`` scans the whole history; otherwise only rows
     within the last N days participate. ROW_NUMBER() dedupes candidates
@@ -434,6 +440,69 @@ async def match_pairs(
         list(paired),
     )
     for r in tolerance_rows:
+        paired.add(r["out_id"])
+        paired.add(r["in_id"])
+
+    # Fourth pass: cash ↔ debt tolerance matcher. Symmetric to the
+    # depository tolerance pass, but for credit-card / loan paydowns
+    # routed through a fee-bearing rail (PayPal Instant Transfer to a
+    # CC, wire to a mortgage, etc.). Without it, paying a $300 Citi
+    # bill from PayPal IT (1.75% fee) would leave the depository
+    # outflow as ``expense`` and the CC inflow as something the
+    # classifier doesn't tag at all — both legs would silently
+    # mis-aggregate. ACH bill-pay (free) is still caught by the
+    # cent-exact cash↔debt query above, which always wins via the
+    # paired-set exclusion below.
+    cash_debt_tolerance_rows = await conn.fetch(
+        """
+        WITH scoped AS (
+          SELECT t.id, t.account_id, t.amount_cents, t.date,
+                 t.pfc_primary,
+                 a.type AS account_type,
+                 COALESCE(a.user_id, p.user_id) AS owner_uid
+          FROM transactions t
+          JOIN accounts a ON a.id = t.account_id
+          LEFT JOIN plaid_items p ON p.item_id = a.plaid_item_id
+          WHERE t.source IN ('plaid', 'plaid_sandbox')
+            AND t.is_internal_transfer_manual = FALSE
+            AND NOT (t.id = ANY($2::int[]))
+            AND ($1::int IS NULL OR t.date >= CURRENT_DATE - $1::int * INTERVAL '1 day')
+        ),
+        pairs AS (
+          SELECT
+            o.id AS out_id, i.id AS in_id,
+            ROW_NUMBER() OVER (
+              PARTITION BY o.id
+              ORDER BY ABS(o.amount_cents + i.amount_cents), ABS(o.date - i.date), i.id
+            ) AS rn_out,
+            ROW_NUMBER() OVER (
+              PARTITION BY i.id
+              ORDER BY ABS(o.amount_cents + i.amount_cents), ABS(o.date - i.date), o.id
+            ) AS rn_in
+          FROM scoped o
+          JOIN scoped i
+            ON o.account_type = 'depository'
+           AND o.amount_cents > 0
+           AND o.pfc_primary IN ('LOAN_PAYMENTS', 'TRANSFER_OUT')
+           AND i.account_type IN ('credit', 'loan')
+           AND i.amount_cents < 0
+           AND i.owner_uid IS NOT NULL
+           AND o.owner_uid IS NOT NULL
+           AND o.owner_uid = i.owner_uid
+           -- Same fee tolerance + date window as the depository
+           -- tolerance matcher; see comments there for the rationale.
+           AND ABS(o.amount_cents + i.amount_cents) <= GREATEST(2500, o.amount_cents * 2 / 100)
+           AND ABS(o.amount_cents + i.amount_cents) > 0
+           AND ABS(o.date - i.date) <= 2
+        )
+        SELECT out_id, in_id
+        FROM pairs
+        WHERE rn_out = 1 AND rn_in = 1
+        """,
+        horizon_days,
+        list(paired),
+    )
+    for r in cash_debt_tolerance_rows:
         paired.add(r["out_id"])
         paired.add(r["in_id"])
 

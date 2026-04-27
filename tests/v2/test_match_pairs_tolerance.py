@@ -27,11 +27,12 @@ class TestMatchPairsToleranceSql:
         conn.fetch = AsyncMock(return_value=[])
         await match_pairs(conn, horizon_days=horizon_days)
 
-    async def test_runs_three_sql_passes(self):
-        """match_pairs fires cash↔debt, depo↔depo exact, depo↔depo tolerant."""
+    async def test_runs_four_sql_passes(self):
+        """match_pairs fires cash↔debt exact, depo↔depo exact,
+        depo↔depo tolerant, cash↔debt tolerant — in that order."""
         conn = AsyncMock()
         await self._run(conn)
-        assert conn.fetch.await_count == 3
+        assert conn.fetch.await_count == 4
 
     async def test_tolerance_sql_uses_plus_minus_two_day_window(self):
         """Tolerant matcher must be TIGHTER than the cent-exact one (±2 vs ±3)
@@ -145,20 +146,22 @@ class TestMatchPairsToleranceBehaviour:
                 [{"out_id": 101, "in_id": 102}],  # cash↔debt exact
                 [{"out_id": 201, "in_id": 202}],  # depo↔depo exact
                 [{"out_id": 377, "in_id": 907}],  # depo↔depo tolerant
+                [{"out_id": 555, "in_id": 666}],  # cash↔debt tolerant
             ]
         )
         paired = await match_pairs(conn, horizon_days=90)
-        assert paired == {101, 102, 201, 202, 377, 907}
+        assert paired == {101, 102, 201, 202, 377, 907, 555, 666}
 
-    async def test_tolerance_receives_paired_ids_from_earlier_passes(self):
+    async def test_depo_tolerance_receives_paired_ids_from_earlier_passes(self):
         """The 3rd call's $2 parameter must be a list of every id already
-        paired — so the tolerant matcher never re-pairs them."""
+        paired by exact matchers — so the tolerant matcher never re-pairs them."""
         conn = AsyncMock()
         conn.fetch = AsyncMock(
             side_effect=[
                 [{"out_id": 101, "in_id": 102}],  # cash↔debt exact
                 [{"out_id": 201, "in_id": 202}],  # depo↔depo exact
-                [],                                # tolerance — nothing to do
+                [],                                # depo tolerance — nothing
+                [],                                # cash↔debt tolerance — nothing
             ]
         )
         await match_pairs(conn, horizon_days=90)
@@ -168,14 +171,33 @@ class TestMatchPairsToleranceBehaviour:
         assert tolerance_args[1] == 90
         assert sorted(tolerance_args[2]) == [101, 102, 201, 202]
 
+    async def test_cash_debt_tolerance_excludes_all_prior_matches(self):
+        """The 4th call must exclude rows from BOTH exact matchers AND the
+        depo tolerance matcher, so the cent-exact and depo-tolerant winners
+        all keep precedence over the cash↔debt tolerant matcher."""
+        conn = AsyncMock()
+        conn.fetch = AsyncMock(
+            side_effect=[
+                [{"out_id": 101, "in_id": 102}],  # cash↔debt exact
+                [{"out_id": 201, "in_id": 202}],  # depo↔depo exact
+                [{"out_id": 377, "in_id": 907}],  # depo↔depo tolerant
+                [],                                # cash↔debt tolerance
+            ]
+        )
+        await match_pairs(conn, horizon_days=90)
+
+        cash_debt_tol_args = conn.fetch.await_args_list[3].args
+        assert cash_debt_tol_args[1] == 90
+        assert sorted(cash_debt_tol_args[2]) == [101, 102, 201, 202, 377, 907]
+
     async def test_empty_paired_set_on_cold_start(self):
-        """Fresh family with no Plaid data — tolerance pass runs but finds
+        """Fresh family with no Plaid data — all four passes run but find
         nothing, returns an empty set."""
         conn = AsyncMock()
         conn.fetch = AsyncMock(return_value=[])
         assert await match_pairs(conn, horizon_days=90) == set()
-        # Still ran all three passes.
-        assert conn.fetch.await_count == 3
+        # Still ran all four passes.
+        assert conn.fetch.await_count == 4
 
 
 @pytest.mark.asyncio
@@ -221,6 +243,74 @@ class TestToleranceFormulaCoversPayPalInstantTransfer:
         actual_fee = out_cents - 36553
         assert old_tolerance < actual_fee, "regression scaffolding: old bound should miss"
         assert new_tolerance >= actual_fee, "new bound must cover the real $6.51 fee"
+
+
+@pytest.mark.asyncio
+class TestCashDebtToleranceSql:
+    """SQL contract for the 4th pass — cash↔debt tolerance matcher.
+
+    Symmetric to the depo tolerance matcher but the sink is a credit /
+    loan account. Real-world driver: paying a credit card bill via
+    PayPal Instant Transfer (1.75% fee) — the cent-exact cash↔debt
+    matcher misses, and without this tolerant pass both legs end up
+    mis-classified."""
+
+    @staticmethod
+    async def _run(conn: AsyncMock) -> str:
+        conn.fetch = AsyncMock(return_value=[])
+        await match_pairs(conn, horizon_days=90)
+        return conn.fetch.await_args_list[3].args[0]
+
+    async def test_sink_is_credit_or_loan(self):
+        sql = await self._run(AsyncMock())
+        assert "i.account_type IN ('credit', 'loan')" in sql
+
+    async def test_source_is_depository_outflow(self):
+        sql = await self._run(AsyncMock())
+        assert "o.account_type = 'depository'" in sql
+        assert "o.amount_cents > 0" in sql
+
+    async def test_pfc_gate_matches_exact_matcher(self):
+        """Same PFC gate as the cent-exact cash↔debt matcher — only
+        LOAN_PAYMENTS / TRANSFER_OUT can be the source. Random
+        FOOD_AND_DRINK rows must never participate."""
+        sql = await self._run(AsyncMock())
+        assert "o.pfc_primary IN ('LOAN_PAYMENTS', 'TRANSFER_OUT')" in sql
+
+    async def test_uses_same_tolerance_formula_as_depo(self):
+        """max($25 floor, 2% of out) — identical to the depo tolerance.
+        A change in one tolerance value should be a change in both, with
+        an explicit comment about the rationale."""
+        sql = await self._run(AsyncMock())
+        assert "GREATEST(2500, o.amount_cents * 2 / 100)" in sql
+        assert "ABS(o.amount_cents + i.amount_cents) > 0" in sql
+
+    async def test_uses_two_day_window(self):
+        sql = await self._run(AsyncMock())
+        assert "ABS(o.date - i.date) <= 2" in sql
+
+    async def test_requires_same_owner(self):
+        sql = await self._run(AsyncMock())
+        assert "o.owner_uid = i.owner_uid" in sql
+
+    async def test_excludes_already_paired_rows(self):
+        sql = await self._run(AsyncMock())
+        assert "NOT (t.id = ANY($2::int[]))" in sql
+
+    async def test_keeps_manual_override_guard(self):
+        sql = await self._run(AsyncMock())
+        assert "is_internal_transfer_manual = FALSE" in sql
+
+    async def test_only_runs_on_plaid_rows(self):
+        sql = await self._run(AsyncMock())
+        assert "'plaid'" in sql and "'plaid_sandbox'" in sql
+
+    async def test_prefers_smallest_delta_first(self):
+        sql = await self._run(AsyncMock())
+        assert (
+            "ORDER BY ABS(o.amount_cents + i.amount_cents), ABS(o.date - i.date), i.id"
+            in sql
+        )
 
 
 @pytest.mark.asyncio
