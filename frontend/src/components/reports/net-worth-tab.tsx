@@ -24,7 +24,6 @@
  */
 
 import { useMemo } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import {
   Area,
@@ -97,7 +96,12 @@ export function NetWorthTab({
   }
 
   return (
-    <div className="space-y-6">
+    // ``reports-tab-stagger`` (defined in globals.css) applies a 80 ms
+    // staggered fade-in/slide-up to each direct child. Lives here on
+    // the inner div, not on the parent <TabsContent>, because the
+    // selector targets direct children — and TabsContent's only direct
+    // child is this div.
+    <div className="reports-tab-stagger space-y-6">
       <NetWorthHero summary={summary} />
       <CompositionCard summary={summary} />
       <HistoryCard summary={summary} history={history ?? []} />
@@ -116,7 +120,7 @@ export function NetWorthTab({
 function NetWorthHero({ summary }: { summary: NetWorthSummary }) {
   const negative = summary.net_worth_cents < 0;
   return (
-    <Card className="hero-glow overflow-hidden border-border/80 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
+    <Card className="hero-glow overflow-hidden border-border/80">
       <CardContent className="space-y-5 p-6 sm:p-8">
         <div className="flex flex-col gap-1">
           <p className="text-muted-foreground text-xs font-medium uppercase tracking-wider">
@@ -233,7 +237,7 @@ function CompositionCard({ summary }: { summary: NetWorthSummary }) {
   ];
 
   return (
-    <Card className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-500 motion-safe:[animation-delay:80ms] motion-safe:[animation-fill-mode:both]">
+    <Card>
       <CardHeader className="pb-3">
         <CardTitle className="text-base">Composition</CardTitle>
         <CardDescription>How today&rsquo;s balance sheet adds up.</CardDescription>
@@ -401,7 +405,7 @@ function HistoryCard({
   );
 
   return (
-    <Card className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-500 motion-safe:[animation-delay:160ms] motion-safe:[animation-fill-mode:both]">
+    <Card>
       <CardHeader>
         <CardTitle className="text-base">12-month trend</CardTitle>
         <CardDescription>
@@ -615,7 +619,7 @@ function BreakdownCard({ accounts }: { accounts: NetWorthAccountRow[] }) {
   const debtTotal = debts.reduce((s, a) => s + a.balance_cents, 0);
 
   return (
-    <Card className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-500 motion-safe:[animation-delay:240ms] motion-safe:[animation-fill-mode:both]">
+    <Card>
       <CardHeader>
         <CardTitle className="text-base">Where it&rsquo;s coming from</CardTitle>
         <CardDescription>
@@ -723,28 +727,43 @@ function BreakdownRow({
 }
 
 function AccountAvatar({ row }: { row: NetWorthAccountRow }) {
+  // Per CLAUDE.md / docs/data-model.md: ``institution_logo`` is stored as
+  // **bare** base64 PNG bytes (no data: URL prefix). Other components
+  // (account-tile, flip-card) use ``<img>`` with the prefix prepended;
+  // we follow the same convention here. ``next/image`` would treat the
+  // bare base64 string as an unreachable URL and render the broken-image
+  // placeholder — that was the "?" icons users saw on the Net Worth tab.
   if (row.institution_logo) {
     return (
-      <Image
-        src={row.institution_logo}
+      // eslint-disable-next-line @next/next/no-img-element -- base64 data URL stored in DB
+      <img
+        src={`data:image/png;base64,${row.institution_logo}`}
         alt=""
         width={36}
         height={36}
-        className="size-9 shrink-0 rounded-lg object-cover"
-        unoptimized
+        className="size-9 shrink-0 rounded-lg bg-white object-contain p-0.5"
       />
     );
   }
-  const initials = row.name.slice(0, 2).toUpperCase();
+  // Fallback when there's no institution branding (Cash wallet, manual
+  // accounts, items missing logos). Use a meaningful icon per role
+  // instead of two-letter initials — "TO" for "TOTAL CHECKING" reads as
+  // garbage. ``role`` is the best signal we have at this point.
   const isCash = row.is_cash_wallet;
+  const Icon = isCash ? Banknote : row.role === "debt" ? CreditCard : Landmark;
   return (
     <div
       className={cn(
-        "flex size-9 shrink-0 items-center justify-center rounded-lg text-xs font-semibold",
-        isCash ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300" : "bg-muted text-muted-foreground",
+        "flex size-9 shrink-0 items-center justify-center rounded-lg",
+        isCash
+          ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300"
+          : row.role === "debt"
+            ? "bg-rose-500/10 text-rose-600 dark:text-rose-300"
+            : "bg-muted text-muted-foreground",
       )}
+      aria-label={row.name}
     >
-      {isCash ? <Banknote className="size-4" aria-hidden /> : initials}
+      <Icon className="size-4" aria-hidden />
     </div>
   );
 }
@@ -763,7 +782,7 @@ function SmartInsightsStrip({ summary }: { summary: NetWorthSummary }) {
     : `${months} month${months === 1 ? "" : "s"}`;
 
   return (
-    <Card className="border-primary/20 bg-primary/[0.04] motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-500 motion-safe:[animation-delay:320ms] motion-safe:[animation-fill-mode:both]">
+    <Card className="border-primary/20 bg-primary/[0.04]">
       <CardContent className="flex flex-wrap items-center gap-4 p-5">
         <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
           <Sparkles className="size-5" aria-hidden />

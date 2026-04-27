@@ -234,7 +234,10 @@ export function BudgetHistoryTab({
   const visibleRows = showAll ? sortedRows : sortedRows.slice(0, 8);
 
   return (
-    <div className="space-y-6">
+    // ``reports-tab-stagger`` (defined in globals.css) cascades a fade-
+    // in across direct children so the card-stack assembles top-down,
+    // matching Net Worth / Cash Flow / Income / Expenses.
+    <div className="reports-tab-stagger space-y-6">
       <Card className="hero-glow border-border/80 shadow-sm overflow-hidden">
         <CardHeader className="flex flex-row flex-wrap items-end justify-between gap-4">
           <div>
