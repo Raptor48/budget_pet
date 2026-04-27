@@ -6,6 +6,7 @@
  */
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { formatDistanceToNowStrict } from "date-fns";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,9 +14,10 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { cn } from "@/lib/utils";
 import { botApi, type CoupleSettingsUpdate } from "@/lib/api";
 
-import { formatDate, formatCents } from "./bot-helpers";
+import { formatCents } from "./bot-helpers";
 
 export function BotOverviewTab() {
   const qc = useQueryClient();
@@ -71,14 +73,10 @@ export function BotOverviewTab() {
               Telegram bot to pair this account.
             </p>
             {status.data?.pending_code ? (
-              <div className="rounded-md border border-dashed bg-muted/40 p-3 text-sm">
-                <div>
-                  Code: <code className="font-mono">{status.data.pending_code}</code>
-                </div>
-                <div className="text-muted-foreground">
-                  Expires {formatDate(status.data.pending_expires_at)}
-                </div>
-              </div>
+              <PendingCodeCard
+                code={status.data.pending_code}
+                expiresAt={status.data.pending_expires_at}
+              />
             ) : null}
             <Button
               size="sm"
@@ -107,6 +105,67 @@ export function BotOverviewTab() {
           />
         )}
       </section>
+    </div>
+  );
+}
+
+function PendingCodeCard({
+  code,
+  expiresAt,
+}: {
+  code: string;
+  expiresAt?: string | null;
+}) {
+  // Re-render every 10s so the countdown stays current without thrashing.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), 10_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const expiresDate = expiresAt ? new Date(expiresAt) : null;
+  const expiresMs = expiresDate ? expiresDate.getTime() - Date.now() : null;
+  const expired = expiresMs != null && expiresMs <= 0;
+  const countdown =
+    expiresDate && !expired
+      ? formatDistanceToNowStrict(expiresDate, { addSuffix: false })
+      : null;
+  const exactTime = expiresDate
+    ? expiresDate.toLocaleString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : null;
+
+  const onCopy = () => {
+    if (typeof navigator !== "undefined" && navigator.clipboard) {
+      void navigator.clipboard.writeText(code);
+    }
+  };
+
+  return (
+    <div className="rounded-md border border-dashed bg-muted/40 p-3 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-muted-foreground">Code</span>
+        <code className="rounded bg-background px-2 py-1 font-mono text-base tracking-widest">
+          {code}
+        </code>
+        <Button variant="ghost" size="sm" onClick={onCopy}>
+          Copy
+        </Button>
+      </div>
+      <div className={cn("mt-1.5 text-xs", expired ? "text-destructive" : "text-muted-foreground")}>
+        {expired
+          ? "Code expired — generate a new one."
+          : countdown
+            ? `Expires in ${countdown} (at ${exactTime})`
+            : null}
+      </div>
+      <div className="mt-1 text-xs text-muted-foreground">
+        Send <code>/link {code}</code> in your Telegram bot before it expires.
+        Codes are intentionally short-lived so a leaked screen can&apos;t be
+        used to hijack your account.
+      </div>
     </div>
   );
 }
