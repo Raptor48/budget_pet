@@ -1160,6 +1160,15 @@ export const botApi = {
     `${getApiBaseUrl()}/api/bot/receipts/${id}/image`,
   deleteReceipt: (id: number): Promise<void> =>
     apiRequest(`/api/bot/receipts/${id}`, { method: 'DELETE' }),
+  linkReceipt: (id: number, transactionId: number | null): Promise<ReceiptRow> => {
+    const qs =
+      transactionId == null
+        ? ''
+        : `?transaction_id=${encodeURIComponent(String(transactionId))}`;
+    return apiRequest(`/api/bot/receipts/${id}/link${qs}`, { method: 'PATCH' });
+  },
+  logReceiptAsCash: (id: number): Promise<ReceiptRow> =>
+    apiRequest(`/api/bot/receipts/${id}/log-as-cash`, { method: 'POST' }),
 
   // Leaderboard
   weeklyLeaderboard: (): Promise<LeaderboardOut> =>

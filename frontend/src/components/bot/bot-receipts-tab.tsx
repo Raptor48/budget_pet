@@ -1,7 +1,10 @@
 "use client";
 
 /**
- * Receipts tab — gallery of OCR'd photos linked to cash transactions.
+ * Receipts tab — gallery of OCR'd photos that the user can attach to any
+ * existing transaction (or "log as cash" for receipts that Plaid will
+ * never see). Receipts arrive unlinked by default; the bot now waits for
+ * the user to either run the cash flow or attach to an imported tx.
  *
  * The receipt's image bytes live in Postgres (BYTEA). The frontend just
  * issues a GET /api/bot/receipts/:id/image which authenticates against
@@ -9,18 +12,24 @@
  * to load (404, network) we surface a placeholder rather than an empty
  * frame so the user can still see the line items + totals.
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
   Camera,
+  CircleDashed,
   ImageOff,
+  Link2,
+  Link2Off,
   Loader2,
   Receipt as ReceiptIcon,
+  Search,
   Trash2,
+  Wallet,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -30,7 +39,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { botApi, type ReceiptRow } from "@/lib/api";
+import {
+  botApi,
+  transactionsApi,
+  type ReceiptRow,
+} from "@/lib/api";
+import type { Transaction } from "@/types/v2";
 import { confirm, notify, onMutationError } from "@/lib/notify";
 
 import { formatCents, formatDate } from "./bot-helpers";
@@ -52,6 +66,40 @@ export function BotReceiptsTab() {
     },
     onError: onMutationError("Couldn't delete that receipt."),
   });
+
+  const link = useMutation({
+    mutationFn: ({ id, txnId }: { id: number; txnId: number | null }) =>
+      botApi.linkReceipt(id, txnId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["bot", "receipts"] });
+      qc.invalidateQueries({ queryKey: ["bot", "receipt"] });
+      notify.success("Receipt linked.");
+    },
+    onError: onMutationError("Couldn't link the receipt."),
+  });
+
+  const unlink = useMutation({
+    mutationFn: (id: number) => botApi.linkReceipt(id, null),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["bot", "receipts"] });
+      qc.invalidateQueries({ queryKey: ["bot", "receipt"] });
+      notify.success("Receipt detached.");
+    },
+    onError: onMutationError("Couldn't detach the receipt."),
+  });
+
+  const logAsCash = useMutation({
+    mutationFn: (id: number) => botApi.logReceiptAsCash(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["bot", "receipts"] });
+      qc.invalidateQueries({ queryKey: ["bot", "receipt"] });
+      qc.invalidateQueries({ queryKey: ["transactions"] });
+      notify.success("Logged as cash.");
+    },
+    onError: onMutationError("Couldn't log as cash."),
+  });
+
+  const [pickerForId, setPickerForId] = useState<number | null>(null);
 
   const requestDelete = async (id: number, name: string | null | undefined) => {
     const ok = await confirm({
@@ -138,6 +186,17 @@ export function BotReceiptsTab() {
                 ) : r.parse_status !== "parsed" ? (
                   <Badge variant="outline">{r.parse_status}</Badge>
                 ) : null}
+                {r.transaction_id ? (
+                  <Badge variant="secondary" className="gap-1">
+                    <Link2 className="h-3 w-3" />
+                    linked
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="gap-1 border-amber-500/40 text-amber-600 dark:text-amber-400">
+                    <CircleDashed className="h-3 w-3" />
+                    unlinked
+                  </Badge>
+                )}
                 <span className="font-mono text-sm">
                   {r.total_cents != null ? formatCents(r.total_cents) : "—"}
                 </span>
@@ -151,7 +210,25 @@ export function BotReceiptsTab() {
         id={openId}
         onClose={() => setOpenId(null)}
         onDelete={(name) => openId && requestDelete(openId, name)}
+        onUnlink={() => openId && unlink.mutate(openId)}
+        onLogAsCash={() => openId && logAsCash.mutate(openId)}
+        onAttachClick={() => openId && setPickerForId(openId)}
         deleting={drop.isPending}
+        unlinking={unlink.isPending}
+        loggingCash={logAsCash.isPending}
+      />
+
+      <TransactionPicker
+        receiptId={pickerForId}
+        onClose={() => setPickerForId(null)}
+        onPick={(txnId) => {
+          if (pickerForId) {
+            link.mutate(
+              { id: pickerForId, txnId },
+              { onSettled: () => setPickerForId(null) },
+            );
+          }
+        }}
       />
     </div>
   );
@@ -161,12 +238,22 @@ function ReceiptDetail({
   id,
   onClose,
   onDelete,
+  onUnlink,
+  onLogAsCash,
+  onAttachClick,
   deleting,
+  unlinking,
+  loggingCash,
 }: {
   id: number | null;
   onClose: () => void;
   onDelete: (name: string | null | undefined) => void;
+  onUnlink: () => void;
+  onLogAsCash: () => void;
+  onAttachClick: () => void;
   deleting: boolean;
+  unlinking: boolean;
+  loggingCash: boolean;
 }) {
   const detail = useQuery({
     queryKey: ["bot", "receipt", id],
@@ -260,6 +347,58 @@ function ReceiptDetail({
                   </ul>
                 )}
               </div>
+              <div className="rounded-md border bg-muted/20 p-2.5 text-sm">
+                {r.transaction_id ? (
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Link2 className="h-3.5 w-3.5 text-emerald-500" />
+                      <span>Linked to transaction #{r.transaction_id}</span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={onUnlink}
+                      disabled={unlinking}
+                    >
+                      {unlinking ? (
+                        <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Link2Off className="mr-1 h-3.5 w-3.5" />
+                      )}
+                      Detach
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-amber-600 dark:text-amber-400">
+                      Not linked to a transaction yet.
+                    </span>
+                    <div className="flex gap-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={onAttachClick}
+                      >
+                        <Link2 className="mr-1 h-3.5 w-3.5" />
+                        Attach…
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={onLogAsCash}
+                        disabled={loggingCash}
+                      >
+                        {loggingCash ? (
+                          <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Wallet className="mr-1 h-3.5 w-3.5" />
+                        )}
+                        Log as cash
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
               <div className="mt-auto flex justify-end">
                 <Button
                   variant="ghost"
@@ -279,6 +418,126 @@ function ReceiptDetail({
             </div>
           </div>
         )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Transaction picker — opens when the user taps "Attach…" on an unlinked
+ * receipt. Loads recent transactions, allows free-text search, and on row
+ * click resolves with the picked transaction id.
+ *
+ * Sorting: most-recent date first, deduplicated by id. We don't filter to
+ * "matching amount" automatically because Plaid amounts often differ by a
+ * cent or two from the receipt due to rounding/tipping discrepancies — the
+ * user knows which transaction they meant.
+ */
+function TransactionPicker({
+  receiptId,
+  onClose,
+  onPick,
+}: {
+  receiptId: number | null;
+  onClose: () => void;
+  onPick: (transactionId: number) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const open = receiptId != null;
+  const transactions = useQuery({
+    queryKey: ["transactions", "picker", search],
+    queryFn: () =>
+      transactionsApi.list({
+        search: search.trim() || undefined,
+        exclude_internal_transfers: true,
+        limit: 50,
+      }),
+    enabled: open,
+    staleTime: 10_000,
+  });
+
+  // Reset search when the dialog closes so reopening starts fresh.
+  const memoSearch = useMemo(() => search, [search]);
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) {
+          setSearch("");
+          onClose();
+        }
+      }}
+    >
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Link2 className="h-4 w-4 text-muted-foreground" />
+            Attach receipt to a transaction
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search by merchant or description"
+              value={memoSearch}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-8"
+              autoFocus
+            />
+          </div>
+          {transactions.isLoading ? (
+            <ul className="divide-y rounded-md border">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <li
+                  key={i}
+                  className="flex items-center justify-between px-3 py-2"
+                >
+                  <Skeleton className="h-4 w-44" />
+                  <Skeleton className="h-4 w-16" />
+                </li>
+              ))}
+            </ul>
+          ) : !transactions.data?.length ? (
+            <p className="rounded-md border border-dashed py-6 text-center text-sm text-muted-foreground">
+              No transactions match. Try a different search.
+            </p>
+          ) : (
+            <ul className="max-h-[55vh] divide-y overflow-y-auto rounded-md border">
+              {transactions.data.map((t: Transaction) => (
+                <li
+                  key={t.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onPick(t.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onPick(t.id);
+                    }
+                  }}
+                  className={cn(
+                    "flex items-center justify-between gap-3 px-3 py-2 text-sm cursor-pointer outline-none",
+                    "hover:bg-muted/40 focus-visible:bg-muted/40",
+                  )}
+                >
+                  <div className="min-w-0">
+                    <div className="truncate font-medium">
+                      {t.merchant_name || t.display_title || t.name}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {formatDate(t.date)}
+                    </div>
+                  </div>
+                  <span className="font-mono text-sm">
+                    {formatCents(t.amount_cents)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   );

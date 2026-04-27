@@ -13,6 +13,7 @@ UX rules:
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -271,6 +272,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _on_tea(query, user, parts)
     elif head == "reauth":
         await _on_reauth(query, user, parts)
+    elif head == "chore":
+        await _on_chore(query, user, parts)
+    elif head == "receipt":
+        await _on_receipt_action(query, user, parts)
     else:
         await query.edit_message_text(
             f"Unknown action: {head}", reply_markup=_back_kb()
@@ -384,11 +389,7 @@ async def _on_family(query, user, parts):
             parse_mode=ParseMode.HTML,
         )
     elif sub == "chores":
-        await query.edit_message_text(
-            "🧹 Manage chores in the web app → <b>Bot</b> page → Chores.",
-            reply_markup=_back_kb("menu:family"),
-            parse_mode=ParseMode.HTML,
-        )
+        await _render_chores(query, user)
     elif sub == "anniv":
         settings = await repo.get_couple_settings(user["id"])
         d = settings.get("anniversary_date")
@@ -518,6 +519,97 @@ async def _on_reauth(query, user, parts):
 
 
 # ---------------------------------------------------------------------------
+# Chores — Family → 🧹 view, plus the "Mark done" callback
+# ---------------------------------------------------------------------------
+
+
+async def _render_chores(query, user) -> None:
+    """Show every chore assigned this week. Status icon for everyone (so the
+    audit ritual is fully transparent across both partners) but the
+    [Mark done] inline button only shows for chores assigned to the
+    current user."""
+    repo = get_bot_repo()
+    week = _bot_week_start_iso()
+    members = await _household_user_ids()
+    assignments = await repo.regenerate_week_assignments(
+        date.fromisoformat(week), members
+    )
+    assignments = await repo.list_assignments_for_week(date.fromisoformat(week))
+
+    if not assignments:
+        await query.edit_message_text(
+            "🧹 No chores configured yet — open the web app → Bot → Chores to set them up.",
+            reply_markup=_back_kb("menu:family"),
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    lines = [f"🧹 <b>Chores — week of {week}</b>", ""]
+    rows: List[List[InlineKeyboardButton]] = []
+    for a in assignments:
+        icon = a.get("chore_icon") or "🧹"
+        done = a.get("completed_at") is not None
+        marker = "✅" if done else "🔘"
+        owner = a.get("username") or "?"
+        lines.append(
+            f"{marker} {icon} <b>{a['chore_name']}</b> — {owner}"
+            + (" <i>(done)</i>" if done else "")
+        )
+        if not done and int(a["user_id"]) == int(user["id"]):
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        f"Mark done · {a['chore_name']}",
+                        callback_data=f"chore:done:{a['chore_id']}",
+                    )
+                ]
+            )
+    rows.append([InlineKeyboardButton("◀️ Back", callback_data="menu:family")])
+    await query.edit_message_text(
+        "\n".join(lines),
+        reply_markup=InlineKeyboardMarkup(rows),
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def _on_chore(query, user, parts) -> None:
+    if len(parts) < 3 or parts[1] != "done":
+        return
+    try:
+        chore_id = int(parts[2])
+    except ValueError:
+        return
+    repo = get_bot_repo()
+    week = date.fromisoformat(_bot_week_start_iso())
+    assignments = await repo.list_assignments_for_week(week)
+    target = next((a for a in assignments if int(a["chore_id"]) == chore_id), None)
+    if not target:
+        await query.answer("Chore not found this week.", show_alert=True)
+        return
+    if int(target["user_id"]) != int(user["id"]):
+        await query.answer("That one's not on your plate.", show_alert=True)
+        return
+    await repo.set_assignment_completed(chore_id, week, True)
+    # Re-render the whole list so the user sees the status flip in place.
+    await _render_chores(query, user)
+
+
+def _bot_week_start_iso() -> str:
+    today = date.today()
+    return (today - timedelta(days=today.weekday())).isoformat()
+
+
+async def _household_user_ids() -> List[int]:
+    """All users in the household — chore rotation rotates over this list."""
+    from web.db import get_pool
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT id FROM users ORDER BY id")
+    return [int(r["id"]) for r in rows]
+
+
+# ---------------------------------------------------------------------------
 # /balance, /networth, /upcoming — quick read-only commands
 # ---------------------------------------------------------------------------
 
@@ -536,10 +628,14 @@ async def cmd_networth(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     nw = await _latest_networth()
     if nw is None:
-        await update.message.reply_text("Net worth not yet computed.")
+        await update.message.reply_text(
+            "Net worth not yet computed. Run a Plaid sync first."
+        )
         return
     await update.message.reply_text(
-        f"📈 Net worth: <b>{_money(nw)}</b>", parse_mode=ParseMode.HTML
+        f"📈 <b>Net worth: {_money(nw)}</b>\n"
+        f"<i>Total assets minus all debts. Updated after the last sync.</i>",
+        parse_mode=ParseMode.HTML,
     )
 
 
@@ -553,12 +649,11 @@ async def cmd_upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     lines = ["📅 <b>Next 14 days</b>"]
     for r in rows[:15]:
+        date_str = r["next_date"].strftime("%b %d")
         lines.append(
-            f"• {r['next_date']} — {r['name']} {_money(int(r['amount_cents']))}"
+            f"• {date_str} — {r['name']} {_money(int(r['amount_cents']))}"
         )
-    await update.message.reply_text(
-        "\n".join(lines), parse_mode=ParseMode.HTML
-    )
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
 # ---------------------------------------------------------------------------
@@ -598,6 +693,22 @@ async def on_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def on_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receipts arrive unlinked.
+
+    Auto-syncing happens weekly, so we can't reliably auto-match a fresh
+    receipt photo to a Plaid-imported transaction (it might not exist yet).
+    Instead we store the photo + parsed lines + total, leave
+    ``transaction_id = NULL`` and offer two follow-ups:
+
+    * **Log as cash** — for receipts paid in cash; creates a manual cash
+      transaction in the user's wallet and links the receipt to it.
+    * **Wait for sync** — the receipt sits in /bot → Receipts where the
+      user can manually attach it to any imported transaction once Plaid
+      pulls it in.
+
+    The Insights feed nags the user 7 days later if a receipt is still
+    unlinked.
+    """
     user = await _ensure_linked(update)
     if not user:
         return
@@ -620,27 +731,98 @@ async def on_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Couldn't read a total off this receipt. Try a clearer photo."
         )
         return
+
     name = parsed.get("merchant_name") or "Receipt"
-    try:
-        txn = await _post_cash_transaction(
-            user,
-            int(parsed["total_cents"]),
-            name,
-            receipt_image=image_bytes,
-            receipt_image_mime="image/jpeg",
-            receipt_lines=parsed.get("lines"),
-            receipt_merchant=parsed.get("merchant_name"),
-            receipt_date=parsed.get("date"),
-            tax_cents=parsed.get("tax_cents"),
-            raw_ocr_json=parsed,
-        )
-    except RuntimeError as exc:
-        await update.message.reply_text(str(exc))
-        return
+    total_cents = int(parsed["total_cents"])
+
+    receipt = await get_bot_repo().create_receipt(
+        user_id=user["id"],
+        image_data=image_bytes,
+        image_mime="image/jpeg",
+        merchant_name=parsed.get("merchant_name"),
+        receipt_date=parsed.get("date"),
+        total_cents=total_cents,
+        tax_cents=parsed.get("tax_cents"),
+        raw_ocr_json=parsed,
+        lines=parsed.get("lines"),
+    )
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "💵 Log as cash",
+                    callback_data=f"receipt:cash:{receipt['id']}",
+                ),
+                InlineKeyboardButton(
+                    "🕒 Wait for sync",
+                    callback_data=f"receipt:wait:{receipt['id']}",
+                ),
+            ]
+        ]
+    )
     await update.message.reply_text(
-        f"📸 Saved <b>{name}</b> for {_money(int(parsed['total_cents']))}",
+        f"📸 Captured <b>{name}</b> · {_money(total_cents)}\n"
+        f"<i>Saved unlinked. Either log it as a cash spend now, or leave it "
+        f"and attach to a synced bank transaction later from the web app "
+        f"(<b>Bot → Receipts</b>).</i>",
+        reply_markup=keyboard,
         parse_mode=ParseMode.HTML,
     )
+
+
+async def _on_receipt_action(query, user, parts) -> None:
+    """Handle the [Log as cash] / [Wait for sync] follow-up buttons."""
+    if len(parts) < 3:
+        return
+    action = parts[1]
+    try:
+        receipt_id = int(parts[2])
+    except ValueError:
+        return
+    repo = get_bot_repo()
+    receipt = await repo.get_receipt(user["id"], receipt_id)
+    if not receipt:
+        await query.answer("Receipt not found.", show_alert=True)
+        return
+    if action == "wait":
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await query.message.reply_text(
+            "🕒 Saved. Attach it later from the web app → Bot → Receipts.",
+        )
+        return
+    if action == "cash":
+        if receipt.get("transaction_id"):
+            await query.answer("Already linked.", show_alert=True)
+            return
+        amount_cents = int(receipt.get("total_cents") or 0)
+        if amount_cents <= 0:
+            await query.answer("This receipt has no total.", show_alert=True)
+            return
+        name = receipt.get("merchant_name") or "Receipt"
+        try:
+            txn = await _post_cash_transaction(
+                user,
+                amount_cents,
+                name,
+                receipt_merchant=receipt.get("merchant_name"),
+                receipt_date=receipt.get("receipt_date"),
+            )
+        except RuntimeError as exc:
+            await query.answer(str(exc), show_alert=True)
+            return
+        await repo.attach_receipt_to_transaction(receipt_id, int(txn["id"]))
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
+        await query.message.reply_text(
+            f"💵 Logged <b>{name}</b> {_money(amount_cents)} as cash.",
+            parse_mode=ParseMode.HTML,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -758,26 +940,94 @@ def _parse_date(s: str) -> Optional[date]:
     return None
 
 
+# Plaid account types — `type` is the broad bucket ('depository', 'credit',
+# 'loan', 'investment', 'other'). Liability buckets carry positive balances
+# that represent DEBT, so summing them with assets would be nonsense.
+_LIABILITY_TYPES = ("credit", "loan")
+
+
 async def _today_snapshot(user_id: int) -> str:
-    """Tiny dashboard read — totals across cash + Plaid accounts."""
+    """Render the Today/balance card with proper assets vs liabilities split.
+
+    The previous version SUM()ed every account's current_balance, which
+    treated credit-card debt as a positive asset — confusing the headline
+    number relative to /networth (which uses the canonical
+    net_worth_snapshots calculation, assets − liabilities).
+    """
     from web.db import get_pool
 
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT COALESCE(SUM(current_balance_cents), 0) AS total,
+            SELECT type,
+                   subtype,
+                   COALESCE(SUM(current_balance_cents), 0) AS total,
                    COUNT(*) AS n
             FROM accounts
             WHERE is_active = TRUE
-            """
+            GROUP BY type, subtype
+            """,
         )
-    total = int(rows[0]["total"]) if rows else 0
-    n = int(rows[0]["n"]) if rows else 0
-    return (
-        f"📊 <b>Today</b>\nAccounts: {n}\nNet balance: {_money(total)}\n\n"
-        "Use /upcoming for next charges, /networth for the headline number."
+        nw = await conn.fetchval(
+            "SELECT net_worth_cents FROM net_worth_snapshots ORDER BY snapshot_date DESC LIMIT 1"
+        )
+
+    cash_cents = 0
+    savings_cents = 0
+    investments_cents = 0
+    credit_cents = 0
+    loan_cents = 0
+    n_total = 0
+    for r in rows:
+        n_total += int(r["n"])
+        amount = int(r["total"])
+        atype = (r["type"] or "").lower()
+        subtype = (r["subtype"] or "").lower()
+        if atype == "credit":
+            credit_cents += amount
+        elif atype == "loan":
+            loan_cents += amount
+        elif atype == "investment":
+            investments_cents += amount
+        elif atype == "depository":
+            if subtype == "savings":
+                savings_cents += amount
+            else:
+                cash_cents += amount
+        else:
+            cash_cents += amount  # "other" / cash wallets fall here
+
+    assets = cash_cents + savings_cents + investments_cents
+    liabilities = credit_cents + loan_cents
+    net_worth = (
+        int(nw)
+        if nw is not None
+        else assets - liabilities  # fallback if a snapshot hasn't run yet
     )
+
+    lines = [f"📊 <b>Today</b> — {n_total} accounts", ""]
+    lines.append("<b>Assets</b>")
+    if cash_cents:
+        lines.append(f"💵 Cash & checking   {_money(cash_cents)}")
+    if savings_cents:
+        lines.append(f"🏦 Savings           {_money(savings_cents)}")
+    if investments_cents:
+        lines.append(f"📈 Investments       {_money(investments_cents)}")
+    if not (cash_cents or savings_cents or investments_cents):
+        lines.append("—")
+    if liabilities:
+        lines.append("")
+        lines.append("<b>Liabilities</b>")
+        if credit_cents:
+            lines.append(f"💳 Credit cards      {_money(-credit_cents)}")
+        if loan_cents:
+            lines.append(f"🏠 Loans             {_money(-loan_cents)}")
+    lines.append("")
+    lines.append(f"<b>Net worth</b>        {_money(net_worth)}")
+    lines.append("")
+    lines.append("<i>Net worth = assets − debts. Use /upcoming for charges due soon.</i>")
+    return "\n".join(lines)
 
 
 async def _list_recent_cash(user_id: int) -> List[str]:
@@ -811,6 +1061,35 @@ async def _latest_networth() -> Optional[int]:
     return int(row["net_worth_cents"]) if row else None
 
 
+_RECURRING_DESC_NOISE_RE = re.compile(
+    # Plaid descriptions trail with junk like "ST-V6A8O8X8 WEB ID:1800948598",
+    # "CCD ID: 2462467002", purchase city/state strings, raw account masks.
+    # Trim from the first occurrence — leaves the human-readable lead intact.
+    r"\s+(?:CARD\s*\d+|WEB\s*ID:.*|CCD\s*ID:?\s*\d+|ID:?\s*\d{6,}|"
+    r"ST-[A-Z0-9]+|PPD\s*ID:?\s*\d+|TEL\s*ID:?\s*\d+).*$",
+    flags=re.IGNORECASE,
+)
+
+
+def _clean_recurring_label(
+    *, user_label: Optional[str], merchant_name: Optional[str], description: Optional[str]
+) -> str:
+    """user_label > merchant_name > clean(description) — same precedence as the
+    web app's recurring page (see `web/insights/cards.py:_stream_label`)."""
+    if user_label and user_label.strip():
+        return user_label.strip()
+    if merchant_name and merchant_name.strip():
+        return merchant_name.strip()
+    raw = (description or "").strip()
+    if not raw:
+        return "Subscription"
+    cleaned = _RECURRING_DESC_NOISE_RE.sub("", raw).strip()
+    # Title-case only if the source was ALL CAPS — preserve mixed-case names.
+    if cleaned and cleaned == cleaned.upper():
+        cleaned = cleaned.title()
+    return cleaned or "Subscription"
+
+
 async def _upcoming_recurring(days: int = 14) -> List[Dict[str, Any]]:
     from web.db import get_pool
 
@@ -819,7 +1098,8 @@ async def _upcoming_recurring(days: int = 14) -> List[Dict[str, Any]]:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT description AS name, average_amount_cents AS amount_cents,
+            SELECT user_label, merchant_name, description,
+                   average_amount_cents AS amount_cents,
                    (last_date + INTERVAL '1 month')::date AS next_date
             FROM recurring_streams
             WHERE is_active = TRUE
@@ -835,7 +1115,11 @@ async def _upcoming_recurring(days: int = 14) -> List[Dict[str, Any]]:
             continue
         out.append(
             {
-                "name": r["name"],
+                "name": _clean_recurring_label(
+                    user_label=r["user_label"],
+                    merchant_name=r["merchant_name"],
+                    description=r["description"],
+                ),
                 "amount_cents": r["amount_cents"] or 0,
                 "next_date": nd,
             }
@@ -858,16 +1142,17 @@ async def _post_cash_transaction(
     amount_cents: int,
     name: str,
     *,
-    receipt_image: Optional[bytes] = None,
-    receipt_image_mime: Optional[str] = None,
-    receipt_lines: Optional[List[Dict[str, Any]]] = None,
     receipt_merchant: Optional[str] = None,
     receipt_date: Optional[date] = None,
-    tax_cents: Optional[int] = None,
-    raw_ocr_json: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Insert a manual cash transaction. Picks the user's primary cash wallet
-    (by account.user_id if set, else the first non-Plaid account)."""
+    (by account.user_id if set, else the first non-Plaid account).
+
+    Receipt rows are now stored independently via
+    :meth:`BotRepository.create_receipt`; the photo handler links them to a
+    transaction explicitly via ``attach_receipt_to_transaction`` so the user
+    can choose between cash flow and waiting for a Plaid match.
+    """
     from web.db import get_pool
     from web.transactions.repo import TransactionsRepository
 
@@ -889,31 +1174,17 @@ async def _post_cash_transaction(
             "No cash wallet found. Create one in the web app first."
         )
     repo = TransactionsRepository()
-    txn = await repo.create_cash_transaction(
+    return await repo.create_cash_transaction(
         {
             "account_id": wallet["id"],
             "amount_cents": amount_cents,
             "currency": "USD",
-            "date": date.today(),
+            "date": receipt_date or date.today(),
             "name": name,
             "merchant_name": receipt_merchant,
             "source": "manual",
         }
     )
-    if receipt_image:
-        await get_bot_repo().create_receipt(
-            user_id=user["id"],
-            image_data=receipt_image,
-            image_mime=receipt_image_mime or "image/jpeg",
-            merchant_name=receipt_merchant,
-            receipt_date=receipt_date,
-            total_cents=amount_cents,
-            tax_cents=tax_cents,
-            raw_ocr_json=raw_ocr_json,
-            transaction_id=txn["id"],
-            lines=receipt_lines,
-        )
-    return txn
 
 
 # ---------------------------------------------------------------------------

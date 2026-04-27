@@ -316,6 +316,105 @@ async def delete_receipt(request: Request, receipt_id: int):
         raise HTTPException(status_code=404, detail="Receipt not found")
 
 
+@router.patch("/receipts/{receipt_id}/link", response_model=ReceiptOut)
+async def link_receipt(
+    request: Request,
+    receipt_id: int,
+    transaction_id: Optional[int] = Query(
+        None, description="Pass null/omit to detach the receipt."
+    ),
+):
+    """Attach (or detach with ``transaction_id=null``) a receipt to a tx.
+
+    The receipt's amount/date should already be reasonable; we don't try to
+    enforce a strict match here so the user can override fuzzy cases (e.g.
+    Plaid posted $84.32 but the paper receipt says $84.31 because of a
+    rounding glitch on the bank's side).
+    """
+    user_id = _user_id(request)
+    if transaction_id is not None:
+        # Verify the target transaction exists at all (gives a friendly 404
+        # instead of a silent no-op when the user pastes the wrong id).
+        from web.transactions.repo import TransactionsRepository
+
+        txn = await TransactionsRepository().get_transaction(int(transaction_id))
+        if not txn:
+            raise HTTPException(status_code=404, detail="Transaction not found")
+    receipt = await get_bot_repo().link_receipt(user_id, receipt_id, transaction_id)
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+    return receipt
+
+
+@router.post("/receipts/{receipt_id}/log-as-cash", response_model=ReceiptOut)
+async def log_receipt_as_cash(request: Request, receipt_id: int):
+    """Create a cash transaction from the receipt's total + merchant and
+    link the receipt to it. Used when the receipt is for a cash purchase
+    that Plaid will never see."""
+    user_id = _user_id(request)
+    repo = get_bot_repo()
+    receipt = await repo.get_receipt(user_id, receipt_id)
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+    if receipt.get("transaction_id"):
+        raise HTTPException(
+            status_code=409, detail="Receipt is already linked to a transaction."
+        )
+    amount_cents = int(receipt.get("total_cents") or 0)
+    if amount_cents <= 0:
+        raise HTTPException(
+            status_code=422, detail="Receipt has no total to log as cash."
+        )
+    txn = await _create_cash_for_receipt(
+        user_id=user_id,
+        amount_cents=amount_cents,
+        merchant=receipt.get("merchant_name"),
+        receipt_date=receipt.get("receipt_date"),
+    )
+    await repo.attach_receipt_to_transaction(receipt_id, int(txn["id"]))
+    return await repo.get_receipt(user_id, receipt_id)
+
+
+async def _create_cash_for_receipt(
+    *, user_id: int, amount_cents: int, merchant: Optional[str], receipt_date
+):
+    """Pick the user's primary cash wallet and write a manual cash tx."""
+    from web.db import get_pool
+    from web.transactions.repo import TransactionsRepository
+    from datetime import date as _date
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        wallet = await conn.fetchrow(
+            """
+            SELECT id FROM accounts
+            WHERE plaid_account_id IS NULL AND is_active = TRUE
+              AND (user_id = $1 OR user_id IS NULL)
+            ORDER BY (user_id = $1) DESC, id LIMIT 1
+            """,
+            user_id,
+        )
+    if not wallet:
+        raise HTTPException(
+            status_code=412,
+            detail=(
+                "No cash wallet found. Create one in the web app's "
+                "Accounts page first."
+            ),
+        )
+    return await TransactionsRepository().create_cash_transaction(
+        {
+            "account_id": wallet["id"],
+            "amount_cents": amount_cents,
+            "currency": "USD",
+            "date": receipt_date or _date.today(),
+            "name": merchant or "Receipt",
+            "merchant_name": merchant,
+            "source": "manual",
+        }
+    )
+
+
 # ---------------------------------------------------------------------------
 # Couple leaderboard
 # ---------------------------------------------------------------------------

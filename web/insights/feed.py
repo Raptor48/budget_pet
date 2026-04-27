@@ -331,6 +331,34 @@ async def build_insights_feed(viewer_user_id: Optional[int] = None) -> Dict[str,
     except Exception as exc:
         logger.warning("insights price changes: %s", exc)
 
+    # ---- Bot receipts unlinked > 7 days --------------------------------
+    try:
+        from web.bot_api.repo import get_bot_repo
+
+        if viewer_user_id is not None:
+            stale = await get_bot_repo().list_unlinked_receipts(
+                viewer_user_id, older_than_days=7
+            )
+            if stale:
+                cards.append(
+                    card_builders.make_card(
+                        type="receipts_unlinked",
+                        severity="warn",
+                        title=f"{len(stale)} receipt{'s' if len(stale) != 1 else ''} not linked yet",
+                        summary=(
+                            "These photos sat in your /bot Receipts tab for "
+                            "more than a week without being attached to a "
+                            "transaction. Link them or log as cash."
+                        ),
+                        detail=None,
+                        dedupe_key=f"receipts_unlinked:{','.join(str(r['id']) for r in stale)}",
+                        action_url="/bot",
+                        action_label="Open Receipts",
+                    )
+                )
+    except Exception as exc:
+        logger.warning("insights receipts_unlinked: %s", exc)
+
     # NOTE: ``actionable_count`` and ``new_count`` here are placeholders.
     # ``store.load_feed`` recomputes both against persisted ``first_seen_at``
     # and the user's ``insights_last_viewed_at`` after applying the

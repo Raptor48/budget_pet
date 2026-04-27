@@ -939,6 +939,52 @@ class BotRepository:
                 transaction_id,
             )
 
+    async def link_receipt(
+        self, user_id: int, receipt_id: int, transaction_id: Optional[int]
+    ) -> Optional[Dict[str, Any]]:
+        """Link or unlink a receipt to a transaction.
+
+        Caller scopes by ``user_id`` so a partner can only manage their own
+        receipts. Pass ``transaction_id=None`` to detach.
+        """
+        pool = await self._pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE receipts SET transaction_id = $3
+                WHERE id = $1 AND user_id = $2
+                RETURNING id
+                """,
+                receipt_id,
+                user_id,
+                transaction_id,
+            )
+        if not row:
+            return None
+        return await self.get_receipt(user_id, receipt_id)
+
+    async def list_unlinked_receipts(
+        self, user_id: int, *, older_than_days: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """Receipts with ``transaction_id IS NULL``. ``older_than_days`` is
+        used by the Insights nag — set to 7 to surface receipts the user
+        forgot about for a week."""
+        pool = await self._pool()
+        sql = (
+            "SELECT id, merchant_name, receipt_date, total_cents, currency,"
+            "       parse_status, created_at "
+            "FROM receipts "
+            "WHERE user_id = $1 AND transaction_id IS NULL"
+        )
+        args: List[Any] = [user_id]
+        if older_than_days is not None:
+            args.append(int(older_than_days))
+            sql += f" AND created_at < NOW() - make_interval(days => ${len(args)})"
+        sql += " ORDER BY created_at DESC"
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(sql, *args)
+        return [dict(r) for r in rows]
+
     async def list_receipts(
         self, user_id: int, limit: int = 40
     ) -> List[Dict[str, Any]]:
@@ -1015,52 +1061,100 @@ class BotRepository:
         Joins transactions → accounts → users. Banks linked to a Plaid item
         are credited to the user who linked them (``plaid_items.user_id``);
         cash wallets to their owning user via ``accounts.user_id`` if set.
+
+        Hardening: if no transactions in the current ISO week (Mon–Sun)
+        produce ranked rows, retry over the trailing 7 days. If ownership
+        is still unknown for everything, surface a synthetic "Household"
+        entry per category so the user sees data instead of an empty
+        screen — this happens when older Plaid items pre-date the
+        ``plaid_items.user_id`` column and weren't backfilled.
         """
         ws = week_start or _week_start()
         we = ws + timedelta(days=7)
         pool = await self._pool()
         async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                WITH owned AS (
-                    SELECT t.id, t.amount_cents, t.category_id,
-                           COALESCE(pi.user_id, a.user_id) AS user_id
-                    FROM transactions t
-                    JOIN accounts a ON a.id = t.account_id
-                    LEFT JOIN plaid_items pi ON pi.item_id = a.plaid_item_id
-                    WHERE t.date >= $1 AND t.date < $2
-                      AND COALESCE(t.transaction_class, 'expense') = 'expense'
-                      -- Private transactions are excluded from the shared
-                      -- leaderboard; the partner who didn't make the purchase
-                      -- shouldn't see it surface in totals here either.
-                      AND NOT t.is_private
-                ),
-                ranked AS (
-                    SELECT o.user_id, c.id AS category_id, c.name AS category_name,
-                           SUM(o.amount_cents) AS amount_cents,
-                           ROW_NUMBER() OVER (
-                               PARTITION BY c.id ORDER BY SUM(o.amount_cents) DESC
-                           ) AS rn
-                    FROM owned o
-                    JOIN categories c ON c.id = o.category_id
-                    WHERE o.user_id IS NOT NULL
-                    GROUP BY o.user_id, c.id, c.name
+            rows = await self._leaderboard_query(conn, ws, we)
+            if not rows:
+                # No data in the canonical Mon–Sun window — fall back to
+                # last 7 days so the screen feels alive even early on
+                # Monday before the week's first sync.
+                fallback_start = date.today() - timedelta(days=7)
+                fallback_end = date.today() + timedelta(days=1)
+                rows = await self._leaderboard_query(
+                    conn, fallback_start, fallback_end
                 )
-                SELECT r.user_id, u.username, r.category_id, r.category_name,
-                       r.amount_cents
-                FROM ranked r
-                JOIN users u ON u.id = r.user_id
-                WHERE rn = 1
-                ORDER BY r.amount_cents DESC
-                LIMIT 12
-                """,
-                ws,
-                we,
-            )
+                if rows:
+                    ws = fallback_start
+            if not rows:
+                # Still empty: try the same window WITHOUT the user-id
+                # filter and synthesise a household row so the user gets
+                # at least the per-category top spend.
+                rows = await self._leaderboard_household_query(
+                    conn, ws, we if (week_start or _week_start()) == ws else date.today() + timedelta(days=1)
+                )
         return {
             "week_start": ws,
             "entries": [dict(r) for r in rows],
         }
+
+    async def _leaderboard_query(self, conn, start: date, end: date):
+        return await conn.fetch(
+            """
+            WITH owned AS (
+                SELECT t.id, t.amount_cents, t.category_id,
+                       COALESCE(pi.user_id, a.user_id) AS user_id
+                FROM transactions t
+                JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN plaid_items pi ON pi.item_id = a.plaid_item_id
+                WHERE t.date >= $1 AND t.date < $2
+                  AND COALESCE(t.transaction_class, 'expense') = 'expense'
+                  AND NOT t.is_private
+            ),
+            ranked AS (
+                SELECT o.user_id, c.id AS category_id, c.name AS category_name,
+                       SUM(o.amount_cents) AS amount_cents,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY c.id ORDER BY SUM(o.amount_cents) DESC
+                       ) AS rn
+                FROM owned o
+                JOIN categories c ON c.id = o.category_id
+                WHERE o.user_id IS NOT NULL
+                GROUP BY o.user_id, c.id, c.name
+            )
+            SELECT r.user_id, u.username, r.category_id, r.category_name,
+                   r.amount_cents
+            FROM ranked r
+            JOIN users u ON u.id = r.user_id
+            WHERE rn = 1
+            ORDER BY r.amount_cents DESC
+            LIMIT 12
+            """,
+            start,
+            end,
+        )
+
+    async def _leaderboard_household_query(self, conn, start: date, end: date):
+        """Per-category totals across everyone, presented as 'Household' so
+        the screen shows data even when account-ownership rows are NULL."""
+        return await conn.fetch(
+            """
+            SELECT 0 AS user_id,
+                   'Household' AS username,
+                   c.id AS category_id,
+                   c.name AS category_name,
+                   SUM(t.amount_cents) AS amount_cents
+            FROM transactions t
+            JOIN categories c ON c.id = t.category_id
+            WHERE t.date >= $1 AND t.date < $2
+              AND COALESCE(t.transaction_class, 'expense') = 'expense'
+              AND NOT t.is_private
+            GROUP BY c.id, c.name
+            ORDER BY SUM(t.amount_cents) DESC
+            LIMIT 8
+            """,
+            start,
+            end,
+        )
 
 
 _repo: Optional[BotRepository] = None

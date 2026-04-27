@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { botApi, type ChoreRow } from "@/lib/api";
+import { botApi, usersApi, type ChoreRow } from "@/lib/api";
 import { confirm, notify, onMutationError } from "@/lib/notify";
 
 import { formatDate, todayMonday } from "./bot-helpers";
@@ -52,6 +52,29 @@ export function BotChoresTab() {
   const assignments = useQuery({
     queryKey: ["bot", "chore-assignments", week],
     queryFn: () => botApi.listChoreAssignments(week),
+  });
+
+  // Household members populate the "this week" reassignment dropdown.
+  // We only need their id + username; reuse the auth /users feed.
+  const users = useQuery({
+    queryKey: ["users"],
+    queryFn: usersApi.list,
+    staleTime: 60_000,
+  });
+
+  const reassign = useMutation({
+    mutationFn: ({
+      choreId,
+      weekStart,
+      userId,
+    }: {
+      choreId: number;
+      weekStart: string;
+      userId: number;
+    }) => botApi.reassignChore(choreId, weekStart, userId),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["bot", "chore-assignments"] }),
+    onError: onMutationError("Couldn't reassign that chore."),
   });
 
   const setCompleted = useMutation({
@@ -223,7 +246,35 @@ export function BotChoresTab() {
                   <div className="flex items-center gap-2">
                     <ChoreIcon value={a.chore_icon} />
                     <span className="font-medium">{a.chore_name}</span>
-                    <Badge variant="outline">{a.username}</Badge>
+                    {users.data && users.data.length > 1 ? (
+                      <Select
+                        value={String(a.user_id)}
+                        onValueChange={(v) =>
+                          reassign.mutate({
+                            choreId: a.chore_id,
+                            weekStart: a.week_start,
+                            userId: Number(v),
+                          })
+                        }
+                        disabled={
+                          reassign.isPending &&
+                          reassign.variables?.choreId === a.chore_id
+                        }
+                      >
+                        <SelectTrigger className="h-7 w-[120px] text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {users.data.map((u) => (
+                            <SelectItem key={u.id} value={String(u.id)}>
+                              {u.username}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <Badge variant="outline">{a.username}</Badge>
+                    )}
                   </div>
                   <Button
                     size="sm"
