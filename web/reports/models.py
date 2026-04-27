@@ -1,7 +1,15 @@
-from datetime import date
+from datetime import date as _date
 from typing import List, Optional
 
 from pydantic import BaseModel
+
+# Re-exported alias kept for the existing models that have a required field
+# also named ``date`` (e.g. ForecastEntry). Pydantic v2 resolves type
+# annotations against the class ``__dict__`` AT EVAL TIME, so when a field
+# is named ``date`` AND defaults to ``None``, ``Optional[date]`` collapses
+# to ``Optional[None]`` (i.e. None-only). New optional ``date``-typed
+# fields must reference ``_date`` directly. See ``DiagnosticsRow`` below.
+date = _date
 
 
 class CashFlowMonth(BaseModel):
@@ -208,10 +216,22 @@ class DiagnosticsRow(BaseModel):
 
     The shape is intentionally permissive — this endpoint is for the owner
     to spot-check data and the exact field set per section can evolve.
+
+    ``date`` and ``recent_expense_date`` are typed as ``date`` (not ``str``)
+    because asyncpg returns ``datetime.date`` for DATE columns and Pydantic
+    v2's strict response-validation rejects implicit str coercion. Pydantic
+    serialises ``date`` to ``YYYY-MM-DD`` ISO strings on the wire, which is
+    exactly what the FE expects (and what the rest of the app already
+    sends — see Transaction.date / Transaction.authorized_date).
     """
 
     id: int
-    date: Optional[str] = None
+    # NB: ``Optional[_date]`` (not ``Optional[date]``) — Pydantic v2
+    # resolves annotations against the class ``__dict__`` and the
+    # field name ``date`` shadows the type name, collapsing
+    # ``Optional[date]`` to ``Optional[None]`` and rejecting any real
+    # date input. The ``_date`` alias bypasses the shadow.
+    date: Optional[_date] = None
     amount_cents: int
     merchant_name: Optional[str] = None
     name: Optional[str] = None
@@ -221,7 +241,7 @@ class DiagnosticsRow(BaseModel):
     account_type: Optional[str] = None
     transaction_class: Optional[str] = None
     merchant_entity_id: Optional[str] = None
-    recent_expense_date: Optional[str] = None
+    recent_expense_date: Optional[_date] = None
 
     class Config:
         from_attributes = True
