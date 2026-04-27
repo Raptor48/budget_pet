@@ -395,12 +395,20 @@ async def match_pairs(
            AND i.amount_cents < 0
            AND o.account_type = 'depository'
            AND i.account_type = 'depository'
-           -- Fee / FX tolerance: max(500¢ floor, 1% of out) covers PayPal
-           -- Instant Transfer (1.75% but usually <$5 delta), small wire
-           -- fees, and sub-dollar FX rounding.
-           AND ABS(o.amount_cents + i.amount_cents) <= GREATEST(500, o.amount_cents / 100)
+           -- Fee tolerance: max($25 floor, 2% of out) covers PayPal Instant
+           -- Transfer for US personal accounts — 1.75% per leg, capped at
+           -- $25 (https://www.paypal.com/us/digital-wallet/paypal-consumer-fees).
+           -- The $25 floor matches PayPal's hard cap so a $10k transfer
+           -- with the maximum $25 fee still pairs; the 2% ramp gives a
+           -- 0.25% buffer above the headline rate for Plaid rounding and
+           -- minor wire / FX deltas. The previous max($5, 1%) bound was
+           -- off by 1.5× and missed every Instant Transfer above ~$285.
+           AND ABS(o.amount_cents + i.amount_cents) <= GREATEST(2500, o.amount_cents * 2 / 100)
            AND ABS(o.amount_cents + i.amount_cents) > 0
-           AND ABS(o.date - i.date) <= 1
+           -- ±2 day window — PayPal IT lands same day or next business
+           -- day; small ACH-with-fee can take two. Still tighter than the
+           -- exact matcher's ±3 so cent-equality always wins.
+           AND ABS(o.date - i.date) <= 2
         )
         SELECT out_id, in_id
         FROM pairs
