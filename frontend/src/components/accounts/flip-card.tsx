@@ -1,8 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { UserRound } from "lucide-react";
+import {
+  CreditCard as CreditCardIcon,
+  Landmark,
+  PiggyBank,
+  TrendingUp,
+  UserRound,
+  Wallet,
+  type LucideIcon,
+} from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -21,6 +29,27 @@ import {
   formatSyncedAt,
 } from "./helpers";
 
+/**
+ * Pick the icon that represents an account type. Used as the visual centerpiece
+ * of the institution-logo placeholder when Plaid hasn't given us a brand
+ * graphic — letters ("CC", "CO") read as a glitch, but a stylized type-icon on
+ * a brand-colored disc reads as design.
+ */
+function accountTypeIcon(type: string): LucideIcon {
+  switch (type) {
+    case "credit":
+      return CreditCardIcon;
+    case "loan":
+      return PiggyBank;
+    case "investment":
+      return TrendingUp;
+    case "depository":
+      return Landmark;
+    default:
+      return Wallet;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Face helpers
 // ---------------------------------------------------------------------------
@@ -29,6 +58,25 @@ interface FaceProps {
   account: Account;
   color: string;
   size: "default" | "compact";
+}
+
+/**
+ * First letter (or two) of an institution name — used as a stylish fallback
+ * when Plaid hasn't given us a logo. "Chase" → "C", "Bank of America" → "BA".
+ * Returns "" if no usable name; the caller falls back to a type icon.
+ */
+function institutionInitials(name: string | null | undefined): string {
+  if (!name) return "";
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "";
+  if (parts.length === 1) return parts[0][0]?.toUpperCase() ?? "";
+  // For multi-word names, take the first letter of the first two
+  // *meaningful* words (skip short connectors like "of", "the", "and").
+  const skip = new Set(["of", "the", "and", "&"]);
+  const meaningful = parts.filter((p) => !skip.has(p.toLowerCase()));
+  const head = (meaningful[0]?.[0] ?? "").toUpperCase();
+  const tail = (meaningful[1]?.[0] ?? "").toUpperCase();
+  return (head + tail).slice(0, 2);
 }
 
 function InstitutionLogo({
@@ -43,62 +91,111 @@ function InstitutionLogo({
 }) {
   if (account.institution_logo) {
     return (
-      // eslint-disable-next-line @next/next/no-img-element
+      // eslint-disable-next-line @next/next/no-img-element -- base64 data URL stored in DB
       <img
         src={`data:image/png;base64,${account.institution_logo}`}
         alt={account.name}
         width={size}
         height={size}
         style={{ width: size, height: size }}
-        className="rounded-md object-contain"
+        className="rounded-md bg-white/95 object-contain p-1 shadow-sm"
       />
     );
   }
+  // No Plaid logo. Two-tier fallback:
+  //   1. If Plaid gave us institution_name → render its initials on a
+  //      brand-color disc (Chase → "C" on dark blue). Looks like a stylized
+  //      bank emblem, not a glitch.
+  //   2. Otherwise (cash wallet, manual account) → Lucide type icon.
+  // Both variants share the brand-color/type-accent disc treatment.
   const accentColor =
     account.institution_color ?? TYPE_COLORS[account.type] ?? TYPE_COLORS.other;
-  const initials = (account.name || "?")
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? "")
-    .join("");
-  if (variant === "light") {
-    return (
-      <div
-        className="flex items-center justify-center rounded-md font-bold"
-        style={{
+  const initials = institutionInitials(account.institution_name);
+  const Icon = accountTypeIcon(account.type);
+
+  const baseStyle =
+    variant === "light"
+      ? {
           width: size,
           height: size,
-          fontSize: size * 0.38,
           backgroundColor: `${accentColor}22`,
           color: accentColor,
-        }}
-      >
-        {initials}
+        }
+      : {
+          width: size,
+          height: size,
+          backgroundColor: `${accentColor}d9`, // ~85% alpha over gradient
+        };
+  const baseClass =
+    variant === "light"
+      ? "flex items-center justify-center rounded-md"
+      : "flex items-center justify-center rounded-md text-white shadow-sm ring-1 ring-white/15";
+
+  if (initials) {
+    return (
+      <div className={baseClass} style={baseStyle}>
+        <span
+          className="font-bold leading-none tracking-tight"
+          style={{ fontSize: size * (initials.length === 1 ? 0.5 : 0.42) }}
+        >
+          {initials}
+        </span>
       </div>
     );
   }
   return (
-    <div
-      className="flex items-center justify-center rounded-md bg-white/20 text-white font-bold"
-      style={{ width: size, height: size, fontSize: size * 0.38 }}
-    >
-      {initials}
+    <div className={baseClass} style={baseStyle}>
+      <Icon style={{ width: size * 0.55, height: size * 0.55 }} aria-hidden />
     </div>
   );
 }
 
-function TypeLabel({ type }: { type: string }) {
-  const labels: Record<string, string> = {
+/**
+ * Top-right corner stack: bank name (prominent) + account type (small).
+ *
+ * If Plaid gave us an institution_name we surface it here so the user
+ * knows *which* bank a card belongs to even before flipping. Without
+ * this, an unbranded card (no Plaid logo) is identified only by its
+ * mask and product name, which doesn't include the bank — confusing.
+ *
+ * Falls back to type-only when no institution name is available (cash,
+ * manually-created accounts, etc.) so the layout stays balanced.
+ */
+function TitleStack({ account, compact }: { account: Account; compact: boolean }) {
+  const typeLabels: Record<string, string> = {
     depository: "Checking / Savings",
     credit: "Credit Card",
     loan: "Loan",
     investment: "Investment",
     other: "Account",
   };
+  const typeText = typeLabels[account.type] ?? account.type;
+  const bankName = (account.institution_name ?? "").trim();
+
   return (
-    <span className="rounded-full bg-white/20 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-widest text-white/90">
-      {labels[type] ?? type}
-    </span>
+    <div className="flex max-w-[60%] flex-col items-end gap-0.5 text-right">
+      {bankName ? (
+        <span
+          className={
+            compact
+              ? "max-w-full truncate text-[12px] font-semibold leading-none text-white drop-shadow-sm"
+              : "max-w-full truncate text-sm font-semibold leading-none text-white drop-shadow-sm"
+          }
+          title={bankName}
+        >
+          {bankName}
+        </span>
+      ) : null}
+      <span
+        className={
+          compact
+            ? "rounded-full bg-white/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-widest text-white/85"
+            : "rounded-full bg-white/20 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-widest text-white/90"
+        }
+      >
+        {typeText}
+      </span>
+    </div>
   );
 }
 
@@ -120,13 +217,16 @@ function CardFront({ account, color, size }: FaceProps) {
   const name = account.official_name || account.name;
   const mask = account.mask ? `•••• ${account.mask}` : null;
   const isDebt = account.type === "credit" || account.type === "loan";
-  const logoSize = compact ? 30 : 40;
+  // Bigger logo than before — the previous 30px was lost on the card. 40
+  // and 52 give the institution mark proper visual weight without
+  // overwhelming the layout.
+  const logoSize = compact ? 40 : 52;
 
   return (
     <div
       className={
         compact
-          ? "absolute inset-0 flex flex-col justify-between overflow-hidden rounded-xl p-3.5 text-white"
+          ? "absolute inset-0 flex flex-col justify-between overflow-hidden rounded-xl p-3 text-white"
           : "absolute inset-0 flex flex-col justify-between overflow-hidden rounded-2xl p-5 text-white"
       }
       style={{
@@ -145,10 +245,10 @@ function CardFront({ account, color, size }: FaceProps) {
         style={{ width: 140, height: 140 }}
       />
 
-      {/* Top row */}
-      <div className="relative flex items-start justify-between">
+      {/* Top row: institution logo (left) · bank name + type stack (right). */}
+      <div className="relative flex items-start justify-between gap-3">
         <InstitutionLogo account={account} size={logoSize} />
-        <TypeLabel type={account.type} />
+        <TitleStack account={account} compact={compact} />
       </div>
 
       {/* Middle: chip + account label */}
@@ -184,7 +284,6 @@ function CardFront({ account, color, size }: FaceProps) {
           )}
           <div className="mt-1 flex items-center gap-1.5">
             <OwnerBadge username={account.owner_username} />
-            <p className="text-[9px] text-white/50">Tap for details</p>
           </div>
         </div>
         <div className="text-right">
@@ -250,8 +349,8 @@ function CardBack({
     <div
       className={
         compact
-          ? "absolute inset-0 flex flex-col justify-between overflow-hidden rounded-xl p-3 text-white"
-          : "absolute inset-0 flex flex-col justify-between overflow-hidden rounded-2xl p-4 text-white"
+          ? "absolute inset-0 flex flex-col gap-2 overflow-hidden rounded-xl px-2.5 pt-2.5 pb-5 text-white"
+          : "absolute inset-0 flex flex-col gap-2.5 overflow-hidden rounded-2xl px-3.5 pt-3 pb-6 text-white"
       }
       style={{
         background: cardGradient(darken(color, 0.1)),
@@ -261,53 +360,62 @@ function CardBack({
       }}
       onClick={(e) => e.stopPropagation()}
     >
-      {/* Decorative stripe */}
-      <div className="absolute left-0 right-0 top-7 h-7 bg-black/30" />
+      {/* Slim magnetic stripe — kept for the credit-card silhouette but
+          shrunk so it doesn't dominate the back face. */}
+      <div className="pointer-events-none absolute left-0 right-0 top-4 h-3.5 bg-black/30" />
 
-      {/* Header */}
-      <div className="relative flex items-center justify-between pt-7">
+      {/* Header. Sits *above* the stripe — the stripe is purely decorative
+          behind the title now. */}
+      <div className="relative z-10 flex items-center justify-between">
         <p className="text-[10px] uppercase tracking-widest text-white/60">Details</p>
         <button
           type="button"
-          className="flex items-center gap-1 rounded-full bg-white/20 px-2.5 py-0.5 text-[10px] font-medium text-white hover:bg-white/30 active:bg-white/40"
+          className="flex items-center gap-1 rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-medium text-white hover:bg-white/30 active:bg-white/40"
           onClick={onFlipBack}
         >
           ← Back
         </button>
       </div>
 
+      {/* Spacer so content clears the magnetic stripe sitting at top-4. */}
+      <div className="h-2.5" aria-hidden />
+
       {/* Financial details by account type */}
       <div className="relative flex flex-col gap-1.5">
         {isCreditLike && (
           <>
             <UtilizationBar account={account} />
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]">
+            {/* Two inline lines of data instead of the previous 4-cell grid.
+                Roughly halves the vertical footprint of this section. */}
+            <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px]">
               <ManualOverrideField
                 account={account}
                 kind="credit_limit"
                 label="Limit"
                 format={(v) => formatMoney(Number(v), account.currency)}
+                inline
               />
               <ManualOverrideField
                 account={account}
                 kind="apr"
                 label="APR"
                 format={(v) => `${v}%`}
+                inline
               />
-              <div>
-                <p className="text-white/50">Min payment</p>
-                <p className="font-semibold text-white tabular-nums">
+              <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                <span className="text-white/50">Min</span>
+                <span className="font-semibold text-white tabular-nums">
                   {account.min_payment_cents != null
                     ? formatMoney(account.min_payment_cents, account.currency)
                     : "—"}
-                </p>
-              </div>
-              <div>
-                <p className="text-white/50">Due day</p>
-                <p className="font-semibold text-white tabular-nums">
+                </span>
+              </span>
+              <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                <span className="text-white/50">Due</span>
+                <span className="font-semibold text-white tabular-nums">
                   {account.due_day != null ? `Day ${account.due_day}` : "—"}
-                </p>
-              </div>
+                </span>
+              </span>
             </div>
             {account.is_overdue && (
               <span className="w-fit rounded-full bg-red-500/30 px-2 py-0.5 text-[10px] font-bold text-red-300">
@@ -317,38 +425,41 @@ function CardBack({
           </>
         )}
         {isInvestment && (
-          <div className="text-[11px]">
-            <p className="text-white/50">Portfolio value</p>
-            <p className="font-semibold text-white tabular-nums">
+          <p className="flex items-center gap-1 text-[11px]">
+            <span className="text-white/50">Portfolio</span>
+            <span className="font-semibold text-white tabular-nums">
               {formatMoney(account.current_balance_cents, account.currency)}
-            </p>
-          </div>
+            </span>
+          </p>
         )}
         {isDepository && (
-          <div className="grid grid-cols-2 gap-x-4 text-[11px]">
-            <div>
-              <p className="text-white/50">Available</p>
-              <p className="font-semibold text-white tabular-nums">
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px]">
+            <span className="inline-flex items-center gap-1 whitespace-nowrap">
+              <span className="text-white/50">Available</span>
+              <span className="font-semibold text-white tabular-nums">
                 {account.available_balance_cents != null
                   ? formatMoney(account.available_balance_cents, account.currency)
                   : "—"}
-              </p>
-            </div>
-            <div>
-              <p className="text-white/50">Currency</p>
-              <p className="font-semibold text-white">{account.currency}</p>
-            </div>
+              </span>
+            </span>
+            <span className="inline-flex items-center gap-1 whitespace-nowrap">
+              <span className="text-white/50">Currency</span>
+              <span className="font-semibold text-white">{account.currency}</span>
+            </span>
           </div>
         )}
       </div>
 
-      {/* Owner section */}
-      <div className="relative rounded-xl border border-white/15 bg-black/20 px-3 py-2">
-        <OwnerSelector account={account} members={members} currentUser={currentUser} />
+      {/* Owner row — read-only by default; click "Change" to toggle the
+          inline owner selector open. Saves vertical compared to the
+          always-on dropdown layout. */}
+      <div className="relative">
+        <OwnerInlineRow account={account} members={members} currentUser={currentUser} />
       </div>
 
-      {/* Footer: last synced */}
-      <p className="relative text-[9px] text-white/40">
+      {/* Footer: pinned to the absolute bottom so it doesn't compete for
+          flex space with the data above. */}
+      <p className="absolute bottom-1 left-2.5 text-[9px] text-white/40">
         Synced: {formatSyncedAt(account.last_synced_at)}
       </p>
     </div>
@@ -366,6 +477,60 @@ function OwnerBadge({ username }: { username: string | null }) {
       <UserRound className="size-2.5 shrink-0" />
       {username}
     </span>
+  );
+}
+
+/**
+ * Compact owner row for the dense card back. Read-only by default — shows
+ * "Owner: Taya" plus a subtle "Change" link for owners who can reassign.
+ * Clicking "Change" expands the existing OwnerSelector dropdown inline,
+ * so we don't pay the dropdown's vertical cost on every flip.
+ */
+function OwnerInlineRow({
+  account,
+  members,
+  currentUser,
+}: {
+  account: Account;
+  members: Member[];
+  currentUser: { is_owner: boolean } | null;
+}) {
+  const [editing, setEditing] = useState(false);
+  const ownerLabel = account.owner_username ?? "Unassigned";
+
+  if (editing) {
+    return (
+      <div className="rounded-lg border border-white/15 bg-black/20 px-2.5 py-1.5">
+        <OwnerSelector
+          account={account}
+          members={members}
+          currentUser={currentUser}
+        />
+        <button
+          type="button"
+          className="mt-1 text-[10px] text-white/60 underline-offset-2 hover:underline"
+          onClick={() => setEditing(false)}
+        >
+          Done
+        </button>
+      </div>
+    );
+  }
+  return (
+    <p className="flex items-center gap-1.5 text-[11px]">
+      <UserRound className="size-3 shrink-0 text-white/50" aria-hidden />
+      <span className="text-white/50">Owner</span>
+      <span className="font-semibold text-white">{ownerLabel}</span>
+      {currentUser?.is_owner && members.length > 0 ? (
+        <button
+          type="button"
+          className="ml-1 text-[10px] text-white/60 underline underline-offset-2 hover:text-white"
+          onClick={() => setEditing(true)}
+        >
+          Change
+        </button>
+      ) : null}
+    </p>
   );
 }
 
@@ -462,6 +627,12 @@ function OwnerSelector({
 // Flip card wrapper
 // ---------------------------------------------------------------------------
 
+// Tilt magnitude (degrees) and an optional "lift" so the card slightly
+// rises out of the page on hover. Tuned to feel premium without crossing
+// into the gimmicky territory of bigger angles.
+const TILT_MAX_DEG = 6;
+const TILT_LIFT_PX = 6;
+
 export function FlipCard({
   account,
   members,
@@ -478,11 +649,42 @@ export function FlipCard({
   const color =
     account.institution_color ?? TYPE_COLORS[account.type] ?? TYPE_COLORS.other;
 
+  // Tilt is driven through CSS custom properties on a ref'd wrapper so
+  // we don't trigger React re-renders on every mouse move (60Hz). The
+  // wrapper transform composes with the inner flip transform — outer
+  // tilt, inner flip — so flipping mid-tilt still works smoothly.
+  const tiltRef = useRef<HTMLDivElement | null>(null);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const el = tiltRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const nx = ((e.clientX - rect.left) / rect.width - 0.5) * 2; // −1..1
+    const ny = ((e.clientY - rect.top) / rect.height - 0.5) * 2; // −1..1
+    el.style.setProperty("--tilt-x", `${(-ny * TILT_MAX_DEG).toFixed(2)}deg`);
+    el.style.setProperty("--tilt-y", `${(nx * TILT_MAX_DEG).toFixed(2)}deg`);
+    el.style.setProperty("--tilt-z", `${TILT_LIFT_PX}px`);
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    const el = tiltRef.current;
+    if (!el) return;
+    el.style.setProperty("--tilt-x", "0deg");
+    el.style.setProperty("--tilt-y", "0deg");
+    el.style.setProperty("--tilt-z", "0px");
+  }, []);
+
   return (
     <div
+      // Card stretches to the full owner-column width; the column itself
+      // is what's capped at ~440px (in OwnerColumn) so the card and the
+      // list rows below it line up exactly. Capping here too made the
+      // columns look lopsided — wide column, narrow card, empty gutter.
       className="w-full cursor-pointer select-none"
       style={{ perspective: "1000px" }}
       onClick={() => setFlipped((f) => !f)}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
       role="button"
       tabIndex={0}
       aria-label={`${account.name} — tap to ${flipped ? "see front" : "see details"}`}
@@ -490,23 +692,42 @@ export function FlipCard({
         if (e.key === "Enter" || e.key === " ") setFlipped((f) => !f);
       }}
     >
+      {/* Outer tilt wrapper. CSS variables let mouse-move skip React. The
+          motion-reduce variant collapses tilt + lift to zero so users with
+          reduced-motion preferences just see the static card. */}
       <div
-        className="relative w-full transition-transform duration-500"
+        ref={tiltRef}
+        className="relative w-full transition-transform duration-150 ease-out motion-reduce:!transform-none"
         style={{
           aspectRatio: "85.6 / 54",
           transformStyle: "preserve-3d",
-          transform: flipped ? "rotateY(180deg)" : "rotateY(0deg)",
+          // Default values for the CSS variables — overridden on mousemove.
+          ["--tilt-x" as string]: "0deg",
+          ["--tilt-y" as string]: "0deg",
+          ["--tilt-z" as string]: "0px",
+          transform:
+            "perspective(1000px) rotateX(var(--tilt-x)) rotateY(var(--tilt-y)) translateZ(var(--tilt-z))",
         }}
       >
-        <CardFront account={account} color={color} size={size} />
-        <CardBack
-          account={account}
-          color={color}
-          size={size}
-          members={members}
-          currentUser={currentUser}
-          onFlipBack={() => setFlipped(false)}
-        />
+        {/* Inner flip wrapper — independent transform so flip and tilt
+            compose cleanly. */}
+        <div
+          className="relative size-full transition-transform duration-500"
+          style={{
+            transformStyle: "preserve-3d",
+            transform: flipped ? "rotateY(180deg)" : "rotateY(0deg)",
+          }}
+        >
+          <CardFront account={account} color={color} size={size} />
+          <CardBack
+            account={account}
+            color={color}
+            size={size}
+            members={members}
+            currentUser={currentUser}
+            onFlipBack={() => setFlipped(false)}
+          />
+        </div>
       </div>
     </div>
   );

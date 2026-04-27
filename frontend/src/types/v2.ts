@@ -50,6 +50,7 @@ export interface Account {
   created_at: string;
   updated_at: string;
   /** Institution branding from plaid_items (may be null if not available) */
+  institution_name: string | null;
   institution_logo: string | null;
   /** Hex color, e.g. "#004966" */
   institution_color: string | null;
@@ -103,6 +104,13 @@ export interface MerchantRule {
   display_label: string;
   category_id: number;
   category_name: string;
+  /**
+   * Optional substring filter (lower-cased on the server) that narrows the
+   * rule to transactions whose ``name`` or ``display_title`` contains the
+   * value. Null means "match every transaction with this merchant_key" —
+   * the legacy behavior. See ``docs/categorization-precedence.md`` §3.
+   */
+  description_contains?: string | null;
 }
 
 export interface MerchantRulePreviewResult {
@@ -114,12 +122,20 @@ export interface MerchantRulePreviewResult {
   sample_merchant_names: string[];
   /** Category-less match count (only present when preview was called without category_id). */
   match_count?: number | null;
+  /**
+   * Distinct ``name`` values for this merchant in the table. Used by the
+   * smart popover to decide whether to surface the "narrow with
+   * description" affordance — showing it for a merchant with only one
+   * distinct description would be noise.
+   */
+  distinct_description_count?: number | null;
   merchant_key?: string | null;
   display_label?: string | null;
 }
 
 export interface MerchantRuleApplyResult extends MerchantRulePreviewResult {
   updated_count: number;
+  description_contains?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -260,8 +276,13 @@ export interface Transaction {
   account_mask: string | null;
   /** Username of the account owner (joined via accounts.user_id → users) */
   owner_username: string | null;
-  /** Derived display title — short, human-friendly. Server-computed via web/transactions/display.py. */
+  /** Derived display title — short, human-friendly. Server-computed via web/transactions/display.py.
+   * When ``merchant_alias`` is set, the server overrides this field with the alias on read. */
   display_title?: string | null;
+  /** User-chosen merchant rename (e.g. "Nyflower" → "Rent"). NULL when no alias is set.
+   * The server already layers this onto ``display_title``; the field is exposed so the UI
+   * can render an "aliased" affordance and expose a quick revert. */
+  merchant_alias?: string | null;
 }
 
 export interface TransactionFilters {
@@ -356,6 +377,18 @@ export interface RecurringStream {
   last_synced_at: string | null;
   /** plaid | manual — manual streams are not overwritten by Plaid sync */
   stream_source?: string;
+  /**
+   * User-managed lifecycle. Plaid cannot pause/cancel third-party
+   * subscriptions, so we just mark intent locally. KPI sums and Insights
+   * skip non-`active` rows.
+   */
+  user_status?: "active" | "paused" | "cancelled";
+  /** Optional auto-resume date for paused streams. */
+  paused_until?: string | null;
+  /** Stamped when user_status flips to `cancelled`. */
+  cancelled_at?: string | null;
+  /** Hide the price-change badge / Insight until this date. */
+  price_change_snoozed_until?: string | null;
   // --- Enrichment (joined, optional for backwards compatibility) ---
   /** Joined from accounts.name. */
   account_name?: string | null;
@@ -369,8 +402,12 @@ export interface RecurringStream {
   primary_category_name?: string | null;
   /** Primary category color (hex) for chips and dots. */
   primary_category_color?: string | null;
-  /** Short, human-friendly label for the stream (normalized from description). */
+  /** Short, human-friendly label for the stream (normalized from description).
+   * When ``merchant_alias`` is set, the server layers it onto this field. */
   display_title?: string | null;
+  /** User-chosen merchant rename. Recurring rows from Plaid have no
+   * merchant_entity_id so the alias is matched by ``name:<lower(merchant_name)>``. */
+  merchant_alias?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -394,6 +431,38 @@ export interface BudgetProgress {
   actual_cents: number;
   remaining_cents: number;
   percent_used: number;
+  /**
+   * Signed delta of last month's (budget − actual) for the same category:
+   * positive = saved (under-spent), negative = over-spent. `null` when no
+   * budget existed for the previous month. Surfaced as a "saved last
+   * month" badge — informational only, never folded into current totals.
+   */
+  previous_month_diff_cents: number | null;
+}
+
+export interface BudgetCopyResult {
+  from_month: string;
+  to_month: string;
+  copied: number;
+  skipped_existing: number;
+}
+
+export interface BudgetHistoryMonth {
+  month: string;
+  budget_cents: number;
+  actual_cents: number;
+  /** spent / budget. `null` when no budget for that month → render neutral cell. */
+  ratio: number | null;
+}
+
+export interface BudgetHistoryRow {
+  category_id: number;
+  category_name: string;
+  category_color: string;
+  parent_id: number | null;
+  months: BudgetHistoryMonth[];
+  months_with_budget: number;
+  months_under_or_at: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -467,10 +536,28 @@ export interface TagSpend {
 }
 
 export interface MerchantSpend {
+  /** Display name — already the alias when one is set (server-side COALESCE). */
   merchant_name: string;
+  /** True when the row's display name is a user-chosen alias, not the raw Plaid label. */
+  is_aliased?: boolean;
   logo_url: string | null;
   amount_cents: number;
   transaction_count: number;
+}
+
+// ---------------------------------------------------------------------------
+// Merchant aliases (display rename for Plaid-detected merchants)
+// ---------------------------------------------------------------------------
+
+export interface MerchantAlias {
+  /** Family-global key used both here and by merchant_category_rules. */
+  merchant_key: string;
+  /** Human-readable rendering of merchant_key, e.g. "Nyflower". */
+  display_label: string;
+  /** Chosen rename (e.g. "Rent"). */
+  display_name: string;
+  created_at?: string | null;
+  updated_at?: string | null;
 }
 
 export interface NetWorthSnapshot {
@@ -479,6 +566,52 @@ export interface NetWorthSnapshot {
   investment_cents: number;
   debt_cents: number;
   net_worth_cents: number;
+}
+
+/**
+ * Per-account row in the redesigned Net Worth tab. ``role`` collapses
+ * the internal ``type`` enum into the two visual buckets the breakdown
+ * cards split on. ``balance_cents`` is always the magnitude (sign is
+ * implied by ``role``), so summing one bucket gives that bucket's total.
+ */
+export interface NetWorthAccountRow {
+  id: number;
+  name: string;
+  /** Plaid's longer descriptive name (sometimes more meaningful than ``name``). */
+  official_name: string | null;
+  /** Last 4 digits of the account number. */
+  mask: string | null;
+  type: string;
+  subtype: string | null;
+  role: "asset" | "debt";
+  balance_cents: number;
+  owner_username: string | null;
+  institution_name: string | null;
+  institution_logo: string | null;
+  institution_color: string | null;
+  is_cash_wallet: boolean;
+}
+
+export interface NetWorthSummary {
+  liquid_cents: number;
+  investment_cents: number;
+  debt_cents: number;
+  net_worth_cents: number;
+  /** Net change vs the closest snapshot ~30 days ago (±15d tolerance). */
+  mom_delta_cents: number | null;
+  /** Net change vs the closest snapshot ~180 days ago (±45d tolerance). */
+  six_month_delta_cents: number | null;
+  /** ISO snapshot date used for ``mom_delta_cents``. */
+  mom_compared_to: string | null;
+  /** ISO snapshot date used for ``six_month_delta_cents``. */
+  six_month_compared_to: string | null;
+  accounts: NetWorthAccountRow[];
+  /**
+   * Months until projected debt payoff at the current 6-mo (or MoM)
+   * trajectory. Null when there's no debt, no upward trajectory, or no
+   * comparable snapshot to read a slope from.
+   */
+  debt_payoff_months: number | null;
 }
 
 export interface ForecastEntry {

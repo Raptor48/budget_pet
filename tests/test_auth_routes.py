@@ -8,12 +8,14 @@ import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
 
-# Ensure env vars are set before importing app
+# Ensure env vars are set before importing app — AuthRepository pulls
+# these on import, so the assignments must run first. `noqa: E402` is the
+# documented escape hatch for this exact pattern.
 os.environ.setdefault("ADMIN_LOGIN", "testadmin")
 os.environ.setdefault("ADMIN_PASSWORD", "testpassword123")
 os.environ.setdefault("DATABASE_URL", "postgresql://fake/fake")
 
-from web.auth.users_repo import AuthRepository
+from web.auth.users_repo import AuthRepository  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

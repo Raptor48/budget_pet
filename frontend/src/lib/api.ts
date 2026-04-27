@@ -11,6 +11,8 @@ import type {
   AutosyncConfig,
   AutosyncConfigUpdate,
   Budget,
+  BudgetCopyResult,
+  BudgetHistoryRow,
   BudgetProgress,
   CashFlowMonth,
   Category,
@@ -24,6 +26,7 @@ import type {
   Member,
   MerchantSpend,
   NetWorthSnapshot,
+  NetWorthSummary,
   PlaidItem,
   PlaidSyncLogEntry,
   PlaidSyncResult,
@@ -34,6 +37,7 @@ import type {
   TransactionFilters,
   TransactionSplit,
   ManualCashTransactionCreate,
+  MerchantAlias,
   MerchantRule,
   MerchantRuleApplyResult,
   MerchantRulePreviewResult,
@@ -58,6 +62,41 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Coerce a FastAPI / Pydantic error response body into a *plain string*
+ * suitable for `<p>{detail}</p>` rendering and toast messages.
+ *
+ * Pydantic v2 validation failures (HTTP 422) come back as
+ * `{ detail: [{ type, loc, msg, input, ctx }, ...] }` — an **array of
+ * objects**, not a string. Treating that array as the error message and
+ * letting it land inside the React tree (e.g. via `toast.error(...)` or
+ * `<p>{err.detail}</p>`) triggers React error #31 ("Objects are not
+ * valid as a React child") and crashes the page. Always normalise here
+ * so callers can assume `ApiError.detail` is a string.
+ */
+function extractErrorDetail(body: unknown, fallback: string): string {
+  if (!body || typeof body !== 'object') return fallback;
+  const obj = body as Record<string, unknown>;
+  const raw = obj.detail ?? obj.message;
+  if (typeof raw === 'string' && raw.length > 0) return raw;
+  if (Array.isArray(raw)) {
+    // Pydantic 422: pick the human-readable `msg` from each entry; fall
+    // back to the loc-joined path if msg is missing on a malformed item.
+    const messages = raw
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') return null;
+        const e = entry as Record<string, unknown>;
+        const msg = typeof e.msg === 'string' ? e.msg : null;
+        const loc = Array.isArray(e.loc) ? e.loc.filter((p) => p !== 'body').join('.') : null;
+        if (msg && loc) return `${loc}: ${msg}`;
+        return msg ?? loc ?? null;
+      })
+      .filter((s): s is string => Boolean(s));
+    if (messages.length > 0) return messages.join('; ');
+  }
+  return fallback;
+}
+
 async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {},
@@ -76,10 +115,11 @@ async function apiRequest<T>(
   });
 
   if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
+    const fallback = `HTTP ${response.status}`;
+    let detail = fallback;
     try {
       const body = await response.json();
-      detail = body.detail || body.message || detail;
+      detail = extractErrorDetail(body, fallback);
     } catch {
       // ignore parse errors
     }
@@ -101,6 +141,17 @@ export const accountsApi = {
     apiRequest(`/api/accounts?active_only=${activeOnly}`),
 
   cashWallet: (): Promise<Account> => apiRequest("/api/accounts/cash-wallet"),
+
+  /** Create a custom-named manual cash wallet. */
+  createCashWallet: (data: {
+    name: string;
+    initial_balance_cents: number;
+    owner_user_id?: number | null;
+  }): Promise<Account> =>
+    apiRequest("/api/accounts/cash-wallet", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 
   update: (id: number, data: Partial<Account>): Promise<Account> =>
     apiRequest(`/api/accounts/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
@@ -161,6 +212,8 @@ export const merchantRulesApi = {
     merchant_name?: string | null;
     /** Fallback label for ACH / check / bill-pay rows without a Plaid merchant. */
     merchant_label?: string | null;
+    /** Optional substring narrow — see MerchantRule.description_contains. */
+    description_contains?: string | null;
   }): Promise<MerchantRule> =>
     apiRequest('/api/merchant-rules', { method: 'POST', body: JSON.stringify(data) }),
 
@@ -173,11 +226,46 @@ export const merchantRulesApi = {
     merchant_entity_id?: string | null;
     merchant_name?: string | null;
     merchant_label?: string | null;
+    description_contains?: string | null;
   }): Promise<MerchantRulePreviewResult> =>
     apiRequest('/api/merchant-rules/preview', { method: 'POST', body: JSON.stringify(data) }),
 
   applyExisting: (ruleId: number): Promise<MerchantRuleApplyResult> =>
     apiRequest(`/api/merchant-rules/${ruleId}/apply-existing`, { method: 'POST' }),
+};
+
+// ---------------------------------------------------------------------------
+// Merchant aliases (display rename — separate from category rules)
+// ---------------------------------------------------------------------------
+
+export const merchantAliasesApi = {
+  list: (): Promise<MerchantAlias[]> => apiRequest('/api/merchant-aliases'),
+
+  upsert: (data: {
+    display_name: string;
+    merchant_entity_id?: string | null;
+    merchant_name?: string | null;
+    /** Fallback for transactions without a Plaid merchant (ACH / checks). */
+    merchant_label?: string | null;
+  }): Promise<MerchantAlias> =>
+    apiRequest('/api/merchant-aliases', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+
+  /** Delete by merchant_entity_id + merchant_name (clears both eid: and name:
+   * twin rows the upsert wrote). Pass merchant_key directly to delete a
+   * single key. */
+  delete: (data: {
+    merchant_key?: string | null;
+    merchant_entity_id?: string | null;
+    merchant_name?: string | null;
+    merchant_label?: string | null;
+  }): Promise<void> =>
+    apiRequest('/api/merchant-aliases/delete', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };
 
 // ---------------------------------------------------------------------------
@@ -281,10 +369,17 @@ export const transactionsApi = {
 // ---------------------------------------------------------------------------
 
 export const recurringApi = {
-  list: (direction?: 'inflow' | 'outflow', activeOnly = true): Promise<RecurringStream[]> => {
+  list: (
+    direction?: 'inflow' | 'outflow',
+    activeOnly = true,
+    userStatuses?: Array<'active' | 'paused' | 'cancelled'>,
+  ): Promise<RecurringStream[]> => {
     const params = new URLSearchParams();
     if (direction) params.set('direction', direction);
     params.set('active_only', String(activeOnly));
+    if (userStatuses && userStatuses.length > 0) {
+      for (const s of userStatuses) params.append('user_status', s);
+    }
     return apiRequest(`/api/recurring?${params}`);
   },
 
@@ -308,9 +403,23 @@ export const recurringApi = {
 
   update: (
     id: number,
-    data: { user_label?: string | null; category_id?: number | null },
+    data: {
+      user_label?: string | null;
+      category_id?: number | null;
+      user_status?: 'active' | 'paused' | 'cancelled';
+      paused_until?: string | null;
+      price_change_snoozed_until?: string | null;
+    },
   ): Promise<RecurringStream> =>
     apiRequest(`/api/recurring/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+
+  bulk: (data: {
+    ids: number[];
+    action: 'cancel' | 'pause' | 'reactivate' | 'snooze_price_change';
+    paused_until?: string | null;
+    snooze_days?: number;
+  }): Promise<{ updated: number }> =>
+    apiRequest('/api/recurring/bulk', { method: 'POST', body: JSON.stringify(data) }),
 };
 
 // ---------------------------------------------------------------------------
@@ -336,6 +445,17 @@ export const budgetsApi = {
 
   delete: (id: number): Promise<void> =>
     apiRequest(`/api/budgets/${id}`, { method: 'DELETE' }),
+
+  /** Bulk-copy every budget from one month to another. Idempotent. */
+  copy: (fromMonth: string, toMonth: string): Promise<BudgetCopyResult> =>
+    apiRequest(
+      `/api/budgets/copy?from=${encodeURIComponent(fromMonth)}&to=${encodeURIComponent(toMonth)}`,
+      { method: 'POST' },
+    ),
+
+  /** Heatmap data for Reports → Budget History. */
+  getHistory: (months = 12): Promise<BudgetHistoryRow[]> =>
+    apiRequest(`/api/budgets/history?months=${months}`),
 };
 
 // ---------------------------------------------------------------------------
@@ -392,7 +512,7 @@ export const reportsApi = {
     return apiRequest(`/api/reports/merchants?${params}`);
   },
 
-  getNetWorth: (): Promise<{ liquid_cents: number; investment_cents: number; debt_cents: number; net_worth_cents: number }> =>
+  getNetWorth: (): Promise<NetWorthSummary> =>
     apiRequest('/api/reports/net-worth'),
 
   getNetWorthHistory: (months = 12): Promise<NetWorthSnapshot[]> =>
@@ -454,10 +574,11 @@ export async function plaidSyncStream(
   };
   const response = await fetch(url, { method: 'POST', headers, credentials: 'include' });
   if (!response.ok) {
-    let detail = `HTTP ${response.status}`;
+    const fallback = `HTTP ${response.status}`;
+    let detail = fallback;
     try {
       const body = await response.json();
-      detail = body.detail || body.message || detail;
+      detail = extractErrorDetail(body, fallback);
     } catch {
       // ignore
     }
@@ -531,6 +652,19 @@ export const plaidApi = {
   resetCursor: (itemId: string): Promise<{ message: string }> =>
     apiRequest(`/api/plaid/items/${itemId}/reset-cursor`, { method: 'POST' }),
 
+  /** Re-fetch institution branding (logo, color) from Plaid and overwrite
+   * the stored values — used by the "Refresh bank logo" UI when a previously
+   * missing logo might now be available. */
+  refreshBranding: (
+    itemId: string,
+  ): Promise<{
+    logo_present: boolean;
+    color_present: boolean;
+    item_id: string;
+    institution_name: string | null;
+  }> =>
+    apiRequest(`/api/plaid/items/${itemId}/refresh-branding`, { method: 'POST' }),
+
   sync: (): Promise<PlaidSyncResult[]> =>
     apiRequest('/api/plaid/sync', { method: 'POST' }),
 
@@ -579,6 +713,8 @@ export interface InsightCard {
   user_state?: InsightUserState | null;
   /** Server-computed flag: first_seen_at > user_preferences.insights_last_viewed_at. */
   is_new?: boolean;
+  /** ISO-8601 — when the card was first persisted. Drives the "since 3d" footer. */
+  first_seen_at?: string | null;
 }
 
 export interface InsightsFeed {

@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -18,14 +19,14 @@ import { IncomeTab } from "@/components/reports/income-tab";
 import { ExpensesTab } from "@/components/reports/expenses-tab";
 import { CashFlowHistoryChart } from "@/components/reports/cash-flow-history-chart";
 import { TrendsTab } from "@/components/reports/trends-tab";
+import { BudgetHistoryTab } from "@/components/reports/budget-history-tab";
+import { NetWorthTab } from "@/components/reports/net-worth-tab";
 import { AnimatedMoney } from "@/components/ui/animated-money";
-import { reportsApi, transactionsApi } from "@/lib/api";
+import { budgetsApi, reportsApi, transactionsApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type {
   CategorySpend,
-  FinancialHealthScore,
   MerchantSpend,
-  NetWorthSnapshot,
   Transaction,
 } from "@/types/v2";
 
@@ -47,97 +48,6 @@ function formatMoney(cents: number): string {
   }).format(cents / 100);
 }
 
-function formatRatioPercent(value: number | null | undefined): string {
-  if (value == null) return "—";
-  return `${(value * 100).toFixed(1)}%`;
-}
-
-
-function NetWorthLineChart({ data }: { data: NetWorthSnapshot[] }) {
-  const sorted = useMemo(
-    () =>
-      [...data].sort((a, b) =>
-        String(a.snapshot_date).localeCompare(String(b.snapshot_date)),
-      ),
-    [data],
-  );
-
-  const { points, pathD, minV, maxV } = useMemo(() => {
-    if (!sorted.length) {
-      return { points: [] as { x: number; y: number; label: string }[], pathD: "", minV: 0, maxV: 0 };
-    }
-    const values = sorted.map((s) => s.net_worth_cents);
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const pad = max === min ? 1 : (max - min) * 0.08;
-    const minV = min - pad;
-    const maxV = max + pad;
-    const w = 100;
-    const h = 40;
-    const pts = sorted.map((s, i) => {
-      const x = sorted.length === 1 ? w / 2 : (i / (sorted.length - 1)) * w;
-      const t = maxV === minV ? 0.5 : (s.net_worth_cents - minV) / (maxV - minV);
-      const y = h - t * h;
-      return {
-        x,
-        y,
-        label: String(s.snapshot_date).slice(0, 7),
-      };
-    });
-    const pathD = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
-    return { points: pts, pathD, minV, maxV };
-  }, [sorted]);
-
-  if (!sorted.length) {
-    return (
-      <p className="text-muted-foreground text-sm py-8 text-center">No history yet.</p>
-    );
-  }
-
-  return (
-    <div className="space-y-2">
-      <svg
-        viewBox="0 0 100 42"
-        className="w-full h-40 text-primary"
-        preserveAspectRatio="none"
-        role="img"
-        aria-label="Net worth over time"
-      >
-        <defs>
-          <linearGradient id="nwFill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="currentColor" stopOpacity="0.25" />
-            <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <path
-          d={`${pathD} L ${points[points.length - 1]?.x ?? 0} 42 L ${points[0]?.x ?? 0} 42 Z`}
-          fill="url(#nwFill)"
-          className="text-primary"
-        />
-        <path
-          d={pathD}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="0.6"
-          vectorEffect="non-scaling-stroke"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-        />
-        {points.map((p, i) => (
-          <circle key={i} cx={p.x} cy={p.y} r="0.9" fill="currentColor" className="text-primary" />
-        ))}
-      </svg>
-      <div className="flex justify-between text-xs text-muted-foreground px-1">
-        <span>{points[0]?.label}</span>
-        <span>{points[points.length - 1]?.label}</span>
-      </div>
-      <p className="text-xs text-muted-foreground text-center">
-        Range: {formatMoney(minV)} — {formatMoney(maxV)}
-      </p>
-    </div>
-  );
-}
-
 function MerchantLogo({ url, name }: { url: string | null; name: string }) {
   const [failed, setFailed] = useState(false);
   if (!url || failed) {
@@ -148,14 +58,14 @@ function MerchantLogo({ url, name }: { url: string | null; name: string }) {
     );
   }
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
+    <Image
       src={url}
       alt=""
       width={36}
       height={36}
       className="size-9 shrink-0 rounded-lg object-cover bg-muted"
       onError={() => setFailed(true)}
+      unoptimized
     />
   );
 }
@@ -164,15 +74,17 @@ function MerchantLogo({ url, name }: { url: string | null; name: string }) {
 // Page
 // ---------------------------------------------------------------------------
 
+// Visual ordering — left group = "this month" KPIs, right group = "history".
+// The two groups are split by a vertical separator on lg+ (TabsList renders
+// a non-trigger spacer between them).
 const REPORT_TABS = [
   "cashflow",
-  "trends",
   "income",
   "expenses",
   "category",
+  "trends",
   "networth",
-  "merchants",
-  "health",
+  "history",
 ] as const;
 type ReportTab = (typeof REPORT_TABS)[number];
 
@@ -345,14 +257,21 @@ export default function Reports() {
     queryFn: () => reportsApi.getTopMerchants(month, 10),
   });
 
-  const healthQuery = useQuery({
-    queryKey: ["reports", "financial-health"],
-    queryFn: () => reportsApi.getFinancialHealth(),
+  // Budget History feeds the Reports → Budget History tab heatmap. Lazy-load
+  // — only fetched when that tab is active so we don't pay the extra round
+  // trip on every Reports visit.
+  const budgetHistoryQuery = useQuery({
+    queryKey: ["budgets", "history", 12],
+    queryFn: () => budgetsApi.getHistory(12),
+    enabled: tab === "history",
   });
+
+  // Top Merchants embedded in the Cash Flow tab — collapsed (top 5) by
+  // default with an expand-to-10 control.
+  const [merchantsExpanded, setMerchantsExpanded] = useState(false);
 
   const cf = cashFlowQuery.data;
   const net = netWorthQuery.data;
-  const health = healthQuery.data;
 
   return (
     <AppLayout>
@@ -366,20 +285,38 @@ export default function Reports() {
         </header>
 
         <Tabs value={tab} onValueChange={handleTabChange} className="gap-6">
-          <TabsList className="grid h-auto w-full max-w-5xl grid-cols-2 gap-1 p-1 sm:grid-cols-4 lg:grid-cols-8">
-            <TabsTrigger value="cashflow">Cash Flow</TabsTrigger>
-            <TabsTrigger value="trends">Trends</TabsTrigger>
-            <TabsTrigger value="income">Income</TabsTrigger>
-            <TabsTrigger value="expenses">Expenses</TabsTrigger>
-            <TabsTrigger value="category">By Category</TabsTrigger>
-            <TabsTrigger value="networth">Net Worth</TabsTrigger>
-            <TabsTrigger value="merchants">Top Merchants</TabsTrigger>
-            <TabsTrigger value="health" className="col-span-2 sm:col-span-1">
-              Financial Health
+          {/* Two-group tab list:
+              - This month: Cash Flow · Income · Expenses · By Category
+              - History:    Trends · Net Worth · Budget History
+
+              On mobile / tablet the tabs flow in a 2- or 4-column grid and
+              the visual separator is hidden — the natural row break does
+              the grouping for free. On lg+ the list switches to flex so we
+              can render a thin vertical line between groups. The separator
+              is announced as ``role="separator"`` for screen readers. */}
+          <TabsList
+            className={cn(
+              "grid h-auto w-full max-w-5xl gap-1 p-1",
+              "grid-cols-2 sm:grid-cols-4",
+              "lg:flex lg:items-center lg:justify-start",
+            )}
+          >
+            <TabsTrigger value="cashflow" className="lg:flex-1">Cash Flow</TabsTrigger>
+            <TabsTrigger value="income" className="lg:flex-1">Income</TabsTrigger>
+            <TabsTrigger value="expenses" className="lg:flex-1">Expenses</TabsTrigger>
+            <TabsTrigger value="category" className="lg:flex-1">By Category</TabsTrigger>
+            <TabGroupSeparator />
+            <TabsTrigger value="trends" className="lg:flex-1">Trends</TabsTrigger>
+            <TabsTrigger value="networth" className="lg:flex-1">Net Worth</TabsTrigger>
+            <TabsTrigger
+              value="history"
+              className="col-span-2 sm:col-span-4 lg:col-span-1 lg:flex-1"
+            >
+              Budget History
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="cashflow" className="reports-tab-content space-y-6">
+          <TabsContent value="cashflow" className="reports-tab-content reports-tab-stagger space-y-6">
             <Card className="border-border/80 shadow-sm">
               <CardHeader className="flex flex-row flex-wrap items-end justify-between gap-4">
                 <div>
@@ -486,6 +423,97 @@ export default function Reports() {
                     />
                   )}
                 </div>
+
+                {/* Top merchants — used to live in its own tab. Now an
+                    in-tab block under cash flow with collapse-to-5 default. */}
+                <div className="space-y-3 border-t border-border/60 pt-6">
+                  <div className="flex flex-row flex-wrap items-end justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-medium">Top merchants this month</h3>
+                      <p className="text-muted-foreground text-xs">
+                        Where the biggest dollars went.
+                      </p>
+                    </div>
+                  </div>
+                  {merchantsQuery.isLoading && (
+                    <p className="text-muted-foreground text-sm">Loading merchants…</p>
+                  )}
+                  {merchantsQuery.isError && (
+                    <p className="text-destructive text-sm">Could not load merchants.</p>
+                  )}
+                  {merchantsQuery.data && merchantsQuery.data.length > 0 ? (
+                    <>
+                      <div className="overflow-x-auto rounded-lg border border-border/60">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b bg-muted/40 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                              <th className="px-4 py-3 w-14"> </th>
+                              <th className="px-4 py-3">Merchant</th>
+                              <th className="px-4 py-3 text-right">Amount</th>
+                              <th className="px-4 py-3 text-right">Txns</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(merchantsExpanded
+                              ? merchantsQuery.data
+                              : merchantsQuery.data.slice(0, 5)
+                            ).map((m: MerchantSpend, i: number) => (
+                              <tr
+                                key={m.merchant_name}
+                                className="border-b border-border/50 last:border-0 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300"
+                                style={{ animationDelay: `${Math.min(i, 12) * 30}ms` }}
+                              >
+                                <td className="px-4 py-2">
+                                  <MerchantLogo url={m.logo_url} name={m.merchant_name} />
+                                </td>
+                                <td className="px-4 py-2 font-medium">
+                                  <span>{m.merchant_name}</span>
+                                  {m.is_aliased ? (
+                                    <span
+                                      className="text-muted-foreground ml-1.5 inline-flex items-center rounded border bg-muted/50 px-1 py-0.5 text-[9px] uppercase tracking-wide"
+                                      title="Display rename — categorization & math unchanged."
+                                    >
+                                      renamed
+                                    </span>
+                                  ) : null}
+                                </td>
+                                <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">
+                                  {formatMoney(m.amount_cents)}
+                                </td>
+                                <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">
+                                  {m.transaction_count}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      {merchantsQuery.data.length > 5 ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-muted-foreground hover:text-foreground"
+                          onClick={() => setMerchantsExpanded((v) => !v)}
+                        >
+                          <ChevronRight
+                            className={cn(
+                              "size-3.5 transition-transform",
+                              merchantsExpanded && "rotate-90",
+                            )}
+                            aria-hidden
+                          />
+                          {merchantsExpanded
+                            ? `Show top 5`
+                            : `Show all ${merchantsQuery.data.length}`}
+                        </Button>
+                      ) : null}
+                    </>
+                  ) : merchantsQuery.data ? (
+                    <p className="text-muted-foreground text-sm py-4">
+                      No merchant data this month.
+                    </p>
+                  ) : null}
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
@@ -494,15 +522,21 @@ export default function Reports() {
             <TrendsTab />
           </TabsContent>
 
-          <TabsContent value="income" className="reports-tab-content space-y-6">
+          {/* Income / Expenses return a single <Card> directly, so the
+              stagger on TabsContent animates that card cleanly. Net
+              Worth and Budget History wrap in an inner <div>; for those
+              the ``reports-tab-stagger`` class lives on the wrapping
+              div inside the component, since the CSS selector targets
+              direct children only. */}
+          <TabsContent value="income" className="reports-tab-content reports-tab-stagger space-y-6">
             <IncomeTab month={month} onMonthChange={setMonth} />
           </TabsContent>
 
-          <TabsContent value="expenses" className="reports-tab-content space-y-6">
+          <TabsContent value="expenses" className="reports-tab-content reports-tab-stagger space-y-6">
             <ExpensesTab month={month} onMonthChange={setMonth} />
           </TabsContent>
 
-          <TabsContent value="category" className="reports-tab-content space-y-6">
+          <TabsContent value="category" className="reports-tab-content reports-tab-stagger space-y-6">
             <Card className="border-border/80 shadow-sm">
               <CardHeader className="flex flex-row flex-wrap items-end justify-between gap-4">
                 <div className="min-w-0 space-y-1">
@@ -555,16 +589,29 @@ export default function Reports() {
                 )}
                 {byCategoryQuery.data && byCategoryQuery.data.length > 0 && (
                   <>
-                    {/* Chart + interactive legend */}
-                    <div className="grid gap-4 sm:grid-cols-[280px_1fr]">
-                      <CategoryDonutChart
-                        data={byCategoryQuery.data}
-                        hoveredIdx={catHoveredIdx}
-                        lockedIdx={catLockedIdx}
-                        onHover={setCatHoveredIdx}
-                        onLock={setCatLockedIdx}
-                        onSliceClick={focusedParent ? undefined : handleSliceDrilldown}
-                      />
+                    {/* Chart + interactive legend. The card itself is full-
+                        width (Reports is single-column), so we centre the
+                        donut + legend module via ``mx-auto max-w-5xl``
+                        rather than letting the legend column blow out to
+                        1000px+ on big monitors. The donut gets a generous
+                        ~440px square; the legend column caps at ~600px so
+                        the rows feel like a list, not an empty plain. */}
+                    <div className="mx-auto grid max-w-5xl gap-10 lg:grid-cols-[minmax(360px,440px)_minmax(0,600px)]">
+                      <div className="flex items-center justify-center">
+                        <div className="w-full max-w-[440px]">
+                          <CategoryDonutChart
+                            data={byCategoryQuery.data}
+                            hoveredIdx={catHoveredIdx}
+                            lockedIdx={catLockedIdx}
+                            onHover={setCatHoveredIdx}
+                            onLock={setCatLockedIdx}
+                            onSliceClick={focusedParent ? undefined : handleSliceDrilldown}
+                            innerRadius={102}
+                            outerRadius={168}
+                            height={400}
+                          />
+                        </div>
+                      </div>
                       <CategoryLegend
                         data={byCategoryQuery.data}
                         hoveredIdx={catHoveredIdx}
@@ -572,6 +619,7 @@ export default function Reports() {
                         onHover={setCatHoveredIdx}
                         onLock={setCatLockedIdx}
                         onSliceClick={focusedParent ? undefined : handleSliceDrilldown}
+                        maxHeight={400}
                       />
                     </div>
                     {!focusedParent && (
@@ -647,119 +695,20 @@ export default function Reports() {
           </TabsContent>
 
           <TabsContent value="networth" className="reports-tab-content space-y-6">
-            <Card className="border-border/80 shadow-sm">
-              <CardHeader>
-                <CardTitle>Net worth</CardTitle>
-                <CardDescription>Liquid, investments, debt, and total net worth — last 12 snapshots.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-8">
-                {netWorthQuery.isLoading && (
-                  <p className="text-muted-foreground text-sm">Loading balances…</p>
-                )}
-                {netWorthQuery.isError && (
-                  <p className="text-destructive text-sm">Could not load net worth.</p>
-                )}
-                {net && (
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    <MetricTile label="Cash & Savings" value={formatMoney(net.liquid_cents)} accent="neutral" />
-                    <MetricTile label="Portfolio" value={formatMoney(net.investment_cents)} accent="blue" />
-                    <MetricTile label="Loans & Debt" value={formatMoney(net.debt_cents)} accent="rose" />
-                    <MetricTile label="Net Worth" value={formatMoney(net.net_worth_cents)} accent="primary" />
-                  </div>
-                )}
-
-                <div>
-                  <h3 className="text-sm font-medium mb-2">12-month trend</h3>
-                  {netWorthHistoryQuery.isLoading && (
-                    <p className="text-muted-foreground text-sm">Loading history…</p>
-                  )}
-                  {netWorthHistoryQuery.isError && (
-                    <p className="text-destructive text-sm">Could not load net worth history.</p>
-                  )}
-                  {netWorthHistoryQuery.data && (
-                    <NetWorthLineChart data={netWorthHistoryQuery.data} />
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+            <NetWorthTab
+              summary={net}
+              history={netWorthHistoryQuery.data}
+              isLoading={netWorthQuery.isLoading || netWorthHistoryQuery.isLoading}
+              isError={netWorthQuery.isError || netWorthHistoryQuery.isError}
+            />
           </TabsContent>
 
-          <TabsContent value="merchants" className="reports-tab-content space-y-6">
-            <Card className="border-border/80 shadow-sm">
-              <CardHeader className="flex flex-row flex-wrap items-end justify-between gap-4">
-                <div>
-                  <CardTitle>Top merchants</CardTitle>
-                  <CardDescription>Where you spent the most this month.</CardDescription>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs font-medium text-muted-foreground">Month</span>
-                  <MonthYearPicker value={month} onChange={setMonth} />
-                </div>
-              </CardHeader>
-              <CardContent>
-                {merchantsQuery.isLoading && (
-                  <p className="text-muted-foreground text-sm">Loading merchants…</p>
-                )}
-                {merchantsQuery.isError && (
-                  <p className="text-destructive text-sm">Could not load merchants.</p>
-                )}
-                {merchantsQuery.data && (
-                  <div className="overflow-x-auto rounded-lg border border-border/60">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b bg-muted/40 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                          <th className="px-4 py-3 w-14"> </th>
-                          <th className="px-4 py-3">Merchant</th>
-                          <th className="px-4 py-3 text-right">Amount</th>
-                          <th className="px-4 py-3 text-right">Txns</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {merchantsQuery.data.map((m: MerchantSpend, i: number) => (
-                          <tr
-                            key={m.merchant_name}
-                            className="border-b border-border/50 last:border-0 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300"
-                            style={{ animationDelay: `${Math.min(i, 12) * 30}ms` }}
-                          >
-                            <td className="px-4 py-2">
-                              <MerchantLogo url={m.logo_url} name={m.merchant_name} />
-                            </td>
-                            <td className="px-4 py-2 font-medium">{m.merchant_name}</td>
-                            <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">
-                              {formatMoney(m.amount_cents)}
-                            </td>
-                            <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">
-                              {m.transaction_count}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-                {merchantsQuery.data?.length === 0 && (
-                  <p className="text-muted-foreground text-sm text-center py-8">No merchant data this month.</p>
-                )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="health" className="reports-tab-content space-y-6">
-            <Card className="hero-glow border-border/80 shadow-sm overflow-hidden">
-              <CardHeader>
-                <CardTitle>Financial health</CardTitle>
-                <CardDescription>Holistic score from debt, utilization, savings, and safety buffer.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-8">
-                {healthQuery.isLoading && (
-                  <p className="text-muted-foreground text-sm">Loading health score…</p>
-                )}
-                {healthQuery.isError && (
-                  <p className="text-destructive text-sm">Could not load financial health.</p>
-                )}
-                {health && <FinancialHealthPanel score={health} />}
-              </CardContent>
-            </Card>
+          <TabsContent value="history" className="reports-tab-content space-y-6">
+            <BudgetHistoryTab
+              data={budgetHistoryQuery.data}
+              isLoading={budgetHistoryQuery.isLoading}
+              isError={budgetHistoryQuery.isError}
+            />
           </TabsContent>
         </Tabs>
       </div>
@@ -767,102 +716,23 @@ export default function Reports() {
   );
 }
 
-function MetricTile({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: string;
-  accent: "neutral" | "blue" | "rose" | "primary";
-}) {
-  const ring =
-    accent === "blue"
-      ? "border-sky-500/20 bg-sky-500/5"
-      : accent === "rose"
-        ? "border-rose-500/20 bg-rose-500/5"
-        : accent === "primary"
-          ? "border-primary/25 bg-primary/5"
-          : "border-border/80 bg-card";
-  return (
-    <div className={`rounded-xl border px-4 py-3 ${ring}`}>
-      <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">{label}</p>
-      <p className="text-lg font-semibold tabular-nums tracking-tight">{value}</p>
-    </div>
-  );
-}
-
-function FinancialHealthPanel({ score }: { score: FinancialHealthScore }) {
-  const ringPct = Math.min(100, Math.max(0, score.score));
-  return (
-    <div className="space-y-8">
-      <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center sm:justify-center sm:gap-10">
-        <div className="relative size-36">
-          <svg viewBox="0 0 100 100" className="size-full -rotate-90" aria-hidden>
-            <circle cx="50" cy="50" r="42" fill="none" className="stroke-muted" strokeWidth="10" />
-            <circle
-              cx="50"
-              cy="50"
-              r="42"
-              fill="none"
-              stroke={score.color}
-              strokeWidth="10"
-              strokeLinecap="round"
-              strokeDasharray={`${(ringPct / 100) * 264} 264`}
-              className="transition-all duration-500"
-            />
-          </svg>
-          <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-3xl font-bold tabular-nums">{score.score}</span>
-            <span className="text-xs text-muted-foreground">/ 100</span>
-          </div>
-        </div>
-        <div className="text-center sm:text-left space-y-1">
-          <p className="text-lg font-semibold" style={{ color: score.color }}>
-            {score.label}
-          </p>
-          <p className="text-muted-foreground text-sm max-w-md leading-relaxed">{score.advice}</p>
-        </div>
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <HealthMetric label="Debt-to-income" value={formatRatioPercent(score.debt_to_income)} />
-        <HealthMetric label="Credit utilization" value={formatRatioPercent(score.credit_utilization)} />
-        <HealthMetric label="Savings rate" value={formatRatioPercent(score.savings_rate)} />
-        <HealthMetric
-          label="Emergency fund"
-          value={
-            score.emergency_fund_months != null
-              ? `${score.emergency_fund_months.toFixed(1)} mo`
-              : "—"
-          }
-        />
-        <HealthMetric
-          label="Overdue accounts"
-          value={score.has_overdue ? "Yes — action needed" : "None"}
-          highlight={score.has_overdue}
-        />
-      </div>
-    </div>
-  );
-}
-
-function HealthMetric({
-  label,
-  value,
-  highlight,
-}: {
-  label: string;
-  value: string;
-  highlight?: boolean;
-}) {
+/**
+ * Vertical hairline that splits the TabsList into two visual groups
+ * ("this month" KPIs vs historical reports). Hidden on mobile/tablet
+ * because the grid layout already breaks rows; only meaningful on lg+
+ * where every tab sits on a single row.
+ *
+ * Rendered as a non-Trigger child of TabsList — Radix is happy with
+ * that since TabsList just forwards children. ``role="separator"`` +
+ * ``aria-orientation="vertical"`` keeps screen-readers honest.
+ */
+function TabGroupSeparator() {
   return (
     <div
-      className={`rounded-lg border px-4 py-3 ${highlight ? "border-destructive/40 bg-destructive/5" : "border-border/60 bg-muted/20"}`}
-    >
-      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{label}</p>
-      <p className={`mt-1 font-semibold tabular-nums ${highlight ? "text-destructive" : ""}`}>{value}</p>
-    </div>
+      role="separator"
+      aria-orientation="vertical"
+      className="hidden lg:block lg:mx-1 lg:h-5 lg:w-px lg:bg-border/60"
+    />
   );
 }
 

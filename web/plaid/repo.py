@@ -142,6 +142,49 @@ class PlaidRepository:
             )
         return self._row_with_decrypted_token(dict(row))
 
+    async def update_branding(
+        self,
+        item_id: str,
+        *,
+        institution_name: Optional[str] = None,
+        institution_logo: Optional[str] = None,
+        institution_color: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Overwrite institution branding for a single item.
+
+        Distinct from ``save_item`` which uses COALESCE to preserve any
+        existing non-null branding (the right behaviour during routine
+        re-saves). This method is invoked by the explicit
+        "Refresh bank branding" UI: if Plaid added or updated a logo
+        since the original link, the new value should win even when we
+        already have a stored one. Pass ``None`` for any field you don't
+        want to touch — only non-None values are written.
+        """
+        sets: List[str] = []
+        params: List[Any] = [item_id]
+        idx = 2
+        if institution_name is not None:
+            sets.append(f"institution_name = ${idx}")
+            params.append(institution_name)
+            idx += 1
+        if institution_logo is not None:
+            sets.append(f"institution_logo = ${idx}")
+            params.append(institution_logo)
+            idx += 1
+        if institution_color is not None:
+            sets.append(f"institution_color = ${idx}")
+            params.append(institution_color)
+            idx += 1
+        if not sets:
+            return await self.get_item(item_id)
+        pool = await self._pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"UPDATE plaid_items SET {', '.join(sets)} WHERE item_id = $1 RETURNING *",
+                *params,
+            )
+        return self._row_with_decrypted_token(dict(row)) if row else None
+
     async def get_items(self) -> List[Dict[str, Any]]:
         pool = await self._pool()
         async with pool.acquire() as conn:
@@ -582,10 +625,19 @@ class PlaidRepository:
 
                 data["display_title"] = normalize_transaction_title(data)
 
+                # Pass both ``name`` (raw statement line) and
+                # ``display_title`` (cleaned UI form) joined as a single
+                # haystack so a description-filtered rule matches whichever
+                # form the user typed in. ``lookup_category`` lower-cases
+                # internally; we just concatenate.
+                _haystack = " ".join(
+                    s for s in (data.get("name"), data.get("display_title")) if s
+                )
                 rule_cat = await MerchantRulesRepository().lookup_category(
                     data.get("merchant_entity_id"),
                     data.get("merchant_name"),
-                    data.get("display_title"),
+                    fallback_display=data.get("display_title"),
+                    description=_haystack,
                 )
                 if rule_cat is not None:
                     category_id = rule_cat
@@ -735,19 +787,34 @@ class PlaidRepository:
                 )
                 imported += 1
 
-            # Run the unified classifier over the last 7 days so freshly
-            # synced rows get the correct ``transaction_class`` immediately
-            # — no manual rescan needed. This covers both the classic
-            # TRANSFER_OUT/IN pair (savings ↔ checking, same amount across
-            # spouses) and the cash ↔ debt case (checking pays off a
-            # credit card; the depository side tagged LOAN_PAYMENTS never
-            # made it into the old pair matcher). 7 days is long enough for
-            # ACH settlement + weekends; the full-history rescan remains an
-            # explicit endpoint for cleanup passes.
+            # Run the unified classifier over the **full** history so every
+            # freshly imported row gets a correct ``transaction_class``,
+            # not just the last 7 days. The previous 7-day window only
+            # mattered for incremental syncs of an existing item — but
+            # when a Plaid item is freshly added, ``transactions/sync``
+            # returns the entire available history (often 30+ days, often
+            # years). Anything older than 7 days was being inserted with
+            # the default ``transaction_class = 'uncategorized'`` while
+            # the legacy mirror ``is_internal_transfer`` was set correctly
+            # at INSERT time — producing rows whose list pill said
+            # "INTERNAL" but whose modal class dropdown said
+            # "Auto (uncategorized)", and which leaked into Income
+            # aggregates because nothing classified them as
+            # internal_transfer. See ``docs/categorization-precedence.md``
+            # for why we keep transaction_class as the single source of
+            # truth.
+            #
+            # Full rescan is cheap: ~5k rows/batch, all in-process Python
+            # against a couple of pre-aggregated SQL queries. Sub-second
+            # for typical family histories (<50k rows). The trade-off
+            # (a tiny bit more work per sync) is worth the math
+            # consistency guarantee. Manual-class-override rows are
+            # always preserved by ``classify_row`` rule 1, so user
+            # decisions are sacred.
             try:
                 from web.classification.classifier import rescan_all
 
-                stats = await rescan_all(conn, horizon_days=7)
+                stats = await rescan_all(conn, horizon_days=None)
                 if stats.changed:
                     logger.info(
                         "Plaid import: reclassified %d rows (paired=%d)",

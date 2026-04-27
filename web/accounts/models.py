@@ -40,6 +40,7 @@ class AccountOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     # Institution branding (joined from plaid_items)
+    institution_name: Optional[str] = None
     institution_logo: Optional[str] = None
     institution_color: Optional[str] = None
     # Owner (joined from users via user_id)
@@ -59,6 +60,17 @@ class AccountCreate(BaseModel):
     mask: Optional[str] = None
     currency: str = "USD"
     holder_category: Optional[str] = None
+
+
+class CashWalletCreate(BaseModel):
+    """Body for ``POST /api/accounts/cash-wallet``: spawn a manual cash
+    wallet with a user-chosen name, optional starting balance, and an
+    optional owner override (defaults to the requesting user).
+    """
+
+    name: str = Field(..., min_length=1, max_length=80)
+    initial_balance_cents: int = Field(default=0, ge=0)
+    owner_user_id: Optional[int] = Field(default=None)
 
 
 class AccountUpdate(BaseModel):

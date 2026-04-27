@@ -120,7 +120,9 @@ User-defined tags for custom classification (e.g., "alcohol", "business").
 ### recurring_streams
 From Plaid `/transactions/recurring/get`, plus **manual** rows created via `POST /api/recurring`. Plaid upsert skips rows where `stream_source = 'manual'`.
 
-**`GET /api/recurring`** and **`GET /api/recurring/price-changes`** return the full household list for any authenticated member (no per-account `viewer_user_id` filter). Rows are sorted by computed next payment date (`next_occurrence` rules), soonest first. Other callers (e.g. Insights) may still pass `viewer_user_id` into `RecurringRepository.list_streams` / `get_price_changes` to hide streams tied to another member’s personally owned account. List enrichment sets `primary_category_name` from the category hierarchy when `category_id` resolves; if the JOIN name is empty, it uses **`format_plaid_category_for_display`** in `web/categories/pfc_display.py` — the same PFC→label rules as auto-created `categories` rows (not raw `pfc_primary` strings).
+**`GET /api/recurring`** and **`GET /api/recurring/price-changes`** return the full household list for any authenticated member (no per-account `viewer_user_id` filter). `GET /api/recurring` accepts a repeatable `user_status` query parameter (`active` / `paused` / `cancelled`); the default is `active+paused` so cancelled streams stay archived but queryable on demand. Rows are sorted by computed next payment date (`next_occurrence` rules), soonest first. Other callers (e.g. Insights) may still pass `viewer_user_id` into `RecurringRepository.list_streams` / `get_price_changes` to hide streams tied to another member’s personally owned account. List enrichment sets `primary_category_name` from the category hierarchy when `category_id` resolves; if the JOIN name is empty, it uses **`format_plaid_category_for_display`** in `web/categories/pfc_display.py` — the same PFC→label rules as auto-created `categories` rows (not raw `pfc_primary` strings).
+
+**User-managed lifecycle.** Plaid's API is read-only — it can detect streams but cannot pause / cancel third-party subscriptions. The `user_status` / `paused_until` / `cancelled_at` / `price_change_snoozed_until` columns capture local intent only. The user is still responsible for cancelling with the merchant. The Plaid upsert ON CONFLICT clause **does not touch any of these columns**, so the user's choice survives every sync.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -130,14 +132,25 @@ From Plaid `/transactions/recurring/get`, plus **manual** rows created via `POST
 | average_amount_cents | BIGINT | |
 | last_amount_cents | BIGINT | |
 | price_change_pct | NUMERIC(6,2) | Computed on sync as a **signed** percentage: `(last - avg) / abs(avg) * 100`. Positive = last charge higher than the long-term average, negative = lower. Historical rows are backfilled by `_migrate_recurring_price_change_signed` (idempotent). |
-| status | TEXT | MATURE\|EARLY_DETECTION\|TOMBSTONED\|MANUAL (manual rows) |
+| status | TEXT | MATURE\|EARLY_DETECTION\|TOMBSTONED\|MANUAL (manual rows) — Plaid-side detection state |
 | stream_source | TEXT | `plaid` (default) \| `manual` — Plaid `ON CONFLICT` update does not overwrite `manual` |
+| user_status | TEXT NOT NULL DEFAULT 'active' | `active` \| `paused` \| `cancelled`. CHECK-constrained. Default visibility hides `cancelled` rows; KPI sums and Insights skip non-`active` rows. |
+| paused_until | DATE NULL | Optional auto-resume date for paused streams; NULL = pause indefinitely |
+| cancelled_at | TIMESTAMPTZ NULL | Stamped by `RecurringRepository.update_stream` / `bulk_apply` whenever `user_status` flips to `cancelled` |
+| price_change_snoozed_until | DATE NULL | When >= `CURRENT_DATE`, hides the price-change badge on this row and excludes it from the `price_changes_warn` / `_good` Insights cards |
 
 ### plaid_items (connection metadata)
 | Column | Type | Notes |
 |---|---|---|
+| item_id | TEXT PK | Plaid's stable item identifier |
+| access_token | TEXT NULL | **Legacy plain-text column.** Kept for one release as a safety-net during the encryption rollout; new writes set this to NULL. Will be dropped in a follow-up once the encrypted path is verified in production. |
+| access_token_encrypted | BYTEA NULL | Fernet ciphertext of the Plaid access token. Encrypted via `web.plaid.crypto` using `PLAID_ENCRYPTION_KEY`. Repo decrypts transparently — callers always see plaintext on `item["access_token"]`. NULL on rows that pre-date the rollout (encrypted on the next startup once the key is set). See [`docs/plaid.md`](plaid.md#access-token-encryption-at-rest). |
+| user_id | INTEGER FK | Owner; ON DELETE SET NULL |
 | item_login_required | BOOLEAN | Set from Plaid `ITEM_LOGIN_REQUIRED` webhook; cleared after successful sync |
 | sync_updates_pending | BOOLEAN | Set from `SYNC_UPDATES_AVAILABLE`; cleared after successful sync |
+| cursor | TEXT | Plaid `transactions/sync` pagination cursor |
+| connected_at, last_synced_at | TIMESTAMPTZ | |
+| institution_name, institution_logo, institution_color | TEXT | UI display |
 
 ### plaid_webhook_events
 | Column | Type | Notes |
@@ -160,6 +173,19 @@ Key-building priority (see `web/merchant_rules/keys.py`):
 | merchant_key | TEXT UNIQUE | Internal key `eid:…` or `name:…` (lowercased) |
 | category_id | INTEGER FK | |
 | created_at | TIMESTAMPTZ | |
+
+### merchant_aliases
+Family-wide **display rename** for a merchant. Layered on read via a LEFT JOIN — the underlying `transactions.display_title` and `recurring_streams.merchant_name` columns are never modified. Categorization (`merchant_category_rules`), merchant_key matching, math, and Plaid sync are **unaffected**. See [`docs/api.md#merchant-aliases-display-rename`](api.md#merchant-aliases-display-rename) for the HTTP surface.
+
+The table reuses the same `merchant_key` algorithm as `merchant_category_rules` (`web/merchant_rules/keys.py`). Because Plaid's `/transactions/recurring/get` endpoint returns only `merchant_name` (no `merchant_entity_id`), `upsert_alias` writes **two rows** when both identifiers are available — `eid:<id>` and `name:<lower(name)>` — with the same `display_name`. This guarantees the rename matches both transaction rows (which usually have the entity id) and recurring stream rows (which never do).
+
+The single source of truth for the read-side LEFT JOIN clause is `web/merchant_rules/aliases.py::alias_join_sql(table_alias)`. Every repo that returns merchant-bearing rows (transactions list/get, recurring `list_streams`, reports `get_top_merchants`) wraps its query with this fragment and `COALESCE(ma.display_name, t.display_title)` to surface the alias.
+
+| Column | Type | Notes |
+|---|---|---|
+| merchant_key | TEXT PK | Same key shape as `merchant_category_rules`. Two rows may exist for the same merchant — the `eid:` row plus the `name:` twin. |
+| display_name | TEXT NOT NULL | User-chosen rename, e.g. "Rent". CHECK ensures non-empty after trim. |
+| created_at, updated_at | TIMESTAMPTZ | `updated_at` bumps on each PUT. |
 
 ### user_preferences
 | Column | Type | Notes |

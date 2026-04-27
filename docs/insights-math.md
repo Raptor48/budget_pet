@@ -25,8 +25,29 @@ The feed payload also returns `actionable_count` (count of `warn`) and
 Starting with Phase 4, `new_count` is computed from the persisted
 `insights_cards.first_seen_at` column: a card is "new" exactly when it was
 first stored after the viewer last visited the Insights page. Cards are
-also returned with a `user_state` overlay and an `is_new` flag so the
-front-end can render NEW ribbons per card without recomputing.
+also returned with a `user_state` overlay, an `is_new` flag, and the raw
+`first_seen_at` ISO timestamp so the front-end can render both NEW
+ribbons and "surfaced 3d ago" footers without a second roundtrip.
+
+The Insights page itself splits the feed into three visual zones:
+
+1. **Hero** — `financial_health` is rendered with a dedicated card that
+   pulls the score donut + advice from `GET /api/reports/financial-health`
+   directly. It's not run through the generic `InsightGroupCard`.
+2. **Needs action** — every group with `severity = warn`, drawn into a
+   masonry-friendly `grid-auto-flow: row dense` so a tall multi-alert
+   group never leaves a void next to a short single-alert sibling.
+3. **Heads up** — info groups. Single-fact info cards (no detail body)
+   render as compact tiles via the `compact` prop on `InsightGroupCard`;
+   info cards with paragraphs of detail (e.g. `cash_flow_mom`) keep the
+   full standard layout.
+
+Per-type icons live in `frontend/src/lib/insights-icons.ts` and replace
+the previous catch-all `Sparkles`. Severity is signalled by an amber
+left-border accent on warn cards plus an amber-tinted icon chip; the
+literal `Info`/`Warn` text badge is gone since the visual cues are
+sufficient. Snooze is a popover with `1d / 7d / 30d / 90d` presets
+instead of a hard-coded `Snooze 7d` button.
 
 ## 2. Card catalog (Phase 1 scope)
 
@@ -93,6 +114,19 @@ down), `info` for favorable ones. Uses `RecurringRepository.get_price_changes`
 which surfaces streams whose latest charge differs from the long-term
 average by more than `PRICE_CHANGE_THRESHOLD` (10%).
 
+Excluded at SQL level:
+
+- `user_status = 'cancelled'` — the user explicitly archived this stream.
+- `price_change_snoozed_until >= CURRENT_DATE` — the user dismissed the
+  alert from the Recurring page (default snooze window is 30 days).
+
+The same `user_status` filter applies to **`missed_recurring`** and
+**`duplicate_subscription`**: any stream with `user_status != 'active'`
+is skipped in the corresponding card builder so a paused subscription
+does not generate "missing charge" or "duplicate" warnings. Plaid's API
+cannot pause / cancel third-party subscriptions, so these flags are
+purely local intent — see [`docs/data-model.md#recurring_streams`](data-model.md#recurring_streams).
+
 ### `liquidity_buffer`
 
 Severity: `warn` only. Fires when the sum of absolute outflow amounts in
@@ -156,6 +190,15 @@ for `cache_ttl_seconds` (default 300). The cache key is the viewer, so
 the privacy model from §3 is preserved. Every mutation
 (`dismiss`/`snooze`/`unhide`/`mark-viewed`) invalidates the viewer's
 cache entry.
+
+**Plaid sync invalidation.** `iter_sync_all_items` calls
+`invalidate_cache(None)` in its `finally` block (see
+`web/plaid/scheduler.py::_invalidate_insights_cache_post_sync`), so a
+manual or scheduled Plaid sync drops every viewer's cache as soon as it
+finishes — the next `GET /api/insights/feed` recomputes against the
+freshly-imported transactions instead of serving a stale snapshot for
+up to the TTL window. Failure to flush (e.g. import error inside the
+insights module) is logged but never aborts the sync.
 
 ### Configurable thresholds
 

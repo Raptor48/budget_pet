@@ -244,3 +244,69 @@ class TestScheduledSyncAuditHook:
         assert len(recorded) == 1
         assert recorded[0]["event_type"] == "plaid.sync_scheduled"
         assert recorded[0]["metadata"]["failed"] is True
+
+
+class TestPostSyncInsightsInvalidation:
+    """``iter_sync_all_items`` must drop the Insights cache once the last
+    item finishes — otherwise the dashboard / Insights feed keeps showing
+    pre-sync data for up to the cache TTL (5 minutes by default).
+    """
+
+    @pytest.mark.asyncio
+    async def test_invalidates_insights_cache_after_iter_sync(self):
+        from unittest.mock import MagicMock
+
+        from web.plaid import scheduler as scheduler_module
+
+        fake_repo = MagicMock()
+        fake_repo.get_items = AsyncMock(return_value=[
+            {"item_id": "item-1", "access_token": "t1"},
+        ])
+
+        async def fake_payload(_item, _source, *, audit_source):
+            return {"item_id": "item-1", "status": "ok"}
+
+        with patch(
+            "web.plaid.repo.get_plaid_repo", lambda: fake_repo
+        ), patch(
+            "web.plaid.scheduler._sync_item_payload", fake_payload
+        ), patch(
+            "web.insights.store.invalidate_cache",
+        ) as invalidate_mock:
+            results = [
+                r async for r in scheduler_module.iter_sync_all_items(audit_source="manual")
+            ]
+
+        assert results == [{"item_id": "item-1", "status": "ok"}]
+        # Called once, with viewer_user_id=None (drops every entry).
+        invalidate_mock.assert_called_once_with(None)
+
+    @pytest.mark.asyncio
+    async def test_invalidates_even_when_sync_raises(self):
+        """The ``try / finally`` guarantees the cache is flushed even if a
+        per-item sync raises mid-iteration. Otherwise a partial sync would
+        leave stale data behind a bad item."""
+        from unittest.mock import MagicMock
+
+        from web.plaid import scheduler as scheduler_module
+
+        fake_repo = MagicMock()
+        fake_repo.get_items = AsyncMock(return_value=[
+            {"item_id": "item-1", "access_token": "t1"},
+        ])
+
+        async def explode(*_args, **_kwargs):
+            raise RuntimeError("plaid 500")
+
+        with patch(
+            "web.plaid.repo.get_plaid_repo", lambda: fake_repo
+        ), patch(
+            "web.plaid.scheduler._sync_item_payload", explode
+        ), patch(
+            "web.insights.store.invalidate_cache",
+        ) as invalidate_mock:
+            with pytest.raises(RuntimeError, match="plaid 500"):
+                async for _ in scheduler_module.iter_sync_all_items(audit_source="manual"):
+                    pass
+
+        invalidate_mock.assert_called_once_with(None)

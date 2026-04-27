@@ -14,6 +14,27 @@ V2 is centered on Plaid API for linked institutions (transactions, accounts, cat
 | Plaid | plaid-python 39+, products: transactions, liabilities, investments, recurring_transactions |
 | Hosting | Railway (FastAPI, Next.js, Postgres services) |
 
+## Railway environments and deploy branches
+
+The Railway project (`protective-clarity`) runs two environments off the same
+codebase but different branches:
+
+| Environment | Source branch | Purpose |
+|---|---|---|
+| `production` | `main` | Real Plaid data, real users. Auto-deploys on merge to `main`. |
+| `demo` | `demo` | Portfolio-facing sandbox. Plaid `sandbox` mode, login `demo` / `demo_pass`. Updated by hand via PRs targeting `demo`. |
+
+Day-to-day work happens on a versioned working branch (currently `V2.3`); PRs
+land on `main`, which triggers the production deploy. The `demo` branch lags
+behind on purpose so reviewers see a stable surface.
+
+**Cross-service env wiring on Railway:** every service that talks to Postgres
+must reference the templated value
+`${{Postgres-DB.DATABASE_URL}}` (note the hyphen — the service name is
+`Postgres DB`, references replace spaces with hyphens). A literal
+`DATABASE_URL` becomes a foot-gun the moment `POSTGRES_PASSWORD` rotates: the
+templated form auto-rebuilds, a literal does not.
+
 ## Module Structure
 
 ```
@@ -31,10 +52,11 @@ web/
 ├── transactions/        — /api/transactions CRUD + splits + CSV export
 ├── categories/          — /api/categories CRUD + PFC auto-mapping
 ├── tags/                — /api/tags CRUD + transaction-tag linking
-├── recurring/           — /api/recurring + price change detector
+├── recurring/           — /api/recurring + price change detector + bulk lifecycle (pause/cancel/snooze)
 ├── budgets/             — /api/budgets + progress calculation
 ├── investments/         — /api/investments/holdings
 ├── reports/             — /api/reports/* (cash flow, net worth, forecast, health)
+├── merchant_rules/      — /api/merchant-rules (categorization) + /api/merchant-aliases (display rename)
 ├── app_settings/        — /api/settings/app (autosync schedule); singleton app_settings table
 └── audit/               — /api/audit feed + non-throwing `record()` helper (audit_log table)
 ```
@@ -117,6 +139,37 @@ Writes go to the `audit_log` table (see `docs/data-model.md`).
 - Owner accounts manage family members via /api/auth/users
 - Emergency bypass via ADMIN_LOGIN / ADMIN_PASSWORD env vars
 - Cookie auth + Authorization: Bearer fallback for cross-origin
+
+## Plaid access token encryption at rest
+
+Plaid `access_token`s are stored as Fernet ciphertext in
+`plaid_items.access_token_encrypted` (BYTEA). The legacy plain
+`plaid_items.access_token` column is kept as NULL after backfill — it will be
+dropped in a follow-up release once the encrypted path is verified in
+production.
+
+- `web/plaid/crypto.py` is the only module that touches keys; `PlaidRepository`
+  decorates rows transparently, so `scheduler.py`, `routes.py`, and
+  `webhook_config.py` keep using `item["access_token"]` as plaintext.
+- A one-shot, idempotent backfill runs on every startup from
+  `PlaidRepository.init_tables` and only encrypts rows where the encrypted
+  column is NULL.
+- **Soft rollout:** without `PLAID_ENCRYPTION_KEY`, the repo falls back to
+  plaintext (and logs one CRITICAL line via `warn_if_missing_once`) so deploys
+  before the env var is set still boot. With the key set, all writes encrypt
+  and existing rows are backfilled on the first boot.
+- **Operational rule:** generate the key once with
+  `Fernet.generate_key()`, store it in your password manager, and
+  **never rotate it**. A lost key means every linked Plaid item must be
+  re-linked from the UI.
+
+## Plaid SDK call timeouts
+
+The Plaid Python SDK is synchronous (blocks a thread on HTTP). Every call
+goes through `web.plaid.scheduler._plaid_call`, which wraps
+`asyncio.to_thread` in `asyncio.wait_for(timeout=PLAID_SDK_TIMEOUT)` (default
+90s, override via env). Without this, a hung Plaid response would freeze
+the asyncio event loop and the daily sync would never run again.
 
 ## Key Conventions
 

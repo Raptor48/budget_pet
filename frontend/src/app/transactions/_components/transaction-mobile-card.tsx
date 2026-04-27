@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { format } from "date-fns";
 import { ArrowLeftRight, CreditCard, EyeOff, Loader2, Trash2 } from "lucide-react";
 
@@ -39,11 +40,14 @@ function MobileMerchantAvatar({ tx }: { tx: Transaction }) {
   return (
     <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted text-[10px] font-semibold text-muted-foreground">
       {showImg ? (
-        <img
+        <Image
           src={tx.logo_url!}
           alt=""
+          width={36}
+          height={36}
           className="size-full object-cover"
           onError={() => setFailed(true)}
+          unoptimized
         />
       ) : (
         <span className="leading-none">{initialsFromName(name)}</span>
@@ -140,7 +144,12 @@ export function TransactionMobileCard({
               Private
             </span>
           ) : null}
-          {tx.is_internal_transfer ? (
+          {/* Source of truth: ``transaction_class``. The legacy
+              ``is_internal_transfer`` boolean can briefly disagree on
+              freshly-imported historical rows; reading from the modern
+              column matches what the aggregates count. See
+              docs/categorization-precedence.md §4. */}
+          {tx.transaction_class === "internal_transfer" ? (
             <span
               className="inline-flex items-center gap-0.5 rounded-full bg-sky-500/10 px-1.5 py-0 text-[9px] font-medium uppercase tracking-wide text-sky-700 dark:text-sky-400"
               title="Intra-family transfer — excluded from income/expense totals."

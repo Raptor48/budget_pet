@@ -64,6 +64,31 @@ Matching SQL coalesces `NULLIF(merchant_name, '')` onto `transactions.display_ti
 | POST | /api/merchant-rules/{id}/apply-existing | Apply saved rule to existing transactions (only `category_id` + `updated_at` on `transactions`; idempotent). |
 | DELETE | /api/merchant-rules/{id} | Delete rule |
 
+## Merchant Aliases (display rename)
+
+User-chosen rename for a Plaid-detected merchant — purely a presentation
+overlay. Categorization, merchant_key matching, math, and Plaid sync are
+**unaffected**. Stored in the `merchant_aliases` table keyed on the same
+`merchant_key` as `merchant_category_rules` (see
+[`docs/data-model.md#merchant_aliases`](data-model.md#merchant_aliases)).
+
+When both `merchant_entity_id` and `merchant_name` are supplied, `PUT
+/api/merchant-aliases` writes **two rows** — `eid:<id>` and
+`name:<lower(name)>` — with the same `display_name`. The redundant
+`name:` row is necessary because Plaid's recurring endpoint returns
+only `merchant_name` (no entity id), so without it the alias would
+silently fail to match recurring stream rows of the same merchant.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | /api/merchant-aliases | List every alias (`merchant_key`, `display_label`, `display_name`, timestamps). |
+| PUT | /api/merchant-aliases | Upsert. Body: `display_name` (non-empty) + at least one of `merchant_entity_id`, `merchant_name`, `merchant_label`. Writes both `eid:` and `name:` twin rows when both are present. Returns the **primary** row (the one matched first by `merchant_key()` precedence). |
+| POST | /api/merchant-aliases/delete | Remove. Body: `merchant_key` (single-key delete, e.g. from a Settings list) **or** `merchant_entity_id`+`merchant_name` (twin delete — clears both rows the upsert wrote). 204 on success, 404 if no rows matched. |
+
+Read-side application is centralized in `web/merchant_rules/aliases.py::alias_join_sql(table_alias)`. Every repo that returns merchant-bearing rows (transactions, recurring streams, top merchants) wraps its query with this `LEFT JOIN merchant_aliases ma ON ...` clause and `COALESCE(ma.display_name, t.display_title)` overrides the auto-normalized title in the response. The DB column `transactions.display_title` stays auto-normalized — the alias is layered on read so a rename instantly applies to **all** historical rows of that merchant without a backfill UPDATE.
+
+`MerchantSpend` rows from `/api/reports/merchants` carry a `is_aliased: bool` so the UI can label aggregated rows as renamed; aggregation groups by `COALESCE(ma.display_name, t.merchant_name)` so two Plaid merchants the user renamed to the same string aggregate into one row.
+
 ## Transactions
 
 | Method | Path | Description |
@@ -83,13 +108,16 @@ Matching SQL coalesces `NULLIF(merchant_name, '')` onto `transactions.display_ti
 
 ## Recurring Streams
 
+Plaid does not let third-party subscriptions be paused or cancelled via API — these endpoints only manage local lifecycle state used by KPIs and Insights. The user is still expected to cancel with the merchant directly. See [`docs/plaid.md#recurring-is-read-only`](plaid.md#recurring-is-read-only).
+
 | Method | Path | Description |
 |---|---|---|
-| GET | /api/recurring | List streams (`direction=inflow\|outflow`, `active_only`). Each row is enriched with `account_name`, `account_mask`, `owner_username` (joined from the owning account/user), `primary_category_id`/`primary_category_name`/`primary_category_color` (rolled up via `categories.parent_id`), and `display_title` (normalized description via `web/transactions/display.py::normalize_transaction_title`). |
-| GET | /api/recurring/price-changes | Streams whose last charge diverges from the long-term average by more than 10%. The `price_change_pct` field is **signed** (positive = more expensive, negative = cheaper); the UI interprets the sign against `direction` to show good-news / heads-up coloring. |
+| GET | /api/recurring | List streams. Filters: `direction=inflow\|outflow`, `active_only` (Plaid-side), and the repeatable `user_status` query parameter (`active` \| `paused` \| `cancelled`; default = `active+paused` so cancelled rows are archived but still queryable on demand). Each row is enriched with `account_name`, `account_mask`, `owner_username` (joined from the owning account/user), `primary_category_id`/`primary_category_name`/`primary_category_color` (rolled up via `categories.parent_id`), and `display_title` (normalized description via `web/transactions/display.py::normalize_transaction_title`). |
+| GET | /api/recurring/price-changes | Streams whose last charge diverges from the long-term average by more than 10%. The `price_change_pct` field is **signed** (positive = more expensive, negative = cheaper); the UI interprets the sign against `direction` to show good-news / heads-up coloring. Cancelled and snoozed streams (`price_change_snoozed_until >= CURRENT_DATE`) are filtered out at SQL level. |
 | GET | /api/recurring/{id} | Get stream |
-| PATCH | /api/recurring/{id} | Update user_label, category_id |
+| PATCH | /api/recurring/{id} | Update `user_label`, `category_id`, `user_status`, `paused_until`, `price_change_snoozed_until`. Side-effects: flipping `user_status` to `cancelled` stamps `cancelled_at = NOW()`; flipping back to `active` clears it. |
 | POST | /api/recurring | Create a **manual** recurring stream (same table as Plaid); `plaid_stream_id` is synthetic `manual:{uuid}`; excluded from Plaid upsert |
+| POST | /api/recurring/bulk | Apply one lifecycle action to many streams in a single round-trip. Body: `{ids: int[], action: 'cancel'\|'pause'\|'reactivate'\|'snooze_price_change', paused_until?: date, snooze_days?: int}`. Returns `{updated: int}`. `cancel` stamps `cancelled_at`; `pause` writes `paused_until`; `reactivate` clears both; `snooze_price_change` sets `price_change_snoozed_until = today + (snooze_days or 30)`. |
 
 ## Budgets
 

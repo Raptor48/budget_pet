@@ -86,7 +86,12 @@ async def test_upsert_rule_accepts_fallback_display():
     conn = AsyncMock()
     pool = make_mock_pool(conn)
     conn.fetchrow.side_effect = [
-        {"id": 1, "merchant_key": "name:pmts sec: ind", "category_id": 7},
+        {
+            "id": 1,
+            "merchant_key": "name:pmts sec: ind",
+            "category_id": 7,
+            "description_contains": None,
+        },
         {"name": "Transfers"},
     ]
     repo = MerchantRulesRepository()
@@ -94,3 +99,4 @@ async def test_upsert_rule_accepts_fallback_display():
         out = await repo.upsert_rule(None, None, 7, "Pmts Sec: Ind")
     assert out["merchant_key"] == "name:pmts sec: ind"
     assert out["category_name"] == "Transfers"
+    assert out["description_contains"] is None

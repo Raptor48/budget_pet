@@ -8,8 +8,23 @@ from datetime import date
 from typing import Any, Dict, List, Optional
 
 from web.db import get_pool
+from web.merchant_rules.aliases import alias_join_sql
 
 logger = logging.getLogger(__name__)
+
+
+def _apply_alias_inplace(rows: List[Dict[str, Any]]) -> None:
+    """Override ``display_title`` with the user's merchant alias when present.
+
+    The alias is layered on read so a rename instantly applies to every
+    historical row of the same merchant_key. ``merchant_alias`` stays in the
+    response so the UI can render an "aliased" affordance and offer a quick
+    revert. ``display_title`` in the DB remains the auto-normalized value.
+    """
+    for r in rows:
+        alias = r.get("merchant_alias")
+        if alias:
+            r["display_title"] = alias
 
 
 class TransactionsRepository:
@@ -190,6 +205,7 @@ class TransactionsRepository:
                        a.name     AS account_name,
                        a.mask     AS account_mask,
                        u.username AS owner_username,
+                       ma.display_name AS merchant_alias,
                        EXISTS(SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id) AS has_splits
                 FROM transactions t
             """
@@ -199,6 +215,7 @@ class TransactionsRepository:
                        a.name     AS account_name,
                        a.mask     AS account_mask,
                        u.username AS owner_username,
+                       ma.display_name AS merchant_alias,
                        EXISTS(SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id) AS has_splits
                 FROM transactions t
             """
@@ -210,13 +227,16 @@ class TransactionsRepository:
                 {select_tx}
                 LEFT JOIN accounts a ON a.id = t.account_id
                 LEFT JOIN users u ON a.user_id = u.id
+                {alias_join_sql("t", "ma")}
                 WHERE {where}
                 ORDER BY COALESCE(t.authorized_date, t.date) DESC, t.id DESC
                 LIMIT ${idx} OFFSET ${idx + 1}
                 """,
                 *params,
             )
-        return [dict(r) for r in rows]
+        out = [dict(r) for r in rows]
+        _apply_alias_inplace(out)
+        return out
 
     async def get_date_range(
         self,
@@ -275,16 +295,18 @@ class TransactionsRepository:
         pool = await self._pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                """
+                f"""
                 SELECT t.*,
                        a.name     AS account_name,
                        a.mask     AS account_mask,
                        u.username AS owner_username,
                        a.user_id  AS account_user_id,
+                       ma.display_name AS merchant_alias,
                        EXISTS(SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id) AS has_splits
                 FROM transactions t
                 LEFT JOIN accounts a ON a.id = t.account_id
                 LEFT JOIN users u ON a.user_id = u.id
+                {alias_join_sql("t", "ma")}
                 WHERE t.id = $1
                 """,
                 transaction_id,
@@ -300,6 +322,7 @@ class TransactionsRepository:
             and result.get("account_user_id") != viewer_user_id
         ):
             return None
+        _apply_alias_inplace([result])
         return result
 
     async def get_tags_for_transaction(self, transaction_id: int) -> List[Dict[str, Any]]:

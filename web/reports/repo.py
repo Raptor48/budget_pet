@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from web.db import get_pool
 from web.env_flags import reports_include_plaid_sandbox
+from web.merchant_rules.aliases import alias_join_sql
 
 logger = logging.getLogger(__name__)
 
@@ -523,17 +524,25 @@ class ReportsRepository:
             idx += 1
         params.append(limit)
         where = " AND ".join(conditions)
+        # Group by the *aliased* name so two Plaid merchants the user renamed
+        # to the same string (e.g. "Whole Foods" and "WHOLEFDS #123" → both
+        # "Groceries") aggregate into one row. Falls back to t.merchant_name
+        # for any merchant without an alias. The COALESCE expression is
+        # repeated in SELECT and GROUP BY because PostgreSQL does not
+        # accept GROUP BY on a column alias.
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
                 SELECT
-                    t.merchant_name,
+                    COALESCE(ma.display_name, t.merchant_name) AS merchant_name,
+                    BOOL_OR(ma.display_name IS NOT NULL)        AS is_aliased,
                     MAX(t.logo_url) AS logo_url,
                     SUM(t.amount_cents) AS amount_cents,
                     COUNT(*) AS transaction_count
                 FROM transactions t
+                {alias_join_sql("t", "ma")}
                 WHERE {where}
-                GROUP BY t.merchant_name
+                GROUP BY COALESCE(ma.display_name, t.merchant_name)
                 ORDER BY amount_cents DESC
                 LIMIT ${idx}
                 """,
@@ -712,6 +721,28 @@ class ReportsRepository:
         }
 
     async def get_net_worth(self) -> Dict[str, Any]:
+        """Return today's net-worth composition + comparison deltas + per-account breakdown.
+
+        Backwards-compatible: the four flat ``*_cents`` fields are still in
+        the response, in the same shape the previous /api/reports/net-worth
+        clients consumed. Everything else is additive context for the
+        redesigned Net Worth tab — clients that don't read the new fields
+        keep working unchanged.
+
+        Comparison windows pick the snapshot **closest to** the target
+        anchor (30 days ago for MoM, 180 days for the 6-mo lookback). We
+        accept anything within ±15 days of the MoM anchor and ±45 days of
+        the 6-mo anchor; outside those windows we return ``None`` instead
+        of comparing against an arbitrarily distant snapshot, which would
+        be misleading.
+
+        Per-account breakdown joins the accounts list with branding so
+        the UI can render institution logos without a second roundtrip.
+        Investment holdings are summed *into* the parent account row so
+        the breakdown stays one row per account.
+        """
+        from datetime import timedelta
+
         pool = await self._pool()
         async with pool.acquire() as conn:
             liquid = await conn.fetchval(
@@ -723,14 +754,133 @@ class ReportsRepository:
             debt = await conn.fetchval(
                 "SELECT COALESCE(SUM(current_balance_cents), 0) FROM accounts WHERE type IN ('credit','loan') AND is_active"
             )
-        liquid = liquid or 0
-        investments = investments or 0
-        debt = debt or 0
+            liquid = liquid or 0
+            investments = investments or 0
+            debt = debt or 0
+            net = liquid + investments - debt
+
+            # Per-account breakdown. Investment holdings are pre-aggregated
+            # into ``inv_value`` and folded into the depository row sum so
+            # the breakdown shows one tile per account, not one per holding.
+            account_rows = await conn.fetch(
+                """
+                SELECT
+                    a.id, a.name, a.official_name, a.mask, a.type, a.subtype,
+                    a.current_balance_cents,
+                    a.user_id, a.plaid_account_id,
+                    pi.institution_name, pi.institution_logo, pi.institution_color,
+                    u.username AS owner_username,
+                    COALESCE((
+                        SELECT SUM(h.institution_value_cents)
+                        FROM investment_holdings h
+                        WHERE h.account_id = a.id
+                    ), 0) AS holdings_value_cents
+                FROM accounts a
+                LEFT JOIN plaid_items pi ON a.plaid_item_id = pi.item_id
+                LEFT JOIN users u ON a.user_id = u.id
+                WHERE a.is_active = TRUE
+                  AND a.type IN ('depository','credit','loan','investment')
+                ORDER BY a.type, a.name
+                """,
+            )
+
+            # Comparison snapshots. Anchor at today, look up the snapshot
+            # closest to (today - delta) within tolerance.
+            today = date.today()
+
+            async def _closest_snapshot(target: date, tolerance_days: int):
+                lo = target - timedelta(days=tolerance_days)
+                hi = target + timedelta(days=tolerance_days)
+                return await conn.fetchrow(
+                    """
+                    SELECT snapshot_date, net_worth_cents
+                    FROM net_worth_snapshots
+                    WHERE snapshot_date BETWEEN $1 AND $2
+                    ORDER BY ABS(snapshot_date - $3) ASC, snapshot_date DESC
+                    LIMIT 1
+                    """,
+                    lo, hi, target,
+                )
+
+            mom_snap = await _closest_snapshot(today - timedelta(days=30), 15)
+            six_mo_snap = await _closest_snapshot(today - timedelta(days=180), 45)
+
+            # Trajectory for debt-payoff projection: pick the **6-month**
+            # comparison if available (more stable than MoM), else fall
+            # back to MoM. Only meaningful when (a) net is rising and (b)
+            # there's outstanding debt.
+            payoff_months: Optional[int] = None
+            if debt > 0:
+                trajectory_snap = six_mo_snap or mom_snap
+                if trajectory_snap is not None:
+                    span_days = (today - trajectory_snap["snapshot_date"]).days
+                    delta_total = net - int(trajectory_snap["net_worth_cents"])
+                    if span_days > 0 and delta_total > 0:
+                        # Cents per day → cents per month (assume 30 days)
+                        per_month = (delta_total / span_days) * 30.0
+                        if per_month > 0:
+                            months = int(round(debt / per_month))
+                            # Cap at 600mo (50yr) — anything longer is noise
+                            if 0 < months <= 600:
+                                payoff_months = months
+
+        accounts: List[Dict[str, Any]] = []
+        for r in account_rows:
+            atype = r["type"]
+            is_debt = atype in ("credit", "loan")
+            # Pick the meaningful balance for the account's role:
+            # - debt accounts → current balance (already non-negative)
+            # - investment accounts → sum of holdings if available, else
+            #   the account's stored balance
+            # - depository → current balance
+            if atype == "investment":
+                bal = int(r["holdings_value_cents"] or 0) or int(r["current_balance_cents"] or 0)
+            else:
+                bal = int(r["current_balance_cents"] or 0)
+            # Skip zero-balance accounts to keep the breakdown honest —
+            # an empty Cash wallet shouldn't take a tile slot.
+            if bal == 0:
+                continue
+            accounts.append({
+                "id": r["id"],
+                "name": r["name"],
+                "official_name": r["official_name"],
+                "mask": r["mask"],
+                "type": atype,
+                "subtype": r["subtype"],
+                "role": "debt" if is_debt else "asset",
+                "balance_cents": abs(bal),
+                "owner_username": r["owner_username"],
+                "institution_name": r["institution_name"],
+                "institution_logo": r["institution_logo"],
+                "institution_color": r["institution_color"],
+                "is_cash_wallet": (
+                    r["plaid_account_id"] is None
+                    and atype == "depository"
+                    and (r["subtype"] or "") == "cash"
+                ),
+            })
+
+        # Final ordering: assets first (largest first), then debts (largest
+        # first). The UI uses two side-by-side columns so this gives both
+        # sides their natural sort.
+        accounts.sort(key=lambda a: (0 if a["role"] == "asset" else 1, -a["balance_cents"]))
+
         return {
             "liquid_cents": liquid,
             "investment_cents": investments,
             "debt_cents": debt,
-            "net_worth_cents": liquid + investments - debt,
+            "net_worth_cents": net,
+            "mom_delta_cents": (
+                net - int(mom_snap["net_worth_cents"]) if mom_snap is not None else None
+            ),
+            "six_month_delta_cents": (
+                net - int(six_mo_snap["net_worth_cents"]) if six_mo_snap is not None else None
+            ),
+            "mom_compared_to": mom_snap["snapshot_date"] if mom_snap is not None else None,
+            "six_month_compared_to": six_mo_snap["snapshot_date"] if six_mo_snap is not None else None,
+            "accounts": accounts,
+            "debt_payoff_months": payoff_months,
         }
 
     async def get_net_worth_history(self, months: int = 12) -> List[Dict[str, Any]]:

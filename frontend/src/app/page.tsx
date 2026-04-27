@@ -1,10 +1,15 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { formatDistanceToNow } from "date-fns";
 import { AppLayout } from "@/components/layout/app-layout";
 import { CategoryDonutWidget } from "@/components/charts/category-donut-chart";
+import { FinancialHealthCompactCard } from "@/components/reports/financial-health-hero-card";
+import { PlaidAttentionPlate } from "@/components/layout/plaid-attention-banner";
+import { TodaysActionsSection } from "@/components/dashboard/todays-actions";
 import {
   Card,
   CardContent,
@@ -16,16 +21,17 @@ import { Badge } from "@/components/ui/badge";
 import {
   budgetsApi,
   insightsApi,
+  plaidApi,
   recurringApi,
   reportsApi,
   transactionsApi,
 } from "@/lib/api";
-import { MonthYearPicker } from "@/components/ui/month-year-picker";
+import { notify } from "@/lib/notify";
+import { Loader2, RefreshCw, TrendingDown, TrendingUp } from "lucide-react";
 import { PlaidTxnAmount } from "@/components/ui/plaid-txn-amount";
 import type { ForecastEntry, Transaction } from "@/types/v2";
 import { cn } from "@/lib/utils";
 import { composeInsightsBadge, pickTeaser } from "@/lib/insights-teaser";
-import { Button } from "@/components/ui/button";
 
 /** Plain currency (balances, aggregates — not Plaid signed transaction lines). */
 function formatUsd(cents: number): string {
@@ -80,6 +86,63 @@ function SectionSkeleton({ className }: { className?: string }) {
   );
 }
 
+/**
+ * Tiny "↑/↓ $X vs Mar" line under the KPI headline number.
+ *
+ * Sign convention: positive `cents` means "this month is bigger than last
+ * month" — the caller decides whether that's good (cash flow improved) or
+ * bad (net worth dropped). `goodWhenPositive` flips the color so the same
+ * helper works for income-flavored and balance-flavored numbers.
+ *
+ * Hidden when `cents == null` (e.g. no prior data yet) so we don't render
+ * a "+0 vs prev" line that's worse than nothing.
+ */
+function DeltaLine({
+  cents,
+  monthShort,
+  goodWhenPositive,
+}: {
+  cents: number | null;
+  monthShort: string;
+  goodWhenPositive: boolean;
+}) {
+  if (cents == null) return null;
+  const isPositive = cents > 0;
+  const isNegative = cents < 0;
+  const Icon = isNegative ? TrendingDown : TrendingUp;
+  const isGood =
+    (isPositive && goodWhenPositive) || (isNegative && !goodWhenPositive);
+  const isBad =
+    (isPositive && !goodWhenPositive) || (isNegative && goodWhenPositive);
+  const tone = isGood
+    ? "text-emerald-600 dark:text-emerald-400"
+    : isBad
+      ? "text-rose-600 dark:text-rose-400"
+      : "text-muted-foreground";
+  const sign = cents >= 0 ? "+" : "−";
+  const abs = Math.abs(cents);
+  return (
+    <p
+      className={cn(
+        "flex items-center gap-1 text-[11px] font-medium leading-none",
+        tone,
+      )}
+    >
+      {cents !== 0 ? <Icon className="size-3" aria-hidden /> : null}
+      <span className="tabular-nums">
+        {sign}
+        {new Intl.NumberFormat("en-US", {
+          style: "currency",
+          currency: "USD",
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 0,
+        }).format(abs / 100)}
+      </span>
+      <span className="text-muted-foreground/80 font-normal">vs {monthShort}</span>
+    </p>
+  );
+}
+
 function MerchantAvatar({ tx }: { tx: Transaction }) {
   const name = getDisplayName(tx);
   const [failed, setFailed] = useState(false);
@@ -87,14 +150,14 @@ function MerchantAvatar({ tx }: { tx: Transaction }) {
 
   if (logo && !failed) {
     return (
-      // eslint-disable-next-line @next/next/no-img-element -- remote Plaid logos; dynamic URLs
-      <img
+      <Image
         src={logo}
         alt=""
         width={40}
         height={40}
         className="size-10 shrink-0 rounded-full object-cover"
         onError={() => setFailed(true)}
+        unoptimized
       />
     );
   }
@@ -112,11 +175,22 @@ function MerchantAvatar({ tx }: { tx: Transaction }) {
 
 function DashboardContent() {
   const month = currentMonthIso();
-  const [spendMonth, setSpendMonth] = useState(month);
+  // Previous month YYYY-MM, used for the MoM-delta context lines on the
+  // Cash Flow + Net Worth KPI cards.
+  const prevMonth = (() => {
+    const [y, m] = month.split("-").map(Number);
+    if (!y || !m) return month;
+    const py = m === 1 ? y - 1 : y;
+    const pm = m === 1 ? 12 : m - 1;
+    return `${py.toString().padStart(4, "0")}-${pm.toString().padStart(2, "0")}`;
+  })();
+
   const [forecastExpanded, setForecastExpanded] = useState(false);
   const [priceChangesExpanded, setPriceChangesExpanded] = useState(false);
   const [txExpanded, setTxExpanded] = useState(false);
   const [budgetExpanded, setBudgetExpanded] = useState(false);
+
+  const queryClient = useQueryClient();
 
   const netWorthQuery = useQuery({
     queryKey: ["reports", "net-worth"],
@@ -124,9 +198,24 @@ function DashboardContent() {
     staleTime: 60_000,
   });
 
+  // Last 2 net-worth snapshots → for the "vs last month" delta. Cheap, the
+  // reports tab already pulls 12 of these; the cache layer dedupes.
+  const netWorthHistoryQuery = useQuery({
+    queryKey: ["reports", "net-worth-history", 2],
+    queryFn: () => reportsApi.getNetWorthHistory(2),
+    staleTime: 60_000,
+  });
+
   const cashFlowQuery = useQuery({
     queryKey: ["reports", "cash-flow", month],
     queryFn: () => reportsApi.getCashFlow(month),
+    staleTime: 60_000,
+  });
+
+  // Previous-month cash flow → MoM delta. Same endpoint, prior month key.
+  const cashFlowPrevQuery = useQuery({
+    queryKey: ["reports", "cash-flow", prevMonth],
+    queryFn: () => reportsApi.getCashFlow(prevMonth),
     staleTime: 60_000,
   });
 
@@ -160,9 +249,11 @@ function DashboardContent() {
     staleTime: 30_000,
   });
 
+  // Spending breakdown — always current month on the Dashboard. Reports has
+  // a month picker for the rest; the Dashboard's contract is "right now".
   const byCategoryQuery = useQuery({
-    queryKey: ["reports", "by-category", spendMonth, "primary"],
-    queryFn: () => reportsApi.getByCategory(spendMonth, { rollup: "primary" }),
+    queryKey: ["reports", "by-category", month, "primary"],
+    queryFn: () => reportsApi.getByCategory(month, { rollup: "primary" }),
     staleTime: 60_000,
   });
 
@@ -172,9 +263,68 @@ function DashboardContent() {
     staleTime: 120_000,
   });
 
+  // Plaid items power the "last synced" timestamp + the Sync now button.
+  // Same query the sidebar uses for the Settings dot — react-query dedupes.
+  const plaidItemsQuery = useQuery({
+    queryKey: ["plaid-items"],
+    queryFn: plaidApi.listItems,
+    staleTime: 60_000,
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: () => plaidApi.sync(),
+    onSuccess: () => {
+      // Pull every data surface the sync just touched — net worth, cash
+      // flow (current + prev), budgets, transactions, recurring, plaid
+      // items themselves. Coarse invalidations are fine on the Dashboard.
+      queryClient.invalidateQueries({ queryKey: ["reports"] });
+      queryClient.invalidateQueries({ queryKey: ["budgets"] });
+      queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["recurring"] });
+      queryClient.invalidateQueries({ queryKey: ["plaid-items"] });
+      notify.success("Sync complete.");
+    },
+    onError: (err) =>
+      notify.error(err instanceof Error ? err.message : "Sync failed."),
+  });
+
   const netWorth = netWorthQuery.data;
   const cashFlow = cashFlowQuery.data;
+  const cashFlowPrev = cashFlowPrevQuery.data;
   const health = healthQuery.data;
+  const plaidItems = plaidItemsQuery.data ?? [];
+
+  // Pull the most recent successful sync across every connected item; UI
+  // shows "Last synced N ago" in the breadcrumb. Falls back to "—" before
+  // first sync.
+  const lastSyncedAt = plaidItems
+    .map((i) => i.last_synced_at)
+    .filter((d): d is string => Boolean(d))
+    .sort()
+    .pop();
+  const lastSyncedRelative = lastSyncedAt
+    ? formatDistanceToNow(new Date(lastSyncedAt), { addSuffix: true })
+    : null;
+
+  // MoM deltas — surfaced only when we have a prior data point to compare
+  // against; otherwise the line is hidden so we don't render "+0 vs Mar"
+  // when there literally is no Mar.
+  const cashFlowNetDelta =
+    cashFlow != null && cashFlowPrev != null
+      ? cashFlow.net_cents - cashFlowPrev.net_cents
+      : null;
+  const netWorthHistory = netWorthHistoryQuery.data ?? [];
+  const netWorthDelta =
+    netWorth != null && netWorthHistory.length >= 2
+      ? netWorth.net_worth_cents -
+        netWorthHistory[netWorthHistory.length - 2].net_worth_cents
+      : null;
+
+  const prevMonthShort = (() => {
+    const [y, m] = prevMonth.split("-").map(Number);
+    if (!y || !m) return prevMonth;
+    return new Date(y, m - 1, 15).toLocaleDateString("en-US", { month: "short" });
+  })();
   const budgetRows = budgetProgressQuery.data ?? [];
   const topBudgets = topBudgetProgress(budgetRows, 5);
   const forecastSorted = sortForecastUpcoming(forecastQuery.data ?? []);
@@ -190,45 +340,100 @@ function DashboardContent() {
   const visibleTransactions = txExpanded ? transactions : transactions.slice(0, COMPACT_DEFAULT);
   const visibleBudgets = budgetExpanded ? topBudgets : topBudgets.slice(0, COMPACT_DEFAULT);
 
+  // Pretty current-month label for the inline header — "April 2026" beats
+  // the raw "2026-04" YYYY-MM token.
+  const currentMonthLabel = (() => {
+    const [y, m] = month.split("-").map(Number);
+    if (!y || !m) return month;
+    return new Date(y, m - 1, 15).toLocaleDateString("en-US", {
+      month: "long",
+      year: "numeric",
+    });
+  })();
+
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground text-sm">Overview for {spendMonth}</p>
+      {/* Slim breadcrumb-style header: month label on the left, last-sync
+          timestamp + Sync now button on the right. Sidebar already tells
+          the user they're on the Dashboard, so the H1+subtitle stack from
+          before was wasted vertical. */}
+      <div className="flex flex-wrap items-center justify-between gap-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300">
+        <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+          Overview · <span className="text-foreground">{currentMonthLabel}</span>
+        </p>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          {lastSyncedRelative ? (
+            <span className="leading-none">
+              Last synced{" "}
+              <span className="font-medium text-foreground">{lastSyncedRelative}</span>
+            </span>
+          ) : (
+            <span className="leading-none italic">Not synced yet</span>
+          )}
+          <button
+            type="button"
+            onClick={() => syncMutation.mutate()}
+            disabled={syncMutation.isPending}
+            aria-label="Sync now"
+            className="inline-flex h-7 items-center gap-1 rounded-md border border-border/60 bg-card px-2 text-xs font-medium text-foreground transition-colors hover:border-border hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {syncMutation.isPending ? (
+              <Loader2 className="size-3 animate-spin" aria-hidden />
+            ) : (
+              <RefreshCw className="size-3" aria-hidden />
+            )}
+            <span className="hidden sm:inline">
+              {syncMutation.isPending ? "Syncing…" : "Sync now"}
+            </span>
+          </button>
+        </div>
       </div>
 
-      {/* Row 1 — 4 KPI cards: Net Worth · Cash Flow · Health · Insights */}
+      {/* Inline plate replaces the global full-width banner from before.
+          Auto-hides when nothing's wrong, so it doesn't add noise. */}
+      <PlaidAttentionPlate />
+
+      {/* Row 1 — 4 KPI cards in a single line: Net Worth · Cash Flow · Health · Insights.
+          Each card aims for the same visual weight (~150px tall): a headline number,
+          one secondary line of context, and at most one accent. */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Net worth</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-1">
             {netWorthQuery.isLoading ? (
               <SectionSkeleton className="h-16 w-full" />
             ) : netWorthQuery.isError ? (
               <p className="text-destructive text-sm">Could not load net worth.</p>
             ) : netWorth ? (
               <>
-                <p className="text-2xl font-bold tabular-nums">
+                <p
+                  className={cn(
+                    "text-2xl font-bold tabular-nums",
+                    netWorth.net_worth_cents < 0 && "text-rose-600 dark:text-rose-400",
+                  )}
+                >
                   {formatUsd(netWorth.net_worth_cents)}
                 </p>
-                <dl className="space-y-1 text-xs">
-                  <div className="flex justify-between gap-2">
-                    <dt className="text-muted-foreground">Cash & bank</dt>
-                    <dd className="tabular-nums font-medium">{formatUsd(netWorth.liquid_cents)}</dd>
-                  </div>
-                  {netWorth.investment_cents > 0 && (
-                    <div className="flex justify-between gap-2">
-                      <dt className="text-muted-foreground">Investments</dt>
-                      <dd className="tabular-nums font-medium">{formatUsd(netWorth.investment_cents)}</dd>
-                    </div>
-                  )}
-                  <div className="flex justify-between gap-2">
-                    <dt className="text-muted-foreground">Debt</dt>
-                    <dd className="tabular-nums font-medium">{formatUsd(netWorth.debt_cents)}</dd>
-                  </div>
-                </dl>
+                <DeltaLine
+                  cents={netWorthDelta}
+                  monthShort={prevMonthShort}
+                  goodWhenPositive
+                />
+                <p className="text-muted-foreground text-xs leading-snug pt-0.5">
+                  Liquid <span className="tabular-nums font-medium text-foreground">{formatUsd(netWorth.liquid_cents)}</span>
+                  {netWorth.investment_cents > 0 ? (
+                    <>
+                      {" · "}Invest{" "}
+                      <span className="tabular-nums font-medium text-foreground">
+                        {formatUsd(netWorth.investment_cents)}
+                      </span>
+                    </>
+                  ) : null}
+                  {" · "}Debt{" "}
+                  <span className="tabular-nums font-medium text-foreground">{formatUsd(netWorth.debt_cents)}</span>
+                </p>
               </>
             ) : null}
           </CardContent>
@@ -238,108 +443,108 @@ function DashboardContent() {
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Cash flow this month</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2">
+          <CardContent className="space-y-1">
             {cashFlowQuery.isLoading ? (
               <SectionSkeleton className="h-16 w-full" />
             ) : cashFlowQuery.isError ? (
               <p className="text-destructive text-sm">Could not load cash flow.</p>
             ) : cashFlow ? (
               <>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Income</span>
+                <p
+                  className={cn(
+                    "text-2xl font-bold tabular-nums",
+                    cashFlow.net_cents >= 0
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-rose-600 dark:text-rose-400",
+                  )}
+                >
+                  {formatUsd(cashFlow.net_cents)}
+                </p>
+                <DeltaLine
+                  cents={cashFlowNetDelta}
+                  monthShort={prevMonthShort}
+                  goodWhenPositive
+                />
+                <p className="text-muted-foreground text-xs leading-snug pt-0.5">
+                  Income{" "}
                   <span className="tabular-nums font-medium text-emerald-600 dark:text-emerald-400">
                     {formatUsd(cashFlow.income_cents)}
                   </span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Expenses</span>
+                  {" · "}Expenses{" "}
                   <span className="tabular-nums font-medium text-rose-600 dark:text-rose-400">
                     {formatUsd(cashFlow.expenses_cents)}
                   </span>
-                </div>
-                <div className="border-t pt-2">
-                  <div className="flex justify-between text-sm font-semibold">
-                    <span>Net</span>
-                    <span
-                      className={cn(
-                        "tabular-nums",
-                        cashFlow.net_cents >= 0
-                          ? "text-emerald-600 dark:text-emerald-400"
-                          : "text-rose-600 dark:text-rose-400",
-                      )}
-                    >
-                      {formatUsd(cashFlow.net_cents)}
-                    </span>
-                  </div>
-                </div>
+                </p>
               </>
             ) : null}
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Financial health</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {healthQuery.isLoading ? (
-              <SectionSkeleton className="h-16 w-full" />
-            ) : healthQuery.isError ? (
-              <p className="text-destructive text-sm">Could not load health score.</p>
-            ) : health ? (
-              <>
-                <div className="flex items-center gap-2">
-                  <span className="text-2xl font-bold tabular-nums">{health.score}</span>
-                  <Badge className="border-0 font-medium text-white" style={{ backgroundColor: health.color }}>
-                    {health.label}
-                  </Badge>
-                </div>
-                {health.advice && (
-                  <p className="text-muted-foreground text-xs leading-snug">{health.advice}</p>
+        <FinancialHealthCompactCard
+          score={health}
+          isLoading={healthQuery.isLoading}
+          isError={healthQuery.isError}
+        />
+
+        {/* Insights card. Single CTA contract: when the most-severe card has
+            an action URL we jump the user to that filtered view directly;
+            when there's no actionable target, the whole card links to the
+            full insights feed. Two visible CTAs were noisy and competed. */}
+        {(() => {
+          const hasAction = Boolean(
+            insightsTeaser?.action_url && insightsTeaser.action_label,
+          );
+          const cardHref = hasAction
+            ? insightsTeaser!.action_url!
+            : "/insights";
+          const ctaLabel = hasAction
+            ? insightsTeaser!.action_label!
+            : "View all insights";
+          return (
+            <Link href={cardHref} className="group block outline-none">
+              <Card
+                className={cn(
+                  "h-full border-primary/20 transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-lg",
+                  insightsTeaser?.severity === "warn" && "border-amber-500/60",
                 )}
-              </>
-            ) : null}
-          </CardContent>
-        </Card>
-
-        <Link href="/insights" className="group block outline-none">
-          <Card
-            className={cn(
-              "h-full border-primary/20 transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-lg",
-              insightsTeaser?.severity === "warn" && "border-amber-500/60",
-            )}
-          >
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center justify-between gap-2 text-sm font-medium text-muted-foreground">
-                Insights
-                <Badge
-                  variant={insightsTeaser?.severity === "warn" ? "destructive" : "secondary"}
-                  className="font-normal"
-                >
-                  {composeInsightsBadge(insights)}
-                </Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <p className="text-sm leading-snug text-foreground">
-                {insightsTeaser?.summary ?? "Trends, health, and spending stories."}
-              </p>
-              {insightsTeaser?.action_url && insightsTeaser.action_label && (
-                <Button
-                  asChild
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Link href={insightsTeaser.action_url}>{insightsTeaser.action_label}</Link>
-                </Button>
-              )}
-              <p className="text-primary text-xs font-medium group-hover:underline">View all insights →</p>
-            </CardContent>
-          </Card>
-        </Link>
+              >
+                <CardHeader className="pb-2">
+                  <CardTitle className="flex items-center justify-between gap-2 text-sm font-medium text-muted-foreground">
+                    Insights
+                    <Badge
+                      variant={
+                        insightsTeaser?.severity === "warn" ? "destructive" : "secondary"
+                      }
+                      className="font-normal"
+                    >
+                      {composeInsightsBadge(insights)}
+                    </Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <p className="line-clamp-3 text-sm leading-snug text-foreground">
+                    {insightsTeaser?.summary ?? "Trends, health, and spending stories."}
+                  </p>
+                  <p className="text-primary text-xs font-medium transition-transform group-hover:underline group-hover:translate-x-0.5">
+                    {ctaLabel} →
+                  </p>
+                </CardContent>
+              </Card>
+            </Link>
+          );
+        })()}
       </div>
+
+      {/* Today's actions — aggregates already-loaded signals (plaid attention,
+          budgets over their cap, bills due in 7d, warn-severity insights)
+          into a scannable action grid. Auto-hides when the household is in
+          the clear, so it never adds noise on a quiet day. */}
+      <TodaysActionsSection
+        plaidItems={plaidItems}
+        budgets={budgetRows}
+        forecast={forecastSorted}
+        insightCards={insights?.cards ?? []}
+      />
 
       {/* Row 2 — Spending pie (2/3) + Budget compact (1/3) */}
       <div className="grid gap-6 lg:grid-cols-3">
@@ -357,7 +562,6 @@ function DashboardContent() {
               </CardTitle>
               <CardDescription>Month total (split-aware, primary categories)</CardDescription>
             </div>
-            <MonthYearPicker value={spendMonth} onChange={setSpendMonth} />
           </CardHeader>
           <CardContent>
             {byCategoryQuery.isLoading ? (

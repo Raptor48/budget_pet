@@ -1,8 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import { UserRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Account, Member } from "@/types/v2";
+import { AccountDetailDialog } from "./account-detail-dialog";
 import { AccountTile } from "./account-tile";
 import { CashWalletSection } from "./cash-wallet-section";
 import { FlipCard } from "./flip-card";
@@ -17,11 +19,24 @@ import {
 // Section sub-block
 // ---------------------------------------------------------------------------
 
+/**
+ * One section under an owner header.
+ *
+ * `layout="cards"` uses an auto-fit grid: cards reflow into 2 columns once
+ * the parent owner-column is wide enough (~720px+), so on a 1920px screen
+ * with 2 owners the cards wrap inside instead of leaving a huge gutter on
+ * either side. Cards collapse back to a single column on narrow viewports.
+ *
+ * `layout="stack"` keeps list rows full-width — bank rows, loans, etc. read
+ * as data tables and shouldn't wrap into 2 columns.
+ */
 function ColumnSection({
   title,
+  layout = "stack",
   children,
 }: {
   title: string;
+  layout?: "stack" | "cards";
   children: React.ReactNode;
 }) {
   return (
@@ -29,7 +44,13 @@ function ColumnSection({
       <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
         {title}
       </h3>
-      <div className="flex flex-col gap-2.5">{children}</div>
+      {layout === "cards" ? (
+        <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(280px,1fr))]">
+          {children}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-2.5">{children}</div>
+      )}
     </section>
   );
 }
@@ -122,6 +143,12 @@ export function OwnerColumn({
   currentUser: { is_owner: boolean } | null;
   isUnassigned?: boolean;
 }) {
+  // Account-detail dialog state lives on the owner column so the dialog
+  // is reused across every list section (banks, loans, investments) under
+  // this owner. Click any non-cash bank-style row → dialog opens with the
+  // account's recent activity + balances.
+  const [detailAccount, setDetailAccount] = useState<Account | null>(null);
+
   // Partition accounts by the same rules the legacy page used.
   const creditCards = accounts.filter((a) => a.type === "credit");
   const debitCards = accounts.filter(
@@ -142,11 +169,16 @@ export function OwnerColumn({
   if (accounts.length === 0) return null;
 
   return (
-    <div className="flex flex-col gap-4 rounded-2xl border border-border/60 bg-card/40 p-4 shadow-sm">
+    // Owner column stretches to its grid cell. Cards inside reflow via
+    // an auto-fit grid (see ColumnSection layout="cards") — on a wide
+    // viewport with few owners the cards pack into 2 columns inside the
+    // owner block instead of leaving big side gutters; on narrow
+    // viewports they fall back to a single column.
+    <div className="flex w-full flex-col gap-4 rounded-2xl border border-border/60 bg-card/40 p-4 shadow-sm">
       <OwnerHeader name={name} accounts={accounts} isUnassigned={isUnassigned} />
 
       {creditCards.length > 0 && (
-        <ColumnSection title="Credit Cards">
+        <ColumnSection title="Credit Cards" layout="cards">
           {creditCards.map((account) => (
             <FlipCard
               key={account.id}
@@ -160,7 +192,7 @@ export function OwnerColumn({
       )}
 
       {debitCards.length > 0 && (
-        <ColumnSection title="Debit Cards">
+        <ColumnSection title="Debit Cards" layout="cards">
           {debitCards.map((account) => (
             <FlipCard
               key={account.id}
@@ -176,7 +208,12 @@ export function OwnerColumn({
       {bankAccounts.length > 0 && (
         <ColumnSection title="Cash & Bank Accounts">
           {bankAccounts.map((account) => (
-            <AccountTile key={account.id} account={account} size="compact" />
+            <AccountTile
+              key={account.id}
+              account={account}
+              size="compact"
+              onSelect={setDetailAccount}
+            />
           ))}
         </ColumnSection>
       )}
@@ -184,7 +221,12 @@ export function OwnerColumn({
       {loans.length > 0 && (
         <ColumnSection title="Loans">
           {loans.map((account) => (
-            <AccountTile key={account.id} account={account} size="compact" />
+            <AccountTile
+              key={account.id}
+              account={account}
+              size="compact"
+              onSelect={setDetailAccount}
+            />
           ))}
         </ColumnSection>
       )}
@@ -192,7 +234,12 @@ export function OwnerColumn({
       {investments.length > 0 && (
         <ColumnSection title="Investments">
           {investments.map((account) => (
-            <AccountTile key={account.id} account={account} size="compact" />
+            <AccountTile
+              key={account.id}
+              account={account}
+              size="compact"
+              onSelect={setDetailAccount}
+            />
           ))}
         </ColumnSection>
       )}
@@ -200,7 +247,12 @@ export function OwnerColumn({
       {other.length > 0 && (
         <ColumnSection title="Other Accounts">
           {other.map((account) => (
-            <AccountTile key={account.id} account={account} size="compact" />
+            <AccountTile
+              key={account.id}
+              account={account}
+              size="compact"
+              onSelect={setDetailAccount}
+            />
           ))}
         </ColumnSection>
       )}
@@ -210,6 +262,15 @@ export function OwnerColumn({
           <CashWalletSection account={cashWallet} variant="compact" />
         </ColumnSection>
       )}
+
+      {/* Detail dialog shared across every section above. */}
+      <AccountDetailDialog
+        account={detailAccount}
+        open={detailAccount != null}
+        onOpenChange={(v) => {
+          if (!v) setDetailAccount(null);
+        }}
+      />
     </div>
   );
 }

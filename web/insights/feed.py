@@ -104,16 +104,27 @@ async def build_insights_feed(viewer_user_id: Optional[int] = None) -> Dict[str,
         )
         delta = cur["net_cents"] - prv["net_cents"]
         tone = "warn" if delta < 0 else "info"
+        # Plain $ formatting reads better than `123.45 USD` in a one-line
+        # summary, and "this month" beats `MTD` (jargon) for the same
+        # info. Keep two decimal places — these are exact monthly nets,
+        # not rolling estimates.
+        def _signed(cents: int) -> str:
+            return f"-${abs(cents) / 100:,.2f}" if cents < 0 else f"${cents / 100:,.2f}"
+
+        days_label = "day" if today.day == 1 else "days"
         cards.append(
             make_card(
                 type="cash_flow_mom",
                 severity=tone,
                 title="Cash flow vs last month",
                 summary=(
-                    f"Net {cur['net_cents'] / 100:.2f} USD MTD "
-                    f"(vs {prv['net_cents'] / 100:.2f} USD same days last month)"
+                    f"Net {_signed(cur['net_cents'])} this month "
+                    f"(vs {_signed(prv['net_cents'])} same days last month)"
                 ),
-                detail=f"Change in net: {delta / 100:.2f} USD across {today.day} day(s)",
+                detail=(
+                    f"Change in net: {_signed(delta)} across "
+                    f"{today.day} {days_label}."
+                ),
                 dedupe_key=f"cash_flow_mom:{month}",
                 action_url="/reports?tab=cashflow",
                 action_label="Open cash flow",
@@ -140,7 +151,7 @@ async def build_insights_feed(viewer_user_id: Optional[int] = None) -> Dict[str,
                     severity="info",
                     title="Largest spending category",
                     summary=top.get("category_name") or "Category",
-                    detail=f"{(top.get('amount_cents') or 0) / 100:.2f} USD this month",
+                    detail=f"${(top.get('amount_cents') or 0) / 100:,.2f} this month",
                     dedupe_key=f"top_category:{month}:{cat_id or 'na'}",
                     action_url=action_url,
                     action_label="Open category",
@@ -320,10 +331,15 @@ async def build_insights_feed(viewer_user_id: Optional[int] = None) -> Dict[str,
     except Exception as exc:
         logger.warning("insights price changes: %s", exc)
 
+    # NOTE: ``actionable_count`` and ``new_count`` here are placeholders.
+    # ``store.load_feed`` recomputes both against persisted ``first_seen_at``
+    # and the user's ``insights_last_viewed_at`` after applying the
+    # dismiss/snooze overlay, so the values returned to the client come
+    # from there. Keeping fields here only so the in-memory shape matches
+    # what unit tests of ``build_insights_feed`` historically asserted.
     actionable = sum(1 for c in cards if c.get("severity") == "warn")
-    new_count = actionable  # Phase 4 wires this up to first_seen_at.
     return {
         "cards": cards,
         "actionable_count": actionable,
-        "new_count": new_count,
+        "new_count": actionable,
     }

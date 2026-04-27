@@ -230,6 +230,10 @@ def build_missed_recurring(
             continue
         if (s.get("status") or "").upper() == "TOMBSTONED":
             continue
+        # Respect user-managed lifecycle: don't flag missing charges on
+        # streams the user paused or cancelled — they expect them gone.
+        if (s.get("user_status") or "active") != "active":
+            continue
         if s.get("direction") != "outflow":
             continue
         last_date = s.get("last_date")
@@ -261,7 +265,7 @@ def build_missed_recurring(
                 ),
                 detail=(
                     f"Based on a {freq.lower() or 'recurring'} cadence. "
-                    f"Grace window: {grace.days} day(s)."
+                    f"Grace window: {grace.days} {'day' if grace.days == 1 else 'days'}."
                 ),
                 dedupe_key=f"missed_recurring:{s.get('id')}:{expected.isoformat()}",
                 action_url="/recurring",
@@ -301,6 +305,10 @@ def build_duplicate_subscription(
         if not s.get("is_active"):
             continue
         if (s.get("status") or "").upper() == "TOMBSTONED":
+            continue
+        # Don't surface duplicate-subscription alerts for streams the user
+        # already paused or cancelled — they're aware of the overlap.
+        if (s.get("user_status") or "active") != "active":
             continue
         if s.get("direction") != "outflow":
             continue

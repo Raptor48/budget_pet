@@ -33,25 +33,28 @@ class TestMatchPairsToleranceSql:
         await self._run(conn)
         assert conn.fetch.await_count == 3
 
-    async def test_tolerance_sql_uses_plus_minus_one_day_window(self):
-        """Tolerant matcher must be TIGHTER than the cent-exact one (±1 vs ±3)
-        so a fee-adjusted match never beats an unrelated same-amount pair."""
+    async def test_tolerance_sql_uses_plus_minus_two_day_window(self):
+        """Tolerant matcher must be TIGHTER than the cent-exact one (±2 vs ±3)
+        so a fee-adjusted match never beats an unrelated same-amount pair.
+        ±2 (was ±1) covers PayPal Instant Transfers that land on the next
+        business day plus typical Plaid sync lag."""
         conn = AsyncMock()
         await self._run(conn)
         tolerance_sql = conn.fetch.await_args_list[2].args[0]
-        assert "ABS(o.date - i.date) <= 1" in tolerance_sql
+        assert "ABS(o.date - i.date) <= 2" in tolerance_sql
         assert "ABS(o.date - i.date) <= 3" not in tolerance_sql
 
-    async def test_tolerance_sql_uses_greatest_500_or_1pct(self):
-        """Tolerance formula: max(500¢ floor, 1% of outflow).
+    async def test_tolerance_sql_uses_greatest_2500_or_2pct(self):
+        """Tolerance formula: max($25 floor, 2% of outflow).
 
-        The floor lets sub-$500 transfers absorb a flat $5 fee (PayPal
-        Instant Transfer delta is usually <$5); the 1% ramp keeps large
-        transfers from false-pairing against unrelated rows."""
+        The floor matches PayPal Instant Transfer's hard fee cap of $25
+        so a $10k+ transfer with the maximum fee still pairs. The 2%
+        ramp is the headline 1.75% PayPal rate plus 0.25% headroom for
+        Plaid rounding and small wire / FX deltas."""
         conn = AsyncMock()
         await self._run(conn)
         tolerance_sql = conn.fetch.await_args_list[2].args[0]
-        assert "GREATEST(500, o.amount_cents / 100)" in tolerance_sql
+        assert "GREATEST(2500, o.amount_cents * 2 / 100)" in tolerance_sql
         # Strictly positive delta — cent-exact pairs are handled earlier.
         assert "ABS(o.amount_cents + i.amount_cents) > 0" in tolerance_sql
 
@@ -173,3 +176,48 @@ class TestMatchPairsToleranceBehaviour:
         assert await match_pairs(conn, horizon_days=90) == set()
         # Still ran all three passes.
         assert conn.fetch.await_count == 3
+
+
+@pytest.mark.asyncio
+class TestToleranceFormulaCoversPayPalInstantTransfer:
+    """Sanity-check the SQL arithmetic against real PayPal Instant Transfer
+    fees (1.75%, capped at $25). Each case computes the SAME GREATEST
+    expression Postgres would and asserts it covers the real-world fee.
+
+    Regression for the Mar 2026 incident: a $372.04 Instant Transfer
+    PayPal → Chase had a $6.51 fee. The previous bound `max($5, 1%)`
+    came out to $5.00 → the pair never matched and the outflow fell
+    through to expense."""
+
+    @staticmethod
+    def _tolerance_cents(out_cents: int) -> int:
+        # Mirrors the SQL: GREATEST(2500, out_cents * 2 / 100). Postgres
+        # uses integer division for ints, which Python's // matches.
+        return max(2500, out_cents * 2 // 100)
+
+    @staticmethod
+    def _instant_transfer_fee_cents(out_cents: int) -> int:
+        # PayPal US personal: 1.75%, min $0.25, max $25.00.
+        rate = round(out_cents * 0.0175)
+        return max(25, min(2500, rate))
+
+    @pytest.mark.parametrize("out_dollars", [50, 100, 285, 372.04, 500, 1000, 1428.57, 2500, 5000, 10000])
+    def test_tolerance_covers_paypal_instant_transfer_fee(self, out_dollars):
+        out_cents = round(out_dollars * 100)
+        fee = self._instant_transfer_fee_cents(out_cents)
+        tolerance = self._tolerance_cents(out_cents)
+        assert tolerance >= fee, (
+            f"${out_dollars}: PayPal IT fee ${fee/100:.2f} exceeds tolerance "
+            f"${tolerance/100:.2f} — pair would not match"
+        )
+
+    def test_regression_372_dollars_pairs(self):
+        """The exact case from the bug report — $372.04 outflow, $365.53
+        inflow ($6.51 fee). Previous formula `max(500, n/100)` returned
+        500¢ on this input, missing the $651¢ delta."""
+        out_cents = 37204
+        old_tolerance = max(500, out_cents // 100)
+        new_tolerance = self._tolerance_cents(out_cents)
+        actual_fee = out_cents - 36553
+        assert old_tolerance < actual_fee, "regression scaffolding: old bound should miss"
+        assert new_tolerance >= actual_fee, "new bound must cover the real $6.51 fee"

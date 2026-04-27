@@ -118,26 +118,31 @@ CREATE TABLE IF NOT EXISTS transaction_tags (
 
 CREATE_RECURRING_STREAMS = """
 CREATE TABLE IF NOT EXISTS recurring_streams (
-    id                   SERIAL PRIMARY KEY,
-    plaid_stream_id      TEXT UNIQUE NOT NULL,
-    account_id           INTEGER REFERENCES accounts(id),
-    direction            TEXT NOT NULL,
-    description          TEXT NOT NULL,
-    merchant_name        TEXT,
-    frequency            TEXT,
-    average_amount_cents BIGINT,
-    last_amount_cents    BIGINT,
-    currency             TEXT DEFAULT 'USD',
-    pfc_primary          TEXT,
-    pfc_detailed         TEXT,
-    first_date           DATE,
-    last_date            DATE,
-    is_active            BOOLEAN DEFAULT TRUE,
-    status               TEXT,
-    category_id          INTEGER REFERENCES categories(id),
-    user_label           TEXT,
-    price_change_pct     NUMERIC(6,2),
-    last_synced_at       TIMESTAMPTZ DEFAULT NOW()
+    id                          SERIAL PRIMARY KEY,
+    plaid_stream_id             TEXT UNIQUE NOT NULL,
+    account_id                  INTEGER REFERENCES accounts(id),
+    direction                   TEXT NOT NULL,
+    description                 TEXT NOT NULL,
+    merchant_name               TEXT,
+    frequency                   TEXT,
+    average_amount_cents        BIGINT,
+    last_amount_cents           BIGINT,
+    currency                    TEXT DEFAULT 'USD',
+    pfc_primary                 TEXT,
+    pfc_detailed                TEXT,
+    first_date                  DATE,
+    last_date                   DATE,
+    is_active                   BOOLEAN DEFAULT TRUE,
+    status                      TEXT,
+    category_id                 INTEGER REFERENCES categories(id),
+    user_label                  TEXT,
+    price_change_pct            NUMERIC(6,2),
+    last_synced_at              TIMESTAMPTZ DEFAULT NOW(),
+    user_status                 TEXT NOT NULL DEFAULT 'active'
+        CHECK (user_status IN ('active', 'paused', 'cancelled')),
+    paused_until                DATE,
+    cancelled_at                TIMESTAMPTZ,
+    price_change_snoozed_until  DATE
 )
 """
 
@@ -684,6 +689,74 @@ async def _migrate_recurring_price_change_signed(conn) -> None:
     )
 
 
+async def _migrate_merchant_aliases(conn) -> None:
+    """V2.3: per-merchant display rename (Plaid alias).
+
+    Family-global lookup table keyed by ``merchant_key`` (same algorithm as
+    ``merchant_category_rules``, see ``web/merchant_rules/keys.py``). Read paths
+    LEFT JOIN this table and ``COALESCE(alias.display_name, t.display_title)``
+    so the alias overrides the auto-normalized merchant title in **display
+    only** — categorization, merchant_key matching, math, and Plaid sync are
+    untouched. Idempotent.
+
+    Two example rows for context:
+
+        merchant_key                    | display_name
+        --------------------------------+-------------
+        eid:6mnxz3jp3wp4j4yze4kx4vl9p   | Rent
+        name:nyflower                   | Rent
+    """
+    await _ddl(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS merchant_aliases (
+            merchant_key  TEXT PRIMARY KEY,
+            display_name  TEXT NOT NULL CHECK (length(trim(display_name)) > 0),
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+    )
+
+
+async def _migrate_recurring_user_status(conn) -> None:
+    """V2.3: user-managed lifecycle for recurring streams.
+
+    Plaid's API can detect streams but cannot pause / cancel third-party
+    subscriptions, so we keep the local state ourselves:
+
+    * ``user_status`` — 'active' (default) | 'paused' | 'cancelled'.
+      The Plaid upsert (``recurring/repo.py::upsert_streams``) deliberately
+      does NOT touch this column on ON CONFLICT, so user choices survive
+      every sync.
+    * ``paused_until`` — optional auto-resume date (NULL = pause indefinitely).
+    * ``cancelled_at`` — audit timestamp; set whenever ``user_status`` flips
+      to 'cancelled'.
+    * ``price_change_snoozed_until`` — hide the price-change alert (UI badge
+      and Insights card) until this date.
+
+    All columns are additive and idempotent.
+    """
+    for stmt in (
+        "ALTER TABLE recurring_streams ADD COLUMN IF NOT EXISTS user_status TEXT NOT NULL DEFAULT 'active'",
+        "ALTER TABLE recurring_streams ADD COLUMN IF NOT EXISTS paused_until DATE",
+        "ALTER TABLE recurring_streams ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ",
+        "ALTER TABLE recurring_streams ADD COLUMN IF NOT EXISTS price_change_snoozed_until DATE",
+    ):
+        await _ddl(conn, stmt)
+    chk = await conn.fetchval(
+        "SELECT 1 FROM pg_constraint WHERE conname = 'recurring_streams_user_status_check'"
+    )
+    if not chk:
+        await _ddl(
+            conn,
+            """
+            ALTER TABLE recurring_streams ADD CONSTRAINT recurring_streams_user_status_check
+            CHECK (user_status IN ('active', 'paused', 'cancelled'))
+            """,
+        )
+
+
 async def _migrate_merchant_rules_global_family(conn) -> None:
     """
     One global rule per merchant_key (family-wide). Legacy table had (user_id, merchant_key).
@@ -725,6 +798,87 @@ async def _migrate_merchant_rules_global_family(conn) -> None:
         ON merchant_category_rules (merchant_key)
         """,
     )
+
+
+async def _migrate_merchant_rules_description_filter(conn) -> None:
+    """Add ``description_contains`` to ``merchant_category_rules`` so a
+    single rule can be narrowed to transactions whose description / name
+    contains a substring (case-insensitive).
+
+    Use case (see ``docs/categorization-precedence.md`` §3): a household
+    pays rent via Zelle to one specific person while also using Zelle for
+    other things. Without a description filter the only options were
+    "categorize every Zelle as Rent" (wrong) or "manually re-tag every new
+    Zelle to that person" (tedious). With ``description_contains = 'alla'``
+    the rule fires only on rows whose ``name`` or ``display_title``
+    matches.
+
+    Schema notes:
+
+    * Nullable. ``NULL`` preserves the legacy "match every transaction
+      with this merchant_key" behavior — every existing rule keeps
+      working unchanged.
+    * Lowercased on write so the matcher can do a single ``LOWER(...) LIKE
+      '%' || description_contains || '%'`` without per-row case folding.
+    * The unique constraint moves from ``(merchant_key)`` to
+      ``(merchant_key, COALESCE(description_contains, ''))`` so a user
+      can have both a generic ``name:zelle → Transfer Out`` rule AND a
+      narrow ``name:zelle + 'alla' → Rent`` rule for the same merchant.
+      The ``COALESCE(..., '')`` makes ``NULL`` a normal value for index
+      purposes (Postgres treats two NULLs as distinct otherwise).
+
+    All changes are additive and idempotent.
+    """
+    reg = await conn.fetchval("SELECT to_regclass('public.merchant_category_rules')")
+    if not reg:
+        return
+
+    # Add the column. Nullable so legacy rules keep working unchanged.
+    await _ddl(
+        conn,
+        "ALTER TABLE merchant_category_rules ADD COLUMN IF NOT EXISTS description_contains TEXT",
+    )
+
+    # Drop the old single-column UNIQUE in favour of a composite that
+    # treats NULL and '' as the same slot. Done in two steps so we never
+    # hold both indexes on a busy production table at once.
+    has_old_idx = await conn.fetchval(
+        """
+        SELECT 1 FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'merchant_category_rules'
+          AND indexname = 'merchant_category_rules_merchant_key_uidx'
+        """
+    )
+    has_old_constraint = await conn.fetchval(
+        """
+        SELECT 1 FROM information_schema.table_constraints
+        WHERE table_schema = 'public'
+          AND table_name = 'merchant_category_rules'
+          AND constraint_name = 'merchant_category_rules_merchant_key_key'
+        """
+    )
+
+    await _ddl(
+        conn,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS merchant_category_rules_key_filter_uidx
+        ON merchant_category_rules (merchant_key, COALESCE(description_contains, ''))
+        """,
+    )
+
+    if has_old_idx:
+        await _ddl(
+            conn,
+            "DROP INDEX IF EXISTS merchant_category_rules_merchant_key_uidx",
+        )
+    if has_old_constraint:
+        # The original CREATE TABLE used inline UNIQUE(merchant_key) which
+        # Postgres surfaces as ``merchant_category_rules_merchant_key_key``.
+        await _ddl(
+            conn,
+            "ALTER TABLE merchant_category_rules DROP CONSTRAINT IF EXISTS merchant_category_rules_merchant_key_key",
+        )
 
 
 async def _migrate_transactions_display_title_backfill(conn) -> None:
@@ -931,6 +1085,112 @@ async def _migrate_transactions_transaction_class(conn) -> None:
             )
 
 
+async def _migrate_fix_internal_transfer_class_drift(conn) -> None:
+    """One-shot fix for rows whose ``transaction_class`` is stale relative
+    to the current rules / counterparty-name list.
+
+    Two failure modes the migration repairs:
+
+    1. **Legacy/modern column drift.** ``import_transactions`` writes the
+       legacy ``is_internal_transfer`` boolean inline (counterparty match)
+       but never sets ``transaction_class`` on INSERT. Until 2026-04-27
+       the post-import rescan used a 7-day horizon, so rows older than
+       that stayed at ``transaction_class = 'uncategorized'`` while the
+       mirror flag was already TRUE. Symptom users saw: "INTERNAL" pill
+       in the list, "Auto (uncategorized)" in the modal.
+
+    2. **Stale rule-5.5 income classification.** When ``classify_row``
+       rule 4 (counterparty name match) didn't fire (e.g. because the
+       names list was empty at the time of the rescan, or the row's
+       counterparties metadata was missing), rule 5.5 took over for
+       ``TRANSFER_IN`` rows on a depository account and tagged them
+       ``income``. The legacy boolean and the modern class agreed
+       (``FALSE`` ↔ "not internal"), so the column-drift probe alone
+       wouldn't catch them — but the row is still wrong: now that the
+       names list contains the family member, the row should be
+       ``internal_transfer``. These rows leak into Income reports and
+       inflate the family-income totals.
+
+    The first failure mode is detectable by a SQL probe (drift between
+    columns). The second isn't — the classifier needs to actually run
+    against the current names list to know if a re-classification is
+    warranted. So this migration uses **two triggers**:
+
+      a) A one-shot sentinel ``app_settings.itr_v2_rescan_done``. When
+         FALSE (first deploy of this fix), force a full rescan
+         unconditionally. Set TRUE after success. Future startups skip
+         the unconditional path.
+      b) A drift probe (kept from the original implementation). Catches
+         column drift on any future startup, e.g. if a future bug
+         re-introduces the INSERT-skips-class problem.
+
+    Manual class overrides are always preserved by ``classify_row``
+    rule 1, and the matching legacy ``is_internal_transfer_manual``
+    rows are excluded from both the probe and the classifier mirror-
+    update — user decisions stay sacred.
+    """
+    # ---- Sentinel column ------------------------------------------------
+    # Idempotent column add. Default FALSE so existing installs trigger
+    # the one-shot rescan once after this code lands.
+    await _ddl(
+        conn,
+        "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS itr_v2_rescan_done BOOLEAN NOT NULL DEFAULT FALSE",
+    )
+
+    # On a brand-new DB the singleton row may not exist yet (it's
+    # ensured by ``AppSettingsRepository.get`` lazily). For the sentinel
+    # check we treat "no row" the same as "flag = FALSE" — but we need a
+    # row to UPDATE later, so insert one if missing.
+    await conn.execute(
+        """
+        INSERT INTO app_settings (id, itr_v2_rescan_done)
+        VALUES (1, FALSE)
+        ON CONFLICT (id) DO NOTHING
+        """
+    )
+
+    flag_done = await conn.fetchval(
+        "SELECT itr_v2_rescan_done FROM app_settings WHERE id = 1"
+    )
+
+    # ---- Drift probe (column-level) ------------------------------------
+    # Catches case (1). Cheap; runs on every startup as a safety net
+    # even after the one-shot has fired.
+    has_drift = await conn.fetchval(
+        """
+        SELECT EXISTS(
+            SELECT 1 FROM transactions
+            WHERE manual_class_override IS NULL
+              AND is_internal_transfer_manual = FALSE
+              AND is_internal_transfer <> (transaction_class = 'internal_transfer')
+        )
+        """
+    )
+
+    needs_rescan = (not flag_done) or has_drift
+    if not needs_rescan:
+        return
+
+    from web.classification.classifier import rescan_all
+
+    stats = await rescan_all(conn, horizon_days=None)
+    logger.info(
+        "internal-transfer rescan complete (trigger=%s): changed=%d total=%d paired=%d by_class=%s",
+        "first-run" if not flag_done else "drift-probe",
+        stats.changed,
+        stats.total,
+        stats.paired,
+        stats.by_class,
+    )
+
+    # Mark the one-shot done so subsequent startups skip the
+    # unconditional path. The drift probe stays active forever.
+    if not flag_done:
+        await conn.execute(
+            "UPDATE app_settings SET itr_v2_rescan_done = TRUE WHERE id = 1"
+        )
+
+
 async def _migrate_insights_persistence(conn) -> None:
     """Create persistence tables for the Insights feed (V2.1 Phase 4).
 
@@ -1007,10 +1267,14 @@ async def run_v2_migrations(pool) -> None:
         await _migrate_v21_addons(conn)
         await _migrate_accounts_manual_and_missing(conn)
         await _migrate_merchant_rules_global_family(conn)
+        await _migrate_merchant_rules_description_filter(conn)
         await _migrate_categories_parent_id(conn)
         await _migrate_categories_is_income(conn)
         await _migrate_recurring_price_change_signed(conn)
+        await _migrate_recurring_user_status(conn)
+        await _migrate_merchant_aliases(conn)
         await _migrate_transactions_display_title_backfill(conn)
         await _migrate_transactions_transaction_class(conn)
+        await _migrate_fix_internal_transfer_class_drift(conn)
         await _migrate_insights_persistence(conn)
     logger.info("V2 database migrations completed successfully.")

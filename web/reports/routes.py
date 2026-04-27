@@ -14,6 +14,7 @@ from .models import (
     IncomeBreakdown,
     MerchantSpend,
     NetWorthSnapshot,
+    NetWorthSummary,
     TagSpend,
 )
 from .repo import ReportsRepository
@@ -84,7 +85,7 @@ async def get_top_merchants(
     return await _repo().get_top_merchants(month=month, limit=limit, viewer_user_id=_viewer_id(request))
 
 
-@router.get("/net-worth")
+@router.get("/net-worth", response_model=NetWorthSummary)
 async def get_net_worth():
     return await _repo().get_net_worth()
 

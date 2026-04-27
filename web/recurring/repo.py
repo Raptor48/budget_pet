@@ -5,7 +5,7 @@ price change detection (threshold 10%), and user label updates.
 """
 import logging
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from web.accounts.repo import AccountsRepository
@@ -63,6 +63,7 @@ class RecurringRepository:
         direction: Optional[str] = None,
         active_only: bool = True,
         viewer_user_id: Optional[int] = None,
+        include_user_statuses: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """List recurring streams, enriched with account + owner + primary
         category metadata so the UI can render "Charged to <card · @owner>"
@@ -77,6 +78,12 @@ class RecurringRepository:
         (``accounts.user_id IS NULL``) remain visible. ``GET /api/recurring``
         passes ``viewer_user_id=None`` for a single household-wide list.
 
+        ``include_user_statuses`` filters by the user-managed lifecycle column
+        (``user_status``). Default = ``['active', 'paused']`` so cancelled
+        streams stay archived but still queryable on demand. Pass
+        ``['active', 'paused', 'cancelled']`` (or ``None`` + an unrelated
+        callsite) to opt out of the filter.
+
         Results are sorted by computed next payment date (``next_occurrence``),
         soonest first; rows without a computable next date sort last.
         """
@@ -90,11 +97,22 @@ class RecurringRepository:
             idx += 1
         if active_only:
             conditions.append("rs.is_active = TRUE")
+        if include_user_statuses is None:
+            include_user_statuses = ["active", "paused"]
+        if include_user_statuses:
+            conditions.append(f"rs.user_status = ANY(${idx}::text[])")
+            params.append(list(include_user_statuses))
+            idx += 1
         if viewer_user_id is not None:
             conditions.append(f"(a.user_id = ${idx} OR a.user_id IS NULL)")
             params.append(viewer_user_id)
             idx += 1
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+        # Plaid's recurring endpoint does not return ``merchant_entity_id``,
+        # only ``merchant_name`` — so we match aliases by the ``name:`` key
+        # path. ``upsert_alias`` writes both ``eid:`` and ``name:`` rows for
+        # any merchant where both are available, so an alias created from a
+        # transaction also resolves here.
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
@@ -106,12 +124,15 @@ class RecurringRepository:
                     c.parent_id            AS category_parent_id,
                     COALESCE(pc.id, c.id)     AS primary_category_id,
                     COALESCE(pc.name, c.name) AS primary_category_name,
-                    COALESCE(pc.color, c.color) AS primary_category_color
+                    COALESCE(pc.color, c.color) AS primary_category_color,
+                    ma.display_name           AS merchant_alias
                 FROM recurring_streams rs
                 LEFT JOIN accounts a   ON a.id = rs.account_id
                 LEFT JOIN users u      ON u.id = a.user_id
                 LEFT JOIN categories c ON c.id = rs.category_id
                 LEFT JOIN categories pc ON pc.id = c.parent_id
+                LEFT JOIN merchant_aliases ma ON ma.merchant_key =
+                    'name:' || lower(NULLIF(TRIM(rs.merchant_name), ''))
                 {where}
                 """,
                 *params,
@@ -122,7 +143,11 @@ class RecurringRepository:
             d.pop("category_parent_id", None)
             d["display_title"] = normalize_transaction_title(
                 {
-                    "merchant_name": d.get("merchant_name"),
+                    # Layer the alias onto merchant_name so the
+                    # title-normalizer treats it as the canonical merchant
+                    # label — keeps the same precedence chain (user_label
+                    # > merchant_name > description).
+                    "merchant_name": d.get("merchant_alias") or d.get("merchant_name"),
                     "name": d.get("description"),
                     "description": d.get("description"),
                     "user_label": d.get("user_label"),
@@ -157,6 +182,10 @@ class RecurringRepository:
         Filtering still uses the absolute magnitude so drops and increases both
         surface as notable.
 
+        Skips:
+          * cancelled streams (``user_status = 'cancelled'``);
+          * snoozed alerts (``price_change_snoozed_until >= today``).
+
         When ``viewer_user_id`` is set, streams whose underlying account is
         owned by another user are hidden (see ``list_streams``).
         """
@@ -173,6 +202,9 @@ class RecurringRepository:
                 FROM recurring_streams rs
                 LEFT JOIN accounts a ON a.id = rs.account_id
                 WHERE rs.is_active = TRUE
+                  AND rs.user_status <> 'cancelled'
+                  AND (rs.price_change_snoozed_until IS NULL
+                       OR rs.price_change_snoozed_until < CURRENT_DATE)
                   AND rs.last_amount_cents IS NOT NULL
                   AND rs.average_amount_cents IS NOT NULL
                   AND rs.average_amount_cents != 0
@@ -226,10 +258,32 @@ class RecurringRepository:
     async def update_stream(
         self, stream_id: int, data: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        allowed = {"user_label", "category_id"}
+        allowed = {
+            "user_label",
+            "category_id",
+            "user_status",
+            "paused_until",
+            "price_change_snoozed_until",
+        }
         fields = {k: v for k, v in data.items() if k in allowed}
         if not fields:
             return await self.get_stream(stream_id)
+
+        # Side-effects on user_status transition: stamp / clear cancelled_at,
+        # clear paused_until when leaving 'paused'. Done as extra SET pairs so
+        # a single PATCH can flip multiple fields atomically.
+        if "user_status" in fields:
+            new_status = fields["user_status"]
+            if new_status == "cancelled":
+                fields["cancelled_at"] = datetime.now()
+            elif new_status == "active":
+                fields["cancelled_at"] = None
+                # Don't drop paused_until here unless the caller didn't pass it
+                # — they may be re-pausing later from a different code path.
+                fields.setdefault("paused_until", None)
+            elif new_status == "paused":
+                fields["cancelled_at"] = None
+
         set_clause = ", ".join(f"{col} = ${i + 2}" for i, col in enumerate(fields.keys()))
         pool = await self._pool()
         async with pool.acquire() as conn:
@@ -239,6 +293,74 @@ class RecurringRepository:
                 *fields.values(),
             )
         return dict(row) if row else None
+
+    async def bulk_apply(
+        self,
+        ids: List[int],
+        action: str,
+        paused_until: Optional[date] = None,
+        snooze_days: Optional[int] = None,
+    ) -> int:
+        """Apply one user-state action to many streams in a single SQL round-trip.
+
+        See ``RecurringBulkAction`` in ``models.py`` for the action contract.
+        Returns the number of rows updated.
+        """
+        if action not in {"cancel", "pause", "reactivate", "snooze_price_change"}:
+            raise ValueError(f"Unknown bulk action: {action}")
+        if not ids:
+            return 0
+        pool = await self._pool()
+        async with pool.acquire() as conn:
+            if action == "cancel":
+                rows = await conn.fetch(
+                    """
+                    UPDATE recurring_streams
+                       SET user_status  = 'cancelled',
+                           cancelled_at = NOW()
+                     WHERE id = ANY($1::int[])
+                    RETURNING id
+                    """,
+                    ids,
+                )
+            elif action == "pause":
+                rows = await conn.fetch(
+                    """
+                    UPDATE recurring_streams
+                       SET user_status  = 'paused',
+                           paused_until = $2,
+                           cancelled_at = NULL
+                     WHERE id = ANY($1::int[])
+                    RETURNING id
+                    """,
+                    ids,
+                    paused_until,
+                )
+            elif action == "reactivate":
+                rows = await conn.fetch(
+                    """
+                    UPDATE recurring_streams
+                       SET user_status  = 'active',
+                           paused_until = NULL,
+                           cancelled_at = NULL
+                     WHERE id = ANY($1::int[])
+                    RETURNING id
+                    """,
+                    ids,
+                )
+            else:  # action == "snooze_price_change" — validated above.
+                snooze_until = date.today() + timedelta(days=snooze_days or 30)
+                rows = await conn.fetch(
+                    """
+                    UPDATE recurring_streams
+                       SET price_change_snoozed_until = $2
+                     WHERE id = ANY($1::int[])
+                    RETURNING id
+                    """,
+                    ids,
+                    snooze_until,
+                )
+        return len(rows)
 
     async def upsert_streams(
         self,
