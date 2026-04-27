@@ -197,6 +197,34 @@ async def test_preview_match_count_returns_distinct_description_count():
 
 
 @pytest.mark.asyncio
+async def test_preview_for_draft_returns_distinct_description_count():
+    """Regression: the with-category preview path (the one the smart
+    popover actually uses, since it always passes ``category_id``) must
+    surface ``distinct_description_count`` so the UI can decide whether
+    to render the "narrow with description" option.
+
+    The first iteration shipped this field only via ``preview_match_count``
+    — the FE was always calling ``preview_for_draft`` and saw ``None``,
+    so the narrow option was hidden even on merchants with 476 distinct
+    Zelle descriptions. This test guards against the regression."""
+    from web.merchant_rules.apply import preview_for_draft
+
+    conn = AsyncMock()
+    pool = make_mock_pool(conn)
+    # _preview_conn fires four fetchval calls in this order:
+    # 1) eligible_count, 2) skipped_splits_count,
+    # 3) skipped_custom_category_count, 4) distinct_description_count
+    # Plus one more for skipped_has_entity_id (only for kind="name").
+    conn.fetchval.side_effect = [120, 0, 0, 0, 47]
+    conn.fetch.return_value = [{"mn": "Zelle"}]
+
+    with patch("web.merchant_rules.apply.get_pool", AsyncMock(return_value=pool)):
+        out = await preview_for_draft(None, "Zelle", category_id=9)
+
+    assert out["distinct_description_count"] == 47
+
+
+@pytest.mark.asyncio
 async def test_preview_match_count_with_filter_narrows_count():
     """When a filter is supplied the match_count reflects the filtered
     set, but distinct_description_count is unaffected (the UI uses it
