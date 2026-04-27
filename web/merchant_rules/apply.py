@@ -259,12 +259,31 @@ async def _preview_conn(
             *loose_params,
         )
 
+    # Diversity probe — same shape as ``preview_match_count`` but threaded
+    # through the with-category preview path too. The smart-popover UI
+    # uses this to decide whether to surface the "narrow with description"
+    # option; without it a user with 476 Zelle rows would never see the
+    # filter affordance from the Transaction Details "Always categorize
+    # like this" button (which always passes ``category_id``). Computed
+    # against the *unfiltered* set so a draft already-narrow rule still
+    # reports diversity correctly.
+    unfiltered_sql, unfiltered_params = _merchant_sql_params(kind, suffix)
+    distinct_count = await conn.fetchval(
+        f"""
+        SELECT COUNT(DISTINCT lower(COALESCE(t.name, t.display_title, '')))::bigint
+        FROM transactions t
+        WHERE {unfiltered_sql}
+        """,
+        *unfiltered_params,
+    )
+
     return {
         "eligible_count": int(eligible or 0),
         "skipped_splits_count": int(skipped_splits or 0),
         "skipped_custom_category_count": int(skipped_custom or 0),
         "skipped_has_entity_id_count": int(skipped_entity or 0),
         "sample_merchant_names": samples,
+        "distinct_description_count": int(distinct_count or 0),
     }
 
 
