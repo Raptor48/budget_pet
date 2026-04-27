@@ -3,7 +3,7 @@
 /**
  * Audit tab — current Sunday session + last 26 weeks of history.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
@@ -40,12 +40,18 @@ export function BotAuditTab() {
   const [tea, setTea] = useState("");
   const [notes, setNotes] = useState("");
 
-  // Hydrate the form when current changes.
-  if (current.data) {
-    if (current.data.snack !== snack && snack === "") setSnack(current.data.snack ?? "");
-    if (current.data.tea_choice !== tea && tea === "") setTea(current.data.tea_choice ?? "");
-    if (current.data.notes !== notes && notes === "") setNotes(current.data.notes ?? "");
-  }
+  // Hydrate the form once per audit week (re-hydrate only when week_start
+  // changes, i.e. the user navigates to a different session). Driving
+  // setState from render body deadlocks when the source field is null —
+  // null !== "" stays true forever and React #301 fires.
+  const weekKey = current.data?.week_start ?? null;
+  useEffect(() => {
+    if (!current.data) return;
+    setSnack(current.data.snack ?? "");
+    setTea(current.data.tea_choice ?? "");
+    setNotes(current.data.notes ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weekKey]);
 
   return (
     <div className="space-y-8">
