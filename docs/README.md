@@ -15,6 +15,7 @@
 | [plaid.md](./plaid.md) | Plaid integration: products, sync flow, field mapping, sandbox, access-token encryption |
 | [reports-math.md](./reports-math.md) | Source of truth for income / expense / internal_transfer classification |
 | [insights-math.md](./insights-math.md) | Insights feed math |
+| [categorization-precedence.md](./categorization-precedence.md) | Single source of truth for which mechanism wins when PFC mapping, merchant rules, manual edits, splits, classifier, aliases, and tags collide |
 
 ## Quick Start (local)
 
