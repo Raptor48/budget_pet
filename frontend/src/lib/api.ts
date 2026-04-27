@@ -26,6 +26,7 @@ import type {
   Member,
   MerchantSpend,
   NetWorthSnapshot,
+  NetWorthSummary,
   PlaidItem,
   PlaidSyncLogEntry,
   PlaidSyncResult,
@@ -508,7 +509,7 @@ export const reportsApi = {
     return apiRequest(`/api/reports/merchants?${params}`);
   },
 
-  getNetWorth: (): Promise<{ liquid_cents: number; investment_cents: number; debt_cents: number; net_worth_cents: number }> =>
+  getNetWorth: (): Promise<NetWorthSummary> =>
     apiRequest('/api/reports/net-worth'),
 
   getNetWorthHistory: (months = 12): Promise<NetWorthSnapshot[]> =>
