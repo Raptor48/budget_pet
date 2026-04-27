@@ -86,17 +86,24 @@ async def update_internal_transfer_settings(
     repo = get_internal_transfer_settings_repo()
     stored = await repo.set_names(body.names)
 
-    # After editing the list, auto-reclassify the last 90 days so the change
-    # shows up in the UI immediately. Full-history cleanups remain a
-    # separate explicit action because they can touch many rows. The
-    # pair-matcher also runs here so the user gets the same "apply to
-    # recent history" behavior for the newly-added names and any
-    # same-amount transfer pairs that were waiting for the other side to
-    # sync.
+    # After editing the list, auto-reclassify the **entire history** so
+    # the change shows up everywhere immediately — not just on the
+    # Reports views that happen to look at the last 90 days. Previously
+    # this was capped at 90 days, leaving older transactions (e.g. a
+    # Zelle from a year ago) misclassified until the user thought to
+    # press "Re-scan all history" by hand. That's a non-obvious second
+    # step and a real foot-gun: the user adds a spouse's name, the UI
+    # confirms "names updated", but March-2025 income still shows the
+    # spouse's incoming Zelle as their own income.
+    #
+    # Full rescan is cheap by design (see the post-import comment in
+    # ``web/plaid/repo.py``): single classifier pass, sub-second on a
+    # typical family history. Manual class overrides are preserved by
+    # ``classify_row`` rule 1 so user pins stay sacred.
     name_updated = 0
     pair_updated = 0
     try:
-        name_updated, pair_updated = await _rescan(horizon_days=90)
+        name_updated, pair_updated = await _rescan(horizon_days=None)
     except Exception as exc:
         logger.warning("Auto-rescan after names update failed: %s", exc)
 
