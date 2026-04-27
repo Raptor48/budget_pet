@@ -71,9 +71,12 @@ this is the abridged precedence ladder:
 1. **`manual_class_override`** — per-row pin set by the user via the
    class dropdown in Transaction Details. Never second-guessed.
 2. **Cash ↔ debt pair match** — outflow on a depository account paired
-   with the matching inflow on a credit / loan account within ±3 days.
+   with the matching inflow on a credit / loan account within ±3 days,
+   **same family member on both legs**.
 3. **Depository ↔ depository pair match** — classic
-   `TRANSFER_OUT` / `TRANSFER_IN` cross-account move.
+   `TRANSFER_OUT` / `TRANSFER_IN` cross-account move, **same family
+   member on both legs**. Cross-spouse moves are handled by rule 4
+   (counterparty name match), not by this matcher.
 4. **Counterparty name match** — `app_settings.internal_transfer_names`
    contains the counterparty (e.g. a spouse's name on Zelle).
 5. **`category.is_income`** — the assigned category is flagged as income

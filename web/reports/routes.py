@@ -112,8 +112,13 @@ async def get_income_breakdown(
 ):
     """
     Per-person income for the month plus the per-category sources that make up
-    each person's total. "Income" is defined by the family-wide ``is_income``
-    flag on categories — see ``ReportsRepository.get_income_breakdown``.
+    each person's total. "Income" is defined by the canonical four-class
+    classifier (``transaction_class = 'income'``) — see
+    ``docs/reports-math.md`` and ``ReportsRepository.get_income_breakdown``.
+    The ``categories.is_income`` flag is one *input* to that classifier
+    (rule 5), not the definition of income itself; pair-matched and
+    name-matched transfers are correctly excluded even when their category
+    happens to be flagged as income.
     """
     return await _repo().get_income_breakdown(
         month, viewer_user_id=_viewer_id(request)

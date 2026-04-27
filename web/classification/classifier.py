@@ -292,6 +292,13 @@ async def match_pairs(
            AND i.amount_cents = -o.amount_cents
            AND i.owner_uid IS NOT NULL
            AND o.owner_uid IS NOT NULL
+           -- Both legs must belong to the SAME family member. Without this,
+           -- a same-day same-amount coincidence between spouse A's
+           -- depository outflow and spouse B's credit-card balance change
+           -- would falsely pair → both rows vanish from income/expense
+           -- reports. Cross-family transfers are handled by the Zelle name
+           -- list (rule 4), which doesn't go through this matcher at all.
+           AND o.owner_uid = i.owner_uid
            AND ABS(o.date - i.date) <= 3
         )
         SELECT out_id, in_id
@@ -332,6 +339,10 @@ async def match_pairs(
            AND i.account_id <> o.account_id
            AND i.owner_uid IS NOT NULL
            AND o.owner_uid IS NOT NULL
+           -- Same-family-member guard. See cash↔debt matcher above for
+           -- the full rationale; cross-spouse pairs would silently
+           -- erase real income + real expense from the family reports.
+           AND o.owner_uid = i.owner_uid
            AND i.amount_cents = -o.amount_cents
            AND o.amount_cents > 0
            AND o.account_type = 'depository'
@@ -391,6 +402,11 @@ async def match_pairs(
            AND i.account_id <> o.account_id
            AND i.owner_uid IS NOT NULL
            AND o.owner_uid IS NOT NULL
+           -- Same-family-member guard. See cash↔debt matcher above for
+           -- the full rationale; cross-spouse fee-tolerant pairs are
+           -- the highest false-positive risk because the amount window
+           -- is the loosest of the three queries.
+           AND o.owner_uid = i.owner_uid
            AND o.amount_cents > 0
            AND i.amount_cents < 0
            AND o.account_type = 'depository'

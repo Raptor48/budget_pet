@@ -142,20 +142,16 @@ class TestPlaidRepository:
         async def fake_fetchrow(sql, *args):
             if "FROM transactions" not in sql or "plaid_transaction_id = $1" not in sql:
                 return None
-            # The pending-twin lookup happens twice during import_transactions:
-            # once for the carryover fields (is_private / user_note /
-            # category_id) and once for the internal-transfer flags. Both
-            # SELECTs use plaid_transaction_id = $1, so distinguish by the
-            # column list the query requested.
-            if "is_internal_transfer" in sql:
-                return {
-                    "is_internal_transfer": False,
-                    "is_internal_transfer_manual": False,
-                }
+            # Single unified pending-twin lookup since 2026-04-27: one
+            # SELECT pulls every field that needs carrying so we don't
+            # round-trip twice for the same row.
             return {
                 "is_private": True,
                 "user_note": "honeymoon surprise",
                 "category_id": 77,
+                "manual_class_override": None,
+                "is_internal_transfer": False,
+                "is_internal_transfer_manual": False,
             }
 
         conn.execute = AsyncMock(side_effect=fake_execute)
@@ -182,14 +178,67 @@ class TestPlaidRepository:
         args = executed_args[0]
         # Column order ends with:
         #   ... pending_transaction_id, is_private, user_note,
-        #       is_internal_transfer, is_internal_transfer_manual
-        assert args[-5] == "txn-pending-1"
-        assert args[-4] is True, "is_private must be carried from the pending twin"
-        assert args[-3] == "honeymoon surprise", "user_note must be carried forward"
-        assert args[-2] is False, "internal-transfer flag stays False when twin wasn't flagged"
-        assert args[-1] is False, "manual-override sentinel stays False"
+        #       is_internal_transfer, is_internal_transfer_manual,
+        #       manual_class_override
+        assert args[-6] == "txn-pending-1"
+        assert args[-5] is True, "is_private must be carried from the pending twin"
+        assert args[-4] == "honeymoon surprise", "user_note must be carried forward"
+        assert args[-3] is False, "internal-transfer flag stays False when twin wasn't flagged"
+        assert args[-2] is False, "manual-override sentinel stays False"
+        assert args[-1] is None, "no manual class override on the pending twin"
         # Category from pending twin should win when no merchant rule applied.
         assert args[2] == 77
+
+    @pytest.mark.asyncio
+    async def test_pending_to_posted_carries_manual_class_override(self, repo):
+        """Regression for the 2026-04-27 audit: a user who pinned a pending
+        row's class to ``expense`` (e.g. a refund the rule-5.5 default of
+        ``income`` mis-tagged) must keep that pin when the row goes posted.
+        Previously only ``is_internal_transfer_manual`` was carried, so
+        expense / income pins silently reverted on the next sync."""
+        conn = AsyncMock()
+        pool = make_mock_pool(conn)
+        executed_args: list[tuple] = []
+
+        async def fake_execute(sql, *args):
+            executed_args.append(args)
+            return "INSERT 0 1"
+
+        async def fake_fetchrow(sql, *args):
+            if "FROM transactions" not in sql:
+                return None
+            return {
+                "is_private": False,
+                "user_note": None,
+                "category_id": None,
+                "manual_class_override": "expense",
+                "is_internal_transfer": False,
+                "is_internal_transfer_manual": False,
+            }
+
+        conn.execute = AsyncMock(side_effect=fake_execute)
+        conn.fetchrow = AsyncMock(side_effect=fake_fetchrow)
+
+        posted = _make_txn(
+            "txn-posted-refund",
+            "acct-1",
+            pending_transaction_id="txn-pending-refund",
+        )
+        with patch("web.plaid.repo.get_pool", AsyncMock(return_value=pool)), patch(
+            "web.merchant_rules.repo.MerchantRulesRepository.lookup_category",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            await repo.import_transactions(
+                [posted], {"acct-1": 1}, source="plaid"
+            )
+
+        args = executed_args[0]
+        assert args[-1] == "expense", (
+            "manual_class_override='expense' on the pending twin must "
+            "land on the posted row's INSERT — otherwise the user's "
+            "refund pin reverts to rule-5.5 income on next rescan"
+        )
 
     @pytest.mark.asyncio
     async def test_posted_without_pending_twin_defaults_to_public(self, repo):
@@ -217,12 +266,14 @@ class TestPlaidRepository:
 
         args = executed_args[0]
         # No pending_transaction_id, defaults for is_private/user_note/
-        # is_internal_transfer/is_internal_transfer_manual.
-        assert args[-5] is None
-        assert args[-4] is False
-        assert args[-3] is None
+        # is_internal_transfer/is_internal_transfer_manual/
+        # manual_class_override.
+        assert args[-6] is None
+        assert args[-5] is False
+        assert args[-4] is None
+        assert args[-3] is False
         assert args[-2] is False
-        assert args[-1] is False
+        assert args[-1] is None
 
     @pytest.mark.asyncio
     async def test_delete_removed_transactions(self, repo):

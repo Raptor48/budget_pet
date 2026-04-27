@@ -221,3 +221,38 @@ class TestToleranceFormulaCoversPayPalInstantTransfer:
         actual_fee = out_cents - 36553
         assert old_tolerance < actual_fee, "regression scaffolding: old bound should miss"
         assert new_tolerance >= actual_fee, "new bound must cover the real $6.51 fee"
+
+
+@pytest.mark.asyncio
+class TestMatchPairsSameOwnerGuard:
+    """All three pair queries must require the outflow and inflow to belong
+    to the SAME family member. Without this, a same-amount coincidence
+    between spouses' accounts on the same day would falsely pair → the
+    real income (one spouse) and the real expense (other spouse) both
+    vanish from reports. This is one of the hardest classification bugs
+    to spot because the totals are silently wrong, not visibly wrong.
+
+    Cross-spouse legitimate transfers (e.g. Denis → Anastasiia via Zelle)
+    are handled by classifier rule 4 (counterparty name match), which
+    doesn't go through the pair matcher at all."""
+
+    async def test_cash_debt_query_requires_same_owner(self):
+        conn = AsyncMock()
+        conn.fetch = AsyncMock(return_value=[])
+        await match_pairs(conn, horizon_days=90)
+        cash_debt_sql = conn.fetch.await_args_list[0].args[0]
+        assert "o.owner_uid = i.owner_uid" in cash_debt_sql
+
+    async def test_depository_exact_query_requires_same_owner(self):
+        conn = AsyncMock()
+        conn.fetch = AsyncMock(return_value=[])
+        await match_pairs(conn, horizon_days=90)
+        depo_exact_sql = conn.fetch.await_args_list[1].args[0]
+        assert "o.owner_uid = i.owner_uid" in depo_exact_sql
+
+    async def test_tolerance_query_requires_same_owner(self):
+        conn = AsyncMock()
+        conn.fetch = AsyncMock(return_value=[])
+        await match_pairs(conn, horizon_days=90)
+        tolerance_sql = conn.fetch.await_args_list[2].args[0]
+        assert "o.owner_uid = i.owner_uid" in tolerance_sql

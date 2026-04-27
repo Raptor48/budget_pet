@@ -220,6 +220,8 @@ class DiagnosticsRow(BaseModel):
     category_name: Optional[str] = None
     account_type: Optional[str] = None
     transaction_class: Optional[str] = None
+    merchant_entity_id: Optional[str] = None
+    recent_expense_date: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -231,6 +233,7 @@ class Diagnostics(BaseModel):
     suspicious_income_category_with_positive_amount: List[DiagnosticsRow]
     transfer_pfc_not_classified_as_internal: List[DiagnosticsRow]
     large_uncategorized: List[DiagnosticsRow]
+    possible_refunds_misclassified_as_income: List[DiagnosticsRow] = []
 
 
 class FinancialHealthScore(BaseModel):

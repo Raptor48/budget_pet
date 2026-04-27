@@ -1145,6 +1145,53 @@ class ReportsRepository:
                 """,
                 month,
             )
+            # Rule 5.5 (orphan TRANSFER_IN on a depository → income) is a
+            # blunt instrument: it correctly tags wire deposits from
+            # untracked banks as income, but it ALSO swallows ACH refunds
+            # that Plaid happened to label TRANSFER_IN. The income bucket
+            # then double-inflates: the original purchase keeps its
+            # ``expense`` row from N days ago, and the matching refund
+            # arrives as ``income`` instead of reducing the expense.
+            #
+            # We surface (not auto-fix) any rule-5.5 income row whose
+            # merchant_entity_id matches a recent expense from the same
+            # entity within the last 60 days. Owner can confirm and pin
+            # the row to ``expense`` via the modal — manual_class_override
+            # is sacred and the carryover fix landed alongside this
+            # diagnostic so the pin survives the next sync.
+            possible_refunds = await conn.fetch(
+                """
+                SELECT t.id, t.date, t.amount_cents, t.merchant_name, t.name,
+                       t.pfc_primary, t.merchant_entity_id,
+                       COALESCE(c.name, 'Uncategorized') AS category_name,
+                       (
+                         SELECT MAX(e.date)
+                         FROM transactions e
+                         WHERE e.merchant_entity_id = t.merchant_entity_id
+                           AND e.transaction_class = 'expense'
+                           AND e.id <> t.id
+                           AND e.date BETWEEN t.date - INTERVAL '60 days' AND t.date
+                       ) AS recent_expense_date
+                FROM transactions t
+                LEFT JOIN categories c ON c.id = t.category_id
+                WHERE COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
+                  AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
+                  AND t.transaction_class = 'income'
+                  AND t.pfc_primary = 'TRANSFER_IN'
+                  AND t.manual_class_override IS NULL
+                  AND t.merchant_entity_id IS NOT NULL
+                  AND EXISTS (
+                    SELECT 1 FROM transactions e
+                    WHERE e.merchant_entity_id = t.merchant_entity_id
+                      AND e.transaction_class = 'expense'
+                      AND e.id <> t.id
+                      AND e.date BETWEEN t.date - INTERVAL '60 days' AND t.date
+                  )
+                ORDER BY ABS(t.amount_cents) DESC
+                LIMIT 50
+                """,
+                month,
+            )
             counts = await conn.fetchrow(
                 """
                 SELECT
@@ -1175,4 +1222,7 @@ class ReportsRepository:
                 dict(r) for r in unmatched_transfers
             ],
             "large_uncategorized": [dict(r) for r in uncategorized],
+            "possible_refunds_misclassified_as_income": [
+                dict(r) for r in possible_refunds
+            ],
         }
