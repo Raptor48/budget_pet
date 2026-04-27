@@ -80,14 +80,20 @@ async def telegram_unlink(request: Request):
 async def telegram_send_test(request: Request):
     """Probe the full notification pipeline.
 
-    Enqueues a P0 ``test_alert`` row for the caller's user_id, then forces
-    the dispatcher to drain immediately so the round-trip latency is just
-    "Telegram API + your phone push" rather than the regular 60s tick.
+    Enqueues a P0 ``test_alert`` row for the caller's user_id and kicks
+    off a background drain. We deliberately do NOT ``await`` the drain
+    inside the request — the dispatcher iterates every linked user and
+    talks to Telegram, which can take several seconds and would tie up
+    the request socket. The scheduled minute-tick is the safety net if
+    the background task can't acquire the pool quickly.
 
-    Response surfaces ``{sent: true}`` if the dispatcher claimed the row;
-    failures live in ``notifications_queue.failed_at`` and the FastAPI
-    logs (search for ``Failed to send P0 notification``).
+    Response shape:
+      ``{sent: true, queued_id: N}``        — row enqueued, drain kicked
+      ``{sent: false, deduped: true}``      — same key already in flight
+      503 with detail "queue write timed out" — DB was unresponsive
     """
+    import asyncio as _asyncio
+
     user_id = _user_id(request)
     status = await get_bot_repo().get_telegram_link_status(user_id)
     if not status.get("linked"):
@@ -105,22 +111,41 @@ async def telegram_send_test(request: Request):
     )
 
     user = getattr(request.state, "user", None) or {}
-    new_id = await enqueue_notification(
-        user_id=user_id,
-        type="test_alert",
-        priority="P0",
-        payload={"requested_by": user.get("username") or "user"},
-        # Per-second dedup so the user can mash the button without spam,
-        # but a single click always goes through.
-        dedup_key=dedup_key_for(
-            "test_alert",
-            user_id,
-            datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S"),
-        ),
-    )
+    try:
+        # Cap enqueue at 10s — well under the pool's command_timeout (30s)
+        # so a slow Postgres surfaces a friendly error here instead of a
+        # generic 500. The row almost always lands fast; this guard is for
+        # the rare lock-contention / Railway-routing hiccups.
+        new_id = await _asyncio.wait_for(
+            enqueue_notification(
+                user_id=user_id,
+                type="test_alert",
+                priority="P0",
+                payload={"requested_by": user.get("username") or "user"},
+                # Per-second dedup so a button mash doesn't spam, but each
+                # legitimate click goes through.
+                dedup_key=dedup_key_for(
+                    "test_alert",
+                    user_id,
+                    datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S"),
+                ),
+            ),
+            timeout=10,
+        )
+    except _asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Queue write timed out. The DB looks slow — try again "
+                "in a moment. If it persists check Railway logs for "
+                "lock contention."
+            ),
+        )
     if new_id is None:
         return {"sent": False, "deduped": True}
-    await trigger_drain_now()
+    # Fire-and-forget drain so the user doesn't wait on the Telegram round
+    # trip; the scheduled 60s tick is the safety net.
+    _asyncio.create_task(trigger_drain_now())
     return {"sent": True, "queued_id": new_id}
 
 

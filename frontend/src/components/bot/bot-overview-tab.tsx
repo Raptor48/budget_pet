@@ -64,7 +64,10 @@ export function BotOverviewTab() {
     mutationFn: () => botApi.sendTestAlert(),
     onSuccess: (res) => {
       if (res.sent) {
-        notify.success("Test alert sent — check Telegram.");
+        // Drain runs in the background, so the actual Telegram push lands
+        // a second or two later. Wording reflects that without making the
+        // user wait on this toast.
+        notify.success("Test alert queued — should pop up in Telegram any moment.");
       } else if (res.deduped) {
         notify.info("Already sent one in the last second — check Telegram.");
       }
