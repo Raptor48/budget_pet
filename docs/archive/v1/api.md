@@ -4,7 +4,7 @@
 
 # API — Справочник эндпоинтов
 
-Base URL (production): `https://fastapi-production-eadf.up.railway.app`
+Base URL (production): `https://<your-fastapi>.up.railway.app`
 
 ## Аутентификация
 

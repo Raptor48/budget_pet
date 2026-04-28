@@ -16,7 +16,7 @@ V2 is centered on Plaid API for linked institutions (transactions, accounts, cat
 
 ## Railway environments and deploy branches
 
-The Railway project (`protective-clarity`) runs two environments off the same
+The Railway project (`<your-railway-project>`) runs two environments off the same
 codebase but different branches:
 
 | Environment | Source branch | Purpose |
