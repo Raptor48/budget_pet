@@ -4,11 +4,11 @@ This branch (`demo`) is the public, sandbox-only deployment of Budget Pet for
 portfolio / hiring review. The Telegram bot surface is suppressed so the app
 reads as a focused web product; everything else is the real V2.3 codebase.
 
-> **Login:** `demo` / `demo_pass`
+> 🌐 **Live URL:** <https://nextjs-web-ui-demo.up.railway.app>
 >
-> _If the deployed login differs, the values to use are whatever
-> `ADMIN_LOGIN` and `ADMIN_PASSWORD` are set to on the Railway `demo`
-> environment._
+> 🔐 **Login:** `demo` / `demo_pass`
+>
+> 🏦 **API:** <https://fastapi-demo-e11c.up.railway.app> (Plaid sandbox only)
 
 ## What you can do in the demo
 
