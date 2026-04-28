@@ -181,6 +181,92 @@ _SECTION_ORDER = [
     ("leaderboard", "🏆 Leaderboard"),
 ]
 
+_TOP_N_PER_SECTION = 5  # show top N by amount, collapse the rest
+
+
+def _format_subscription_section(items: List[Dict[str, Any]]) -> List[str]:
+    """Aggregate subscription_creep events into a single bulleted section.
+
+    Brand-new subscriptions (prev=None) collapse into one heading with a
+    total + top-N bullet list + "and N more"; price changes get a one-line
+    each since they're rarer and individually meaningful.
+    """
+    new_subs: List[Dict[str, Any]] = []
+    price_changes: List[Dict[str, Any]] = []
+    for item in items:
+        payload = item.get("payload") or {}
+        if payload.get("previous_amount_cents") is None:
+            new_subs.append(payload)
+        else:
+            price_changes.append(payload)
+
+    out: List[str] = []
+    if new_subs:
+        # De-duplicate by name+amount within the same brief — Plaid sometimes
+        # emits the same subscription under two slightly different descriptors
+        # in one window.
+        seen: set = set()
+        unique: List[Dict[str, Any]] = []
+        for p in new_subs:
+            key = (str(p.get("name", "")).lower(), int(p.get("amount_cents", 0)))
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(p)
+        unique.sort(key=lambda p: int(p.get("amount_cents", 0)), reverse=True)
+        total = sum(int(p.get("amount_cents", 0)) for p in unique)
+        plural = "s" if len(unique) != 1 else ""
+        out.append(
+            f"🔁 <b>Subscriptions</b> — {len(unique)} new, "
+            f"{_money(total)} total"
+        )
+        for p in unique[:_TOP_N_PER_SECTION]:
+            out.append(
+                f"  • <b>{p.get('name', '?')}</b> — "
+                f"{_money(int(p.get('amount_cents', 0)))}"
+            )
+        remainder = len(unique) - _TOP_N_PER_SECTION
+        if remainder > 0:
+            out.append(f"  • +{remainder} more")
+
+    for p in price_changes:
+        cur = int(p.get("amount_cents", 0))
+        prev = int(p.get("previous_amount_cents") or 0)
+        delta_pct = ((cur - prev) / max(prev, 1)) * 100
+        out.append(
+            f"📈 <b>{p.get('name', '?')}</b> "
+            f"{_money(prev)} → {_money(cur)} ({delta_pct:+.0f}%)"
+        )
+    return out
+
+
+def _format_new_merchant_section(items: List[Dict[str, Any]]) -> List[str]:
+    """Aggregate new_merchant events: heading with total + top-N bullets."""
+    payloads = [item.get("payload") or {} for item in items]
+    payloads.sort(key=lambda p: int(p.get("amount_cents", 0)), reverse=True)
+    total = sum(int(p.get("amount_cents", 0)) for p in payloads)
+    out: List[str] = [
+        f"🆕 <b>New merchants</b> — {len(payloads)} this week, "
+        f"{_money(total)} total"
+    ]
+    for p in payloads[:_TOP_N_PER_SECTION]:
+        out.append(
+            f"  • <b>{p.get('merchant_name', '?')}</b> — "
+            f"{_money(int(p.get('amount_cents', 0)))}"
+        )
+    remainder = len(payloads) - _TOP_N_PER_SECTION
+    if remainder > 0:
+        out.append(f"  • +{remainder} more")
+    return out
+
+
+# Sections whose items are merged into a single rendered block. Sections
+# absent from this map fall back to default per-item rendering.
+_SECTION_FORMATTERS = {
+    "subscription_creep": _format_subscription_section,
+    "new_merchant": _format_new_merchant_section,
+}
+
 
 def build_brief(
     *,
@@ -204,6 +290,13 @@ def build_brief(
     for type_, heading in _SECTION_ORDER:
         items = grouped.get(type_) or []
         if not items:
+            continue
+        formatter = _SECTION_FORMATTERS.get(type_)
+        if formatter is not None:
+            block = formatter(items)
+            if block:
+                lines.append("")
+                lines.extend(block)
             continue
         lines.append("")
         lines.append(heading)

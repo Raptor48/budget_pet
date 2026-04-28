@@ -9,14 +9,108 @@ Wired into the scheduler in :mod:`web.notifications.scheduler`.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List
 
 from web.bot_api.repo import get_bot_repo
 from web.db import get_pool
 from web.notifications.queue import dedup_key_for, enqueue_notification
+from web.transactions.display import normalize_transaction_title
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Bank-artefact denylist. Plaid's recurring detector occasionally flags
+# things that aren't really subscriptions: finance charges, monthly bank
+# fees, self-transfers, generic ACH descriptors. Without this filter the
+# morning brief turns into a wall of "New subscription detected: INTEREST
+# CHARGE…" lines that the user can't act on. Keep substrings ALL-CAPS and
+# specific enough that they only match bank junk, never real merchants.
+# ---------------------------------------------------------------------------
+_BANK_ARTEFACT_SUBSTRINGS = (
+    "INTEREST CHARGE",
+    "INTEREST CHARGED",
+    "MONTHLY SERVICE FEE",
+    "MAINTENANCE FEE",
+    "OVERDRAFT FEE",
+    "FOREIGN TRANSACTION FEE",
+    "ATM FEE",
+    "DDA TO DDA",  # Wells Fargo internal transfer
+    "TRANSFER TO ",
+    "TRANSFER FROM ",
+    "INTERNAL TRANSFER",
+    "WIRE TRANSFER",
+    "ZELLE PAYMENT",
+    "PAYMENT THANK YOU",  # credit-card auto-payment to itself
+    "AUTOPAY PAYMENT",
+)
+
+
+def _looks_like_bank_artefact(name: str) -> bool:
+    """True if ``name`` looks like a bank-internal descriptor rather than
+    a real merchant. Used to suppress noise alerts."""
+    if not name:
+        return True
+    upper = name.upper()
+    return any(needle in upper for needle in _BANK_ARTEFACT_SUBSTRINGS)
+
+
+# ---------------------------------------------------------------------------
+# Brand canonicalization for subscription alerts. Plaid's recurring-stream
+# descriptions still carry phone numbers, ACH IDs, state+date suffixes, and
+# duplicated words even after the generic ACH cleaner. For the bot we want
+# the simplest possible label ("Apple" not "Apple.com/bill CA 03/27"), so
+# we run a small brand-override layer over the generic normalizer.
+#
+# Patterns are matched in order — list more specific patterns first so a
+# multi-word match wins over a substring (e.g. ARCHDIGEST CONDENAST before
+# CONDENAST alone).
+# ---------------------------------------------------------------------------
+_BRAND_OVERRIDES: tuple = (
+    (re.compile(r"\bARCH(?:DIGEST|ITECTURAL\s+DIGEST)\b", re.I), "Architectural Digest"),
+    (re.compile(r"\bCON\s*ED(?:ISON)?\b", re.I), "Con Edison"),
+    (re.compile(r"\bUPSTART\b", re.I), "Upstart"),
+    (re.compile(r"\bAPPLE(?:\.COM)?\b", re.I), "Apple"),
+    (re.compile(r"\bPAYPAL\b", re.I), "PayPal"),
+    (re.compile(r"\bAFFIRM\b", re.I), "Affirm"),
+    (re.compile(r"\bADOBE\b", re.I), "Adobe"),
+    (re.compile(r"\bSPECTRUM\b", re.I), "Spectrum"),
+    (re.compile(r"\bPATREON\b", re.I), "Patreon"),
+    (re.compile(r"\bRAILWAY(?:\.COM)?\b", re.I), "Railway"),
+    (re.compile(r"\bNETFLIX\b", re.I), "Netflix"),
+    (re.compile(r"\bSPOTIFY\b", re.I), "Spotify"),
+    (re.compile(r"\bGITHUB\b", re.I), "GitHub"),
+    (re.compile(r"\bAMAZON\b|\bAMZN\b", re.I), "Amazon"),
+    (re.compile(r"\bGOOGLE\b|\bG\s*SUITE\b|\bGSUITE\b", re.I), "Google"),
+)
+
+_DUP_WORD_RE = re.compile(r"\b(\w+)\s+\1\b", re.I)
+
+
+def _pretty_subscription_name(raw: str) -> str:
+    """Bot-friendly merchant name for subscription alerts.
+
+    1. Brand overrides win when the description contains a known SaaS/utility
+       brand — collapses noisy bank descriptors to the canonical name.
+    2. Otherwise falls back to ``normalize_transaction_title`` and additionally
+       collapses duplicated consecutive words ("Spectrum Spectrum" → "Spectrum")
+       which the generic cleaner doesn't dedupe.
+    """
+    if not raw:
+        return raw or ""
+    for pattern, canonical in _BRAND_OVERRIDES:
+        if pattern.search(raw):
+            return canonical
+    cleaned = normalize_transaction_title({"description": raw})
+    # Collapse "WORD WORD" → "WORD" repeatedly.
+    while True:
+        deduped = _DUP_WORD_RE.sub(r"\1", cleaned)
+        if deduped == cleaned:
+            break
+        cleaned = deduped
+    return cleaned
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +320,13 @@ async def detect_new_merchants() -> int:
         merchant = (r["merchant_name"] or "").strip()
         if not merchant:
             continue
+        # Skip bank-internal artefacts (interest, fees, transfers). Plaid
+        # sometimes leaves these in merchant_name when enrichment misses.
+        if _looks_like_bank_artefact(merchant):
+            continue
+        # Skip micro-charges — almost never a real first-merchant moment.
+        if int(r["amount_cents"] or 0) < 100:
+            continue
         key = merchant.lower()
         sighting = await repo.remember_merchant(key)
         if not sighting.get("new"):
@@ -280,6 +381,18 @@ async def detect_subscription_changes() -> int:
             "SELECT id FROM users WHERE telegram_chat_id IS NOT NULL"
         )
     for s in streams:
+        raw_description = s["description"] or ""
+        # Filter out bank artefacts (interest charges, fees, self-transfers).
+        # Plaid's recurring detector sometimes catches these as "subscriptions"
+        # because they repeat monthly, but they are not actionable for the user.
+        if _looks_like_bank_artefact(raw_description):
+            continue
+        # Pretty-print the merchant name once at enqueue time so the brief
+        # never has to deal with raw ACH descriptors. Brand overrides catch
+        # common SaaS/utility names; everything else falls through to the
+        # generic display normalizer.
+        pretty_name = _pretty_subscription_name(raw_description)
+
         history = await repo.get_recurring_price_history(int(s["id"]), limit=2)
         prev_amount = None
         if history:
@@ -304,7 +417,7 @@ async def detect_subscription_changes() -> int:
                 type="subscription_creep",
                 priority="P1",
                 payload={
-                    "name": s["description"],
+                    "name": pretty_name,
                     "amount_cents": int(s["last_amount_cents"]),
                     "previous_amount_cents": prev_amount,
                     "stream_id": int(s["id"]),
