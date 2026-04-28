@@ -101,7 +101,35 @@ async def start_bot_runtime():
     logger.info("Telegram bot runtime initialized")
 
     await _register_menu_button(application)
+    await _register_commands(application)
     return _app
+
+
+async def _register_commands(application) -> None:
+    """Publish the slash-command list shown by the native Menu button.
+
+    The blue "Menu" button next to the input field shows this list when
+    tapped. Telegram renders each entry as a wide native row — so we get
+    a discoverable, large-tap-target command palette for free, alongside
+    the persistent reply keyboard that drives day-to-day navigation.
+    """
+    try:
+        from telegram import BotCommand
+
+        await application.bot.set_my_commands(
+            [
+                BotCommand("menu", "Open the main menu"),
+                BotCommand("balance", "Show today's balance"),
+                BotCommand("networth", "Show net worth"),
+                BotCommand("upcoming", "Upcoming subscriptions"),
+                BotCommand("milestone", "Add a savings milestone"),
+                BotCommand("anniversary", "Set anniversary date"),
+                BotCommand("link", "Pair this chat with the web app"),
+            ]
+        )
+        logger.info("Telegram bot commands registered")
+    except Exception:
+        logger.exception("Failed to register bot commands")
 
 
 async def stop_bot_runtime():

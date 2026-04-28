@@ -21,6 +21,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
     Update,
 )
 from telegram.constants import ParseMode
@@ -85,11 +87,10 @@ def _pad_label(label: str, target: int = _MENU_PAD_TARGET) -> str:
 
 
 def _main_menu_kb() -> InlineKeyboardMarkup:
-    # 3 columns x 2 rows. Each cell is padded with IDEOGRAPHIC SPACE so the
-    # row total exceeds the chat bubble's natural width; Telegram then
-    # clamps at bubble-max and splits that width evenly across the three
-    # buttons in the row. Net effect: the menu reads as a 3x2 grid of
-    # equally-sized tiles instead of a tall list of narrow rows.
+    # Inline 3x2 grid kept as a fallback surface for users who explicitly
+    # type /menu — but the primary main menu now renders as a persistent
+    # reply keyboard (see _main_reply_kb) so the buttons are full device
+    # width instead of bubble width.
     def _cell(label: str, cb: str) -> InlineKeyboardButton:
         return InlineKeyboardButton(_pad_label(label, target=12), callback_data=cb)
 
@@ -110,6 +111,49 @@ def _main_menu_kb() -> InlineKeyboardMarkup:
 
 def _back_kb(target: str = "menu:main") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("◀️ Back", callback_data=target)]])
+
+
+# ---------------------------------------------------------------------------
+# Persistent ReplyKeyboard — the primary main-menu surface.
+#
+# Inline keyboards are bubble-width-bound; on iPhone that caps each button
+# at ~75% of screen width even with aggressive ideographic-space padding,
+# which is too small for a thumb-first menu. Reply keyboards live in the
+# bottom keyboard area instead, so each cell occupies a fraction of the
+# *device* width — roughly 2-3x the visible size of an inline button. With
+# is_persistent=True the keyboard stays on screen between interactions, so
+# the user never has to send /menu again to find their way around.
+#
+# The trade-off: a tap on a reply-keyboard button sends a normal text
+# message containing the button's label. We route those labels back to the
+# existing menu handlers via _REPLY_BUTTON_TO_SECTION + an early branch in
+# on_text_message so the same submenus light up.
+# ---------------------------------------------------------------------------
+
+# Lookup from reply-keyboard label to the menu section it should open.
+# Keep the labels here in lock-step with _main_reply_kb below — the
+# MessageHandler matches on exact string equality.
+_REPLY_BUTTON_TO_SECTION: Dict[str, str] = {
+    "➕ Add": "cash",
+    "📊 Today": "today",
+    "🔔 Alerts": "alerts",
+    "👥 Family": "family",
+    "🎯 Goals": "goals",
+    "⚙️ Settings": "settings",
+}
+
+
+def _main_reply_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton("➕ Add"), KeyboardButton("📊 Today")],
+            [KeyboardButton("🔔 Alerts"), KeyboardButton("👥 Family")],
+            [KeyboardButton("🎯 Goals"), KeyboardButton("⚙️ Settings")],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+        input_field_placeholder="Tap a menu item or type a command",
+    )
 
 
 def _cash_menu_kb() -> InlineKeyboardMarkup:
@@ -208,9 +252,13 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user = await _user_for_chat(chat_id)
     if user:
+        # Anchor the persistent reply keyboard. resize_keyboard + is_persistent
+        # together keep the buttons visible at the bottom of every chat in
+        # this conversation, so the user never has to type /menu again.
         await update.message.reply_text(
-            f"Welcome back, {user['username']} 👋\nPick a section:",
-            reply_markup=_main_menu_kb(),
+            f"Welcome back, {user['username']} 👋\nPick a section below or"
+            " tap a slash-command from the Menu button.",
+            reply_markup=_main_reply_kb(),
         )
         return
     await update.message.reply_text(
@@ -225,7 +273,12 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = await _ensure_linked(update)
     if not user:
         return
-    await update.message.reply_text("Main menu:", reply_markup=_main_menu_kb())
+    # Re-anchor the reply keyboard. Telegram only renders it after a message
+    # is sent that carries the markup, so calling /menu again is a quick
+    # way to force it back if the user accidentally hid it.
+    await update.message.reply_text(
+        "Main menu — buttons stay below.", reply_markup=_main_reply_kb()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +321,8 @@ async def cmd_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         payload={"telegram_username": getattr(tg_user, "username", None)},
     )
     await update.message.reply_text(
-        f"Linked ✅ Welcome, {user['username']}!", reply_markup=_main_menu_kb()
+        f"Linked ✅ Welcome, {user['username']}!",
+        reply_markup=_main_reply_kb(),
     )
 
 
@@ -694,6 +748,56 @@ async def cmd_upcoming(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------------------------------------------------------------------
 
 
+async def _open_main_section(
+    update: Update, user: Dict[str, Any], section: str
+) -> None:
+    """Render a top-level menu section as a NEW message (no callback query).
+
+    This is the reply-keyboard counterpart of ``_on_menu``: when the user
+    taps "➕ Add" / "📊 Today" / etc. on the persistent reply keyboard, the
+    bot receives a plain text message and we open the corresponding submenu
+    by sending a fresh message. We keep ``_on_menu`` unchanged because it's
+    still used for inline callback navigation (back buttons, drill-downs).
+    """
+    repo = get_bot_repo()
+    msg = update.message
+    if section == "cash":
+        await msg.reply_text(
+            "➕ <b>Add transaction</b>\nTap <b>Type</b> for a quick entry, "
+            "or <b>Receipt</b> to upload a photo.",
+            reply_markup=_cash_menu_kb(),
+            parse_mode=ParseMode.HTML,
+        )
+    elif section == "today":
+        snapshot = await _today_snapshot(user["id"])
+        await msg.reply_text(
+            snapshot, reply_markup=_back_kb(), parse_mode=ParseMode.HTML
+        )
+    elif section == "alerts":
+        prefs = await repo.list_notification_prefs(user["id"])
+        await msg.reply_text(
+            "🔔 Toggle alerts (✅ on / ❌ off):", reply_markup=_alerts_menu_kb(prefs)
+        )
+    elif section == "family":
+        await msg.reply_text(
+            "👥 <b>Family</b>",
+            reply_markup=_family_menu_kb(),
+            parse_mode=ParseMode.HTML,
+        )
+    elif section == "goals":
+        await msg.reply_text(
+            "🎯 <b>Goals</b>",
+            reply_markup=_goals_menu_kb(),
+            parse_mode=ParseMode.HTML,
+        )
+    elif section == "settings":
+        await msg.reply_text(
+            "⚙️ <b>Settings</b>",
+            reply_markup=_settings_menu_kb(),
+            parse_mode=ParseMode.HTML,
+        )
+
+
 async def on_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from web.telegram.activity import log_bot_activity
 
@@ -704,6 +808,25 @@ async def on_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = (update.message.text or "").strip()
     if not txt:
         return
+
+    # Persistent reply-keyboard taps arrive here as plain text. Dispatch to
+    # the matching menu section before trying to parse the message as a
+    # cash entry. Skipped while a conversation handler is mid-flight (e.g.
+    # the cash-entry "await amount" state) so keystroke flow isn't hijacked.
+    if (
+        txt in _REPLY_BUTTON_TO_SECTION
+        and not context.user_data.get("cash_state")
+    ):
+        await log_bot_activity(
+            kind="incoming.text",
+            summary=f"Reply-keyboard tap: {txt}",
+            user_id=user["id"],
+            chat_id=chat_id,
+            payload={"section": _REPLY_BUTTON_TO_SECTION[txt]},
+        )
+        await _open_main_section(update, user, _REPLY_BUTTON_TO_SECTION[txt])
+        return
+
     parsed = _parse_cash_entry(txt)
     if parsed is None:
         await update.message.reply_text(
