@@ -93,8 +93,13 @@ app.include_router(insights_router)
 app.include_router(app_settings_router)
 app.include_router(internal_transfers_router)
 app.include_router(audit_router)
-app.include_router(bot_router)
-app.include_router(telegram_router)
+# Bot + Telegram webhook routes are registered only when a bot token is
+# configured. Without TELEGRAM_BOT_TOKEN there's nothing they can do (the
+# bot runtime no-ops at startup too) and exposing them just adds attack
+# surface in demo / portfolio deployments. Restart required to flip.
+if (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip():
+    app.include_router(bot_router)
+    app.include_router(telegram_router)
 
 # ---------------------------------------------------------------------------
 # Startup

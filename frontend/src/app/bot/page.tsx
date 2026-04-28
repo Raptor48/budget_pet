@@ -10,8 +10,13 @@
  * Visual notes (V2.3): every tab content fades in from below; the page
  * header carries a subtle accent dot in the bot-brand colour so the section
  * is recognisable at a glance even with the sidebar collapsed.
+ *
+ * When NEXT_PUBLIC_HIDE_BOT_TAB=true (demo/portfolio builds with no
+ * Telegram bot configured), the route silently redirects to / so a
+ * direct URL paste doesn't expose a useless surface.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Activity,
   Bot as BotIcon,
@@ -61,9 +66,22 @@ const TABS: TabSpec[] = [
   { value: "activity", label: "Activity", icon: Activity },
 ];
 
+const HIDE_BOT_TAB = process.env.NEXT_PUBLIC_HIDE_BOT_TAB === "true";
+
 export default function BotPage() {
   const [tab, setTab] = useState<string>("overview");
   const tabsList = useMemo(() => TABS, []);
+  const router = useRouter();
+
+  useEffect(() => {
+    if (HIDE_BOT_TAB) {
+      router.replace("/");
+    }
+  }, [router]);
+
+  if (HIDE_BOT_TAB) {
+    return null;
+  }
 
   return (
     <AppLayout>

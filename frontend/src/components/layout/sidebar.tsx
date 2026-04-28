@@ -31,6 +31,11 @@ import { useAuth } from "@/contexts/auth-context";
 import { insightsApi, plaidApi } from "@/lib/api";
 
 // `divider: true` inserts a thin separator above the row in the sidebar.
+// Bot row is suppressed when NEXT_PUBLIC_HIDE_BOT_TAB=true so demo/portfolio
+// builds don't expose the Telegram bot surface (it makes no sense without a
+// configured TELEGRAM_BOT_TOKEN and clutters the UI for reviewers).
+const HIDE_BOT_TAB = process.env.NEXT_PUBLIC_HIDE_BOT_TAB === "true";
+
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard, ownerOnly: false },
   { name: "Transactions", href: "/transactions", icon: Receipt, ownerOnly: false },
@@ -38,7 +43,17 @@ const navigation = [
   { name: "Recurring", href: "/recurring", icon: Repeat, ownerOnly: false },
   { name: "Reports", href: "/reports", icon: PieChart, ownerOnly: false },
   { name: "Insights", href: "/insights", icon: Lightbulb, ownerOnly: false },
-  { name: "Bot", href: "/bot", icon: Bot, ownerOnly: false, divider: true },
+  ...(HIDE_BOT_TAB
+    ? []
+    : [
+        {
+          name: "Bot",
+          href: "/bot",
+          icon: Bot,
+          ownerOnly: false,
+          divider: true,
+        },
+      ]),
 ];
 
 interface SidebarProps {
