@@ -18,6 +18,7 @@ import {
   ArrowDownToDot,
   Bell,
   CalendarClock,
+  CalendarHeart,
   ClipboardCheck,
   Loader2,
   Plug,
@@ -45,6 +46,7 @@ const ALERT_ICONS: Record<string, LucideIcon> = {
   mood_check: Smile,
   leaderboard: Trophy,
   sunday_brief: ClipboardCheck,
+  anniversary: CalendarHeart,
 };
 
 // P0 / P1 / P2 labels live next to each toggle so the user can decide at a

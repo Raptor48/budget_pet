@@ -123,6 +123,18 @@ def _render_streak_milestone(payload: Dict[str, Any]) -> str:
     return _line("🔥", f"<b>{label}</b>: {count} in a row")
 
 
+def _render_anniversary(payload: Dict[str, Any]) -> str:
+    days = int(payload.get("days_until") or 0)
+    years = int(payload.get("years") or 0)
+    year_part = f" — {years} year{'' if years == 1 else 's'} together" if years > 0 else ""
+    if days == 0:
+        return _line("💌", f"<b>Happy anniversary!</b>{year_part}")
+    return _line(
+        "💌",
+        f"Anniversary in <b>{days} days</b>{year_part}. Time to plan something.",
+    )
+
+
 def _render_test_alert(payload: Dict[str, Any]) -> str:
     """End-to-end probe — verifies queue → dispatcher → Telegram works.
     Triggered manually from /bot → Overview → Send test alert."""
@@ -145,6 +157,7 @@ _RENDERERS = {
     "mood_check": _render_mood_check,
     "leaderboard": _render_leaderboard,
     "streak_milestone": _render_streak_milestone,
+    "anniversary": _render_anniversary,
     "test_alert": _render_test_alert,
 }
 
@@ -183,6 +196,7 @@ _SECTION_ORDER = [
     ("new_merchant", "🆕 New merchants"),
     ("milestone", "🎉 Milestones"),
     ("streak_milestone", "🔥 Streaks"),
+    ("anniversary", "💌 Anniversary"),
     ("leaderboard", "🏆 Leaderboard"),
     ("mood_check", "🤔 Mood check"),
 ]

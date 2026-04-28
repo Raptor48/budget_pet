@@ -7,6 +7,10 @@
  * push didn't fire or a photo didn't parse. Errors land at the top of
  * the list with a red badge and a click-to-expand traceback. The tab
  * auto-refreshes every 10 seconds while it's the active view.
+ *
+ * Owners get an extra "Everyone" scope toggle so they can see rows
+ * belonging to other linked users — handy when one partner reports the
+ * bot misfired and the admin wants the traceback without juggling logins.
  */
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -40,10 +44,12 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { botApi, type BotActivityEntry } from "@/lib/api";
+import { getCurrentUser } from "@/lib/auth";
 import { confirm, notify, onMutationError } from "@/lib/notify";
 
 type SeverityFilter = "all" | "error" | "warn" | "info";
 type KindFilter = "all" | "error" | "incoming." | "outgoing." | "ocr." | "link.";
+type ScopeFilter = "self" | "all";
 
 const SEVERITY_LABEL: Record<Exclude<SeverityFilter, "all">, string> = {
   error: "Errors",
@@ -82,14 +88,28 @@ export function BotActivityTab() {
   const qc = useQueryClient();
   const [severity, setSeverity] = useState<SeverityFilter>("all");
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
+  const [scope, setScope] = useState<ScopeFilter>("self");
+
+  const me = useQuery({
+    queryKey: ["auth", "me"],
+    queryFn: getCurrentUser,
+    staleTime: 60_000,
+  });
+  const isOwner = !!me.data?.is_owner;
+
+  // Effective scope: only owners can fetch the cross-user view, so guard
+  // against a non-owner ever being stuck in `all` mode (e.g. ownership
+  // revoked while the page was open).
+  const effectiveScope: ScopeFilter = isOwner ? scope : "self";
 
   const list = useQuery({
-    queryKey: ["bot", "activity", severity, kindFilter],
+    queryKey: ["bot", "activity", severity, kindFilter, effectiveScope],
     queryFn: () =>
       botApi.listActivity({
         limit: 200,
         severity: severity === "all" ? undefined : severity,
         kind_prefix: kindFilter === "all" ? undefined : kindFilter,
+        scope: effectiveScope,
       }),
     // Slightly chatty refresh — 10 seconds is short enough that you can
     // press a button in Telegram and watch the corresponding row appear,
@@ -134,6 +154,12 @@ export function BotActivityTab() {
         every push it sent, every uncaught error. Auto-refreshes every 10s.
         Errors and warnings show a click-to-expand traceback. Storage is
         capped at 30 days.
+        {isOwner ? (
+          <span className="ml-1">
+            Owners can switch scope to <em>Everyone</em> to see rows from
+            other linked users.
+          </span>
+        ) : null}
       </p>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -168,6 +194,20 @@ export function BotActivityTab() {
             ))}
           </SelectContent>
         </Select>
+        {isOwner ? (
+          <Select
+            value={scope}
+            onValueChange={(v) => setScope(v as ScopeFilter)}
+          >
+            <SelectTrigger className="h-9 w-[140px] text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="self">Just me</SelectItem>
+              <SelectItem value="all">Everyone</SelectItem>
+            </SelectContent>
+          </Select>
+        ) : null}
         <Button
           variant="ghost"
           size="sm"
@@ -313,7 +353,11 @@ function ActivityRow({ entry }: { entry: BotActivityEntry }) {
             {formatDistanceToNowStrict(new Date(entry.created_at), {
               addSuffix: true,
             })}
-            {entry.user_id ? ` · user ${entry.user_id}` : ""}
+            {entry.username
+              ? ` · @${entry.username}`
+              : entry.user_id
+                ? ` · user ${entry.user_id}`
+                : ""}
             {entry.chat_id ? ` · chat ${entry.chat_id}` : ""}
           </div>
         </div>

@@ -96,6 +96,8 @@ async def detect_budget_thresholds() -> int:
 
 
 async def detect_recurring_tomorrow() -> int:
+    from web.reports.calculations import next_future_occurrence
+
     pool = await get_pool()
     repo = get_bot_repo()
     target = date.today() + timedelta(days=1)
@@ -108,17 +110,19 @@ async def detect_recurring_tomorrow() -> int:
             return 0
         rows = await conn.fetch(
             """
-            SELECT id, description, average_amount_cents,
-                   (last_date + INTERVAL '1 month')::date AS next_date
+            SELECT id, description, frequency, average_amount_cents, last_date
             FROM recurring_streams
             WHERE is_active = TRUE
               AND user_status = 'active'
               AND last_date IS NOT NULL
-              AND last_date >= NOW() - INTERVAL '60 days'
             """,
         )
     for r in rows:
-        if r["next_date"] != target:
+        # Advance from last_date to the next *future* expected charge using
+        # the same helper the FE/forecast use. Plaid's last_date can be
+        # several cadences behind, so a single +1 month is wrong.
+        nxt = next_future_occurrence(r["last_date"], r["frequency"] or "")
+        if nxt != target:
             continue
         for u in users:
             uid = int(u["id"])
@@ -427,6 +431,77 @@ async def detect_mood_check() -> int:
 
 
 # ---------------------------------------------------------------------------
+# Anniversary — fires 7 days before and on the day itself.
+# ---------------------------------------------------------------------------
+
+
+def _next_anniversary(original: date, today: date) -> date:
+    """Project the original wedding date onto today's calendar.
+
+    Handles Feb 29 by falling back to Feb 28 in non-leap years, so a leapling
+    couple still gets a notification every year.
+    """
+    year = today.year
+    try:
+        candidate = original.replace(year=year)
+    except ValueError:
+        # Feb 29 in a non-leap year
+        candidate = original.replace(year=year, day=28)
+    if candidate < today:
+        try:
+            candidate = original.replace(year=year + 1)
+        except ValueError:
+            candidate = original.replace(year=year + 1, day=28)
+    return candidate
+
+
+async def detect_anniversary() -> int:
+    pool = await get_pool()
+    repo = get_bot_repo()
+    fired = 0
+    today = date.today()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT cs.user_id, cs.anniversary_date
+              FROM couple_settings cs
+              JOIN users u ON u.id = cs.user_id
+             WHERE cs.anniversary_date IS NOT NULL
+               AND u.telegram_chat_id IS NOT NULL
+            """,
+        )
+    for r in rows:
+        original: date = r["anniversary_date"]
+        next_anniv = _next_anniversary(original, today)
+        days_until = (next_anniv - today).days
+        # We fire two events: T-7 (heads-up) and T-0 (celebration).
+        # Outside those two days nothing happens.
+        if days_until not in (0, 7):
+            continue
+        uid = int(r["user_id"])
+        if not await repo.is_alert_enabled(uid, "anniversary"):
+            continue
+        years = next_anniv.year - original.year
+        new_id = await enqueue_notification(
+            user_id=uid,
+            type="anniversary",
+            priority="P1",
+            payload={
+                "anniversary_date": str(next_anniv),
+                "original_date": str(original),
+                "years": years,
+                "days_until": days_until,
+            },
+            dedup_key=dedup_key_for(
+                "anniversary", uid, str(next_anniv), days_until
+            ),
+        )
+        if new_id:
+            fired += 1
+    return fired
+
+
+# ---------------------------------------------------------------------------
 # Couple leaderboard — Sunday morning P2
 # ---------------------------------------------------------------------------
 
@@ -485,6 +560,7 @@ async def run_all_producers() -> Dict[str, int]:
         ("subscription_creep", detect_subscription_changes),
         ("milestone", detect_milestones),
         ("mood_check", detect_mood_check),
+        ("anniversary", detect_anniversary),
     ]:
         try:
             results[name] = await fn()

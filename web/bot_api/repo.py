@@ -91,6 +91,15 @@ DEFAULT_NOTIFICATION_PREFS: List[Dict[str, Any]] = [
         "enabled": True,
         "description": "All-in-one Sunday morning summary right after sync.",
     },
+    {
+        "alert_type": "anniversary",
+        "label": "Anniversary reminder",
+        "enabled": True,
+        "description": (
+            "Heads-up 7 days before your anniversary, plus a celebration "
+            "on the day itself. Set the date on the Overview tab."
+        ),
+    },
 ]
 
 
@@ -246,6 +255,59 @@ class BotRepository:
                 ORDER BY id
                 """,
             )
+        return [dict(r) for r in rows]
+
+    async def list_linked_users(self) -> List[Dict[str, Any]]:
+        """All users with a Telegram chat attached, plus their most recent
+        bot activity timestamp. Used by the owner view in Bot → Overview
+        so the admin can see at a glance who's wired up."""
+        pool = await self._pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT u.id              AS user_id,
+                       u.username,
+                       u.is_owner,
+                       u.telegram_chat_id,
+                       u.telegram_username,
+                       (
+                           SELECT MAX(created_at) FROM bot_activity_log b
+                            WHERE b.user_id = u.id
+                       )                  AS last_activity_at
+                  FROM users u
+                 WHERE u.telegram_chat_id IS NOT NULL
+                 ORDER BY u.id
+                """,
+            )
+        return [dict(r) for r in rows]
+
+    async def list_household_members(self) -> List[Dict[str, Any]]:
+        """Real people the chores/audit/family features should care about.
+
+        Excludes the env-var bootstrap admin (``ADMIN_LOGIN``), which is a
+        technical fallback account for emergency access — not a household
+        member who washes dishes. Falls back to all users when the env
+        isn't set so dev environments still work.
+        """
+        import os
+
+        admin_login = (os.getenv("ADMIN_LOGIN") or "").strip().lower()
+        pool = await self._pool()
+        async with pool.acquire() as conn:
+            if admin_login:
+                rows = await conn.fetch(
+                    """
+                    SELECT id, username
+                      FROM users
+                     WHERE LOWER(username) <> $1
+                     ORDER BY id
+                    """,
+                    admin_login,
+                )
+            else:
+                rows = await conn.fetch(
+                    "SELECT id, username FROM users ORDER BY id",
+                )
         return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------

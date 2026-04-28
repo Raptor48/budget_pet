@@ -22,6 +22,34 @@ class TelegramLinkStatus(BaseModel):
     pending_expires_at: Optional[datetime] = None
 
 
+class LinkedUser(BaseModel):
+    """One row per user with a Telegram chat attached.
+
+    Returned by the owner-only ``GET /api/bot/telegram/linked-users``
+    endpoint so the admin/owner can see who in the household has the bot
+    wired up without juggling per-user logins.
+    """
+
+    user_id: int
+    username: str
+    is_owner: bool
+    telegram_chat_id: int
+    telegram_username: Optional[str] = None
+    last_activity_at: Optional[datetime] = None
+
+
+class HouseholdMember(BaseModel):
+    """A user the bot considers a real household member.
+
+    Excludes the env-var bootstrap admin (used as an emergency-only
+    technical account) so chore rotation, audit hosts, etc. only show
+    real people.
+    """
+
+    id: int
+    username: str
+
+
 class TelegramLinkCodeOut(BaseModel):
     code: str
     expires_at: datetime
@@ -286,6 +314,7 @@ class LeaderboardOut(BaseModel):
 class BotActivityEntry(BaseModel):
     id: int
     user_id: Optional[int] = None
+    username: Optional[str] = None
     chat_id: Optional[int] = None
     kind: str
     severity: str

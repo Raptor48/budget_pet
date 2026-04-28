@@ -119,32 +119,42 @@ def _minimal_stream_row(**overrides):
 
 
 class TestListStreamsSortedByNextPayment:
-    """``list_streams`` orders by soonest ``next_occurrence(last_date, frequency)``."""
+    """``list_streams`` orders by soonest *future* charge — uses
+    ``next_future_occurrence``, so a stream whose ``last_date`` is months
+    behind sorts by its next-after-today projection, not by the next step
+    after ``last_date`` (which may itself be in the past)."""
 
     @pytest.mark.asyncio
     async def test_sorts_by_next_payment_not_db_order(self):
         from web.recurring.repo import RecurringRepository
 
+        # All test last_dates are seeded in the future relative to any
+        # plausible "today", so a single cadence step is already on/after
+        # today and the test's expected ordering doesn't drift over time.
+        future_anchor = date.today() + timedelta(days=30)
+        # Expected next dates (one step from anchor):
+        #   id=10  monthly  → +1mo
+        #   id=20  weekly   → +7d   (soonest)
+        #   id=30  monthly  → +1mo, but seeded 9 days earlier so it lands
+        #                     ahead of id=10 → second.
         conn = AsyncMock()
         pool = make_mock_pool(conn)
-        # DB returns id order 10, 20, 30 — expected next dates: weekly Apr 18→Apr 25,
-        # monthly Apr 1→May 1, monthly Apr 10→May 10 → sorted 20, 30, 10.
         conn.fetch.return_value = [
             _minimal_stream_row(
                 id=10,
-                last_date=date(2026, 4, 10),
+                last_date=future_anchor,
                 frequency="MONTHLY",
                 description="A",
             ),
             _minimal_stream_row(
                 id=20,
-                last_date=date(2026, 4, 18),
+                last_date=future_anchor,
                 frequency="WEEKLY",
                 description="B",
             ),
             _minimal_stream_row(
                 id=30,
-                last_date=date(2026, 4, 1),
+                last_date=future_anchor - timedelta(days=9),
                 frequency="MONTHLY",
                 description="C",
             ),

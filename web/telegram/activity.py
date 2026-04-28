@@ -125,24 +125,32 @@ async def list_activity(
     kind_prefix: Optional[str] = None,
     user_id: Optional[int] = None,
 ) -> list[Dict[str, Any]]:
-    """Read recent rows. Used by GET /api/bot/activity."""
+    """Read recent rows. Used by GET /api/bot/activity.
+
+    The row dict includes ``username`` when the originating user is known,
+    so the cross-user (owner) view can label rows without a per-row
+    follow-up lookup.
+    """
     pool = await get_pool()
     sql = (
-        "SELECT id, user_id, chat_id, kind, severity, summary, payload, error, "
-        "created_at FROM bot_activity_log WHERE 1=1"
+        "SELECT b.id, b.user_id, b.chat_id, b.kind, b.severity, b.summary, "
+        "b.payload, b.error, b.created_at, u.username "
+        "FROM bot_activity_log b "
+        "LEFT JOIN users u ON u.id = b.user_id "
+        "WHERE 1=1"
     )
     args: list[Any] = []
     if severity:
         args.append(severity)
-        sql += f" AND severity = ${len(args)}"
+        sql += f" AND b.severity = ${len(args)}"
     if kind_prefix:
         args.append(kind_prefix + "%")
-        sql += f" AND kind LIKE ${len(args)}"
+        sql += f" AND b.kind LIKE ${len(args)}"
     if user_id is not None:
         args.append(user_id)
-        sql += f" AND (user_id = ${len(args)} OR user_id IS NULL)"
+        sql += f" AND (b.user_id = ${len(args)} OR b.user_id IS NULL)"
     args.append(int(limit))
-    sql += f" ORDER BY id DESC LIMIT ${len(args)}"
+    sql += f" ORDER BY b.id DESC LIMIT ${len(args)}"
     async with pool.acquire() as conn:
         rows = await conn.fetch(sql, *args)
     out = []

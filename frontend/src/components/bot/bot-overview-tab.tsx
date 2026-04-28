@@ -3,6 +3,12 @@
 /**
  * Overview tab — link your Telegram chat, see core settings, tweak the
  * morning brief / quiet hours / mood threshold from one place.
+ *
+ * Layout note (V2.3 polish): the brief/quiet-hours fields live in a 2-col
+ * grid where every cell shares the same height + icon treatment so the
+ * column doesn't look ragged on narrow screens. Anniversary computes the
+ * *next* occurrence client-side so a wedding date in the past still
+ * surfaces "next anniversary in N days" — the bot fires on T-7 and T-0.
  */
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -17,10 +23,12 @@ import {
   Link as LinkIcon,
   Loader2,
   MoonStar,
+  Shield,
   Sparkles,
   Sun,
   Trophy,
   Unlink,
+  Users,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -30,11 +38,47 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { botApi, type CoupleSettings, type CoupleSettingsUpdate } from "@/lib/api";
+import {
+  botApi,
+  type CoupleSettings,
+  type CoupleSettingsUpdate,
+  type LinkedUser,
+} from "@/lib/api";
+import { getCurrentUser } from "@/lib/auth";
 import { notify, onMutationError } from "@/lib/notify";
 
-import { formatCents } from "./bot-helpers";
+import { formatCents, formatDate } from "./bot-helpers";
+
+// Curated short list — covers ~99% of household setups. Anything else can
+// be typed via the "Other (custom)" branch.
+const TIMEZONE_PRESETS = [
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "America/Toronto",
+  "Europe/London",
+  "Europe/Berlin",
+  "Europe/Amsterdam",
+  "Europe/Madrid",
+  "Europe/Warsaw",
+  "Europe/Moscow",
+  "Asia/Tokyo",
+  "Asia/Singapore",
+  "Asia/Dubai",
+  "Australia/Sydney",
+  "UTC",
+];
+
+const TZ_CUSTOM_VALUE = "__custom__";
 
 export function BotOverviewTab() {
   const qc = useQueryClient();
@@ -45,6 +89,11 @@ export function BotOverviewTab() {
   const settings = useQuery({
     queryKey: ["bot", "settings"],
     queryFn: botApi.getSettings,
+  });
+  const me = useQuery({
+    queryKey: ["auth", "me"],
+    queryFn: getCurrentUser,
+    staleTime: 60_000,
   });
 
   const generateCode = useMutation({
@@ -64,9 +113,6 @@ export function BotOverviewTab() {
     mutationFn: () => botApi.sendTestAlert(),
     onSuccess: (res) => {
       if (res.sent) {
-        // Drain runs in the background, so the actual Telegram push lands
-        // a second or two later. Wording reflects that without making the
-        // user wait on this toast.
         notify.success("Test alert queued — should pop up in Telegram any moment.");
       } else if (res.deduped) {
         notify.info("Already sent one in the last second — check Telegram.");
@@ -160,6 +206,8 @@ export function BotOverviewTab() {
         )}
       </section>
 
+      {me.data?.is_owner ? <LinkedUsersSection /> : null}
+
       <Separator />
 
       <section>
@@ -194,6 +242,77 @@ function SettingsSkeleton() {
       <Skeleton className="h-14 w-full sm:col-span-2" />
       <Skeleton className="h-14 w-full sm:col-span-2" />
     </div>
+  );
+}
+
+function LinkedUsersSection() {
+  const linked = useQuery({
+    queryKey: ["bot", "linked-users"],
+    queryFn: botApi.listLinkedUsers,
+    staleTime: 30_000,
+  });
+
+  return (
+    <section>
+      <h2 className="mb-1 flex items-center gap-2 text-base font-semibold">
+        <Users className="h-4 w-4 text-muted-foreground" />
+        Linked household members
+      </h2>
+      <p className="mb-3 text-xs text-muted-foreground">
+        Everyone in the household with the bot wired up. Visible to owners
+        only — useful when someone says &ldquo;did you get the alert?&rdquo;.
+      </p>
+      {linked.isLoading ? (
+        <div className="space-y-2">
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-12 w-full" />
+        </div>
+      ) : !linked.data?.length ? (
+        <div className="rounded-md border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">
+          Nobody else has linked yet.
+        </div>
+      ) : (
+        <ul className="divide-y rounded-md border">
+          {linked.data.map((u) => (
+            <LinkedUserRow key={u.user_id} user={u} />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function LinkedUserRow({ user }: { user: LinkedUser }) {
+  const lastSeen = user.last_activity_at
+    ? formatDistanceToNowStrict(new Date(user.last_activity_at), {
+        addSuffix: true,
+      })
+    : "no activity yet";
+  return (
+    <li className="flex flex-wrap items-center gap-3 px-3 py-2.5 text-sm">
+      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
+        {user.is_owner ? (
+          <Shield className="h-3.5 w-3.5" aria-hidden />
+        ) : (
+          <Users className="h-3.5 w-3.5" aria-hidden />
+        )}
+      </span>
+      <div className="min-w-0">
+        <div className="flex items-center gap-1.5 font-medium">
+          {user.username}
+          {user.is_owner ? (
+            <Badge variant="outline" className="text-[10px] uppercase">
+              Owner
+            </Badge>
+          ) : null}
+        </div>
+        <div className="text-xs text-muted-foreground">
+          Chat <code className="rounded bg-muted px-1 py-0.5">{user.telegram_chat_id}</code>
+          {user.telegram_username ? ` · @${user.telegram_username}` : ""}
+          {` · last activity ${lastSeen}`}
+        </div>
+      </div>
+    </li>
   );
 }
 
@@ -292,6 +411,36 @@ function PendingCodeCard({
   );
 }
 
+/**
+ * Project an anniversary date onto today's calendar. Mirrors
+ * `_next_anniversary` in web/notifications/producers.py — kept in sync so
+ * the UI hint and the actual notification agree on what "next" means.
+ */
+function nextAnniversary(originalIso: string, today: Date): Date | null {
+  const [yStr, mStr, dStr] = originalIso.split("-");
+  const y = Number(yStr);
+  const m = Number(mStr) - 1;
+  const day = Number(dStr);
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(day)) {
+    return null;
+  }
+  const tryDate = (year: number) => {
+    const dt = new Date(year, m, day);
+    // Handle Feb 29 in a non-leap year — JS rolls over to Mar 1, so detect
+    // the rollover and clamp to Feb 28.
+    if (dt.getMonth() !== m) return new Date(year, m, 28);
+    return dt;
+  };
+  let candidate = tryDate(today.getFullYear());
+  const startOfToday = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate(),
+  );
+  if (candidate < startOfToday) candidate = tryDate(today.getFullYear() + 1);
+  return candidate;
+}
+
 function SettingsForm({ initial }: { initial: CoupleSettings }) {
   const qc = useQueryClient();
 
@@ -312,6 +461,17 @@ function SettingsForm({ initial }: { initial: CoupleSettings }) {
   useEffect(() => {
     setForm(buildForm(initial));
   }, [initial]);
+
+  // Track whether the timezone is one of the curated presets so we can
+  // show the "Other (custom)" branch when the user has typed something
+  // unusual (e.g. America/Indiana/Indianapolis).
+  const tzIsPreset = TIMEZONE_PRESETS.includes(form.morning_brief_tz);
+  const [tzMode, setTzMode] = useState<"preset" | "custom">(
+    tzIsPreset || !form.morning_brief_tz ? "preset" : "custom",
+  );
+  useEffect(() => {
+    setTzMode(tzIsPreset || !form.morning_brief_tz ? "preset" : "custom");
+  }, [tzIsPreset, form.morning_brief_tz]);
 
   const save = useMutation({
     mutationFn: (patch: CoupleSettingsUpdate) => botApi.updateSettings(patch),
@@ -344,58 +504,113 @@ function SettingsForm({ initial }: { initial: CoupleSettings }) {
     });
   };
 
+  // Anniversary hint — show next computed anniversary so a wedding date in
+  // the past still feels meaningful. Computed client-side; the producer
+  // does the same projection on the server when it fires.
+  const anniversaryHint = useMemo(() => {
+    if (!form.anniversary_date) {
+      return "Bot pings 7 days before and on the day. Past dates are projected to this year.";
+    }
+    const next = nextAnniversary(form.anniversary_date, new Date());
+    if (!next) return null;
+    const diffDays = Math.round(
+      (next.getTime() - Date.now()) / (1000 * 60 * 60 * 24),
+    );
+    const original = new Date(form.anniversary_date);
+    const years = Number.isFinite(original.getFullYear())
+      ? next.getFullYear() - original.getFullYear()
+      : null;
+    const yearStr = years && years > 0 ? ` · ${years} years together` : "";
+    return `Next: ${formatDate(next.toISOString())} — in ${diffDays} day${diffDays === 1 ? "" : "s"}${yearStr}. Bot pings T-7 and on the day.`;
+  }, [form.anniversary_date]);
+
   return (
     <form className="grid gap-4 sm:grid-cols-2" onSubmit={submit}>
-      <FieldWithIcon
+      <Field
         icon={Sun}
         id="brief"
         label="Morning brief"
         hint="Bundles overnight P1 alerts into one push."
       >
-        <Input
+        <PolishedInput
           id="brief"
           type="time"
           value={form.morning_brief_local}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, morning_brief_local: e.target.value }))
+          onChange={(v) =>
+            setForm((f) => ({ ...f, morning_brief_local: v }))
           }
         />
-      </FieldWithIcon>
+      </Field>
 
-      <FieldWithIcon icon={Globe} id="tz" label="Timezone">
-        <Input
-          id="tz"
-          placeholder="America/New_York"
-          value={form.morning_brief_tz}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, morning_brief_tz: e.target.value }))
-          }
-        />
-      </FieldWithIcon>
+      <Field icon={Globe} id="tz" label="Timezone" hint="Used for brief + quiet hours.">
+        <Select
+          value={tzMode === "preset" ? form.morning_brief_tz : TZ_CUSTOM_VALUE}
+          onValueChange={(v) => {
+            if (v === TZ_CUSTOM_VALUE) {
+              setTzMode("custom");
+            } else {
+              setTzMode("preset");
+              setForm((f) => ({ ...f, morning_brief_tz: v }));
+            }
+          }}
+        >
+          <SelectTrigger id="tz" className="h-9">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {TIMEZONE_PRESETS.map((tz) => (
+              <SelectItem key={tz} value={tz}>
+                {tz}
+              </SelectItem>
+            ))}
+            <SelectItem value={TZ_CUSTOM_VALUE}>Other (custom)…</SelectItem>
+          </SelectContent>
+        </Select>
+        {tzMode === "custom" ? (
+          <Input
+            className="mt-1"
+            placeholder="e.g. America/Indiana/Indianapolis"
+            value={form.morning_brief_tz}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, morning_brief_tz: e.target.value }))
+            }
+          />
+        ) : null}
+      </Field>
 
-      <FieldWithIcon icon={MoonStar} id="quiet-start" label="Quiet hours start">
-        <Input
+      <Field
+        icon={MoonStar}
+        id="quiet-start"
+        label="Quiet hours start"
+        hint="Pushes pause until quiet end."
+      >
+        <PolishedInput
           id="quiet-start"
           type="time"
           value={form.quiet_hours_start}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, quiet_hours_start: e.target.value }))
+          onChange={(v) =>
+            setForm((f) => ({ ...f, quiet_hours_start: v }))
           }
         />
-      </FieldWithIcon>
+      </Field>
 
-      <FieldWithIcon icon={Clock} id="quiet-end" label="Quiet hours end">
-        <Input
+      <Field
+        icon={Clock}
+        id="quiet-end"
+        label="Quiet hours end"
+        hint="Bundled brief lands at this time."
+      >
+        <PolishedInput
           id="quiet-end"
           type="time"
           value={form.quiet_hours_end}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, quiet_hours_end: e.target.value }))
+          onChange={(v) =>
+            setForm((f) => ({ ...f, quiet_hours_end: v }))
           }
         />
-      </FieldWithIcon>
+      </Field>
 
-      <FieldWithIcon
+      <Field
         icon={DollarSign}
         id="mood"
         label="Mood-check threshold ($)"
@@ -405,23 +620,24 @@ function SettingsForm({ initial }: { initial: CoupleSettings }) {
           id="mood"
           type="number"
           min={0}
+          className="h-9"
           value={form.mood_threshold_dollars}
           onChange={(e) =>
             setForm((f) => ({ ...f, mood_threshold_dollars: e.target.value }))
           }
         />
-      </FieldWithIcon>
+      </Field>
 
-      <FieldWithIcon icon={CalendarHeart} id="anniversary" label="Anniversary">
-        <Input
+      <Field icon={CalendarHeart} id="anniversary" label="Anniversary" hint={anniversaryHint ?? undefined}>
+        <PolishedInput
           id="anniversary"
           type="date"
           value={form.anniversary_date}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, anniversary_date: e.target.value }))
+          onChange={(v) =>
+            setForm((f) => ({ ...f, anniversary_date: v }))
           }
         />
-      </FieldWithIcon>
+      </Field>
 
       <ToggleRow
         icon={Sun}
@@ -460,7 +676,35 @@ function SettingsForm({ initial }: { initial: CoupleSettings }) {
   );
 }
 
-function FieldWithIcon({
+/**
+ * Native <input> wrapper that fixes the dark-mode look of the calendar /
+ * clock indicator and keeps the height locked to h-9 across browsers.
+ * Browsers paint the picker icon black-on-black in dark themes by default;
+ * `dark:[color-scheme:dark]` flips it to a tone that reads on muted bg.
+ */
+function PolishedInput({
+  id,
+  type,
+  value,
+  onChange,
+}: {
+  id: string;
+  type: "time" | "date";
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <Input
+      id={id}
+      type={type}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="h-9 [color-scheme:light] dark:[color-scheme:dark]"
+    />
+  );
+}
+
+function Field({
   icon: Icon,
   id,
   label,
@@ -475,12 +719,16 @@ function FieldWithIcon({
 }) {
   return (
     <div className="grid gap-1.5">
-      <Label htmlFor={id} className="flex items-center gap-1.5">
+      <Label htmlFor={id} className="flex items-center gap-1.5 text-xs font-medium">
         <Icon className="h-3.5 w-3.5 text-muted-foreground" />
         {label}
       </Label>
       {children}
-      {hint ? <span className="text-xs text-muted-foreground">{hint}</span> : null}
+      {hint ? (
+        <span className="min-h-[1.25rem] text-[11px] leading-snug text-muted-foreground">
+          {hint}
+        </span>
+      ) : null}
     </div>
   );
 }

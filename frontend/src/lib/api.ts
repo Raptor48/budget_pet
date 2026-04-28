@@ -1270,23 +1270,49 @@ export const botApi = {
       limit?: number;
       severity?: 'info' | 'warn' | 'error';
       kind_prefix?: string;
+      scope?: 'self' | 'all';
     } = {},
   ): Promise<BotActivityEntry[]> => {
     const qs = new URLSearchParams();
     qs.set('limit', String(params.limit ?? 200));
     if (params.severity) qs.set('severity', params.severity);
     if (params.kind_prefix) qs.set('kind_prefix', params.kind_prefix);
+    if (params.scope) qs.set('scope', params.scope);
     return apiRequest(`/api/bot/activity?${qs.toString()}`);
   },
   clearActivity: (olderThanDays = 0): Promise<void> =>
     apiRequest(`/api/bot/activity?older_than_days=${olderThanDays}`, {
       method: 'DELETE',
     }),
+
+  // Owner-only: roster of every user with the bot wired up.
+  listLinkedUsers: (): Promise<LinkedUser[]> =>
+    apiRequest('/api/bot/telegram/linked-users'),
+
+  // All authenticated callers — household members the bot considers real
+  // people (excludes the env ADMIN_LOGIN bootstrap account).
+  listHouseholdMembers: (): Promise<HouseholdMember[]> =>
+    apiRequest('/api/bot/household-members'),
 };
+
+export interface LinkedUser {
+  user_id: number;
+  username: string;
+  is_owner: boolean;
+  telegram_chat_id: number;
+  telegram_username?: string | null;
+  last_activity_at?: string | null;
+}
+
+export interface HouseholdMember {
+  id: number;
+  username: string;
+}
 
 export interface BotActivityEntry {
   id: number;
   user_id?: number | null;
+  username?: string | null;
   chat_id?: number | null;
   kind: string;
   severity: 'info' | 'warn' | 'error';

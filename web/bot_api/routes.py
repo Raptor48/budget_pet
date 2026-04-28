@@ -28,7 +28,9 @@ from .models import (
     ChoreUpdate,
     CoupleSettingsOut,
     CoupleSettingsUpdate,
+    HouseholdMember,
     LeaderboardOut,
+    LinkedUser,
     MilestoneCreate,
     MilestoneOut,
     MoodEntryOut,
@@ -57,6 +59,11 @@ def _user_id(request: Request) -> int:
     return int(uid)
 
 
+def _is_owner(request: Request) -> bool:
+    user = getattr(request.state, "user", None) or {}
+    return bool(user.get("is_owner"))
+
+
 # ---------------------------------------------------------------------------
 # Telegram link
 # ---------------------------------------------------------------------------
@@ -77,6 +84,30 @@ async def telegram_link_code(request: Request):
 @router.delete("/telegram/link", status_code=204)
 async def telegram_unlink(request: Request):
     await get_bot_repo().detach_telegram_chat(_user_id(request))
+
+
+@router.get("/telegram/linked-users", response_model=List[LinkedUser])
+async def telegram_linked_users(request: Request):
+    """Owner-only roster of every user with the bot wired up.
+
+    Useful when one of the partners says "did you get the alert?" — the
+    admin can confirm without poking at the DB. Non-owners get 403.
+    """
+    if not _is_owner(request):
+        raise HTTPException(status_code=403, detail="Owner access required")
+    return await get_bot_repo().list_linked_users()
+
+
+@router.get("/household-members", response_model=List[HouseholdMember])
+async def household_members(request: Request):
+    """Real household members — excludes the env-var bootstrap admin.
+
+    Used by the Chores tab assignee dropdown and the Audit host picker so
+    the technical admin account never shows up as someone who has to take
+    out the trash.
+    """
+    _user_id(request)
+    return await get_bot_repo().list_household_members()
 
 
 @router.post("/telegram/test")
@@ -603,18 +634,39 @@ async def list_bot_activity(
             "`incoming.`."
         ),
     ),
+    scope: str = Query(
+        "self",
+        regex=r"^(self|all)$",
+        description=(
+            "`self` shows the caller's own rows; `all` shows every user's "
+            "rows (owner-only, used by the admin view)."
+        ),
+    ),
 ):
     """Recent bot events. ``user_id IS NULL`` rows (errors from unlinked
     chats) are returned to every authenticated user — they're rare and
-    everyone benefits from seeing the bot exploded somewhere."""
+    everyone benefits from seeing the bot exploded somewhere.
+
+    Owners can pass ``scope=all`` to see rows attributed to other users —
+    handy for the admin view that surfaces what the bot did for the whole
+    household."""
     user_id = _user_id(request)
     from web.telegram.activity import list_activity
+
+    filter_uid: Optional[int] = user_id
+    if scope == "all":
+        if not _is_owner(request):
+            raise HTTPException(
+                status_code=403,
+                detail="Cross-user activity scope requires owner access.",
+            )
+        filter_uid = None
 
     rows = await list_activity(
         limit=limit,
         severity=severity,
         kind_prefix=kind_prefix,
-        user_id=user_id,
+        user_id=filter_uid,
     )
     return rows
 
