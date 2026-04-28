@@ -222,6 +222,15 @@ function CardFront({ account, color, size }: FaceProps) {
   // overwhelming the layout.
   const logoSize = compact ? 40 : 52;
 
+  // The outer FlipCard wrapper is `transformStyle: preserve-3d` so the flip
+  // and tilt animations compose cleanly. WebKit does not honour
+  // `overflow: hidden` + `border-radius` on a child of a preserve-3d
+  // ancestor — decorative blobs leak past the rounded corners on iOS
+  // Safari (visible as a bright crescent on the right edge of the card).
+  // `clip-path: inset(0 round …)` is reliable in 3D contexts and matches
+  // the same corner radius as the Tailwind rounded-* class on each variant.
+  const clipRadius = compact ? "0.75rem" : "1rem"; // rounded-xl / rounded-2xl
+
   return (
     <div
       className={
@@ -233,6 +242,8 @@ function CardFront({ account, color, size }: FaceProps) {
         background: cardGradient(color),
         backfaceVisibility: "hidden",
         WebkitBackfaceVisibility: "hidden",
+        clipPath: `inset(0 round ${clipRadius})`,
+        WebkitClipPath: `inset(0 round ${clipRadius})`,
       }}
     >
       {/* Decorative circle */}
@@ -345,6 +356,11 @@ function CardBack({
   const isDepository = account.type === "depository";
   const compact = size === "compact";
 
+  // Match the front-face clip — same preserve-3d ancestor, same WebKit
+  // overflow-clip quirk. The slim magnetic stripe at the top would
+  // otherwise extend past the rounded corners on iOS Safari.
+  const clipRadius = compact ? "0.75rem" : "1rem";
+
   return (
     <div
       className={
@@ -357,6 +373,8 @@ function CardBack({
         backfaceVisibility: "hidden",
         WebkitBackfaceVisibility: "hidden",
         transform: "rotateY(180deg)",
+        clipPath: `inset(0 round ${clipRadius})`,
+        WebkitClipPath: `inset(0 round ${clipRadius})`,
       }}
       onClick={(e) => e.stopPropagation()}
     >
