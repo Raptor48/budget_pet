@@ -85,16 +85,25 @@ def _pad_label(label: str, target: int = _MENU_PAD_TARGET) -> str:
 
 
 def _main_menu_kb() -> InlineKeyboardMarkup:
-    # Single-column layout with NBSP padding so every button stretches to
-    # the same wide tap target regardless of label length. See _pad_label
-    # for why we can't just rely on the longest label setting the width.
+    # 3 columns x 2 rows. Each cell is padded with IDEOGRAPHIC SPACE so the
+    # row total exceeds the chat bubble's natural width; Telegram then
+    # clamps at bubble-max and splits that width evenly across the three
+    # buttons in the row. Net effect: the menu reads as a 3x2 grid of
+    # equally-sized tiles instead of a tall list of narrow rows.
+    def _cell(label: str, cb: str) -> InlineKeyboardButton:
+        return InlineKeyboardButton(_pad_label(label, target=12), callback_data=cb)
+
     rows = [
-        [InlineKeyboardButton(_pad_label("➕   Add transaction"), callback_data="menu:cash")],
-        [InlineKeyboardButton(_pad_label("📊   Today's snapshot"), callback_data="menu:today")],
-        [InlineKeyboardButton(_pad_label("🔔   Alert preferences"), callback_data="menu:alerts")],
-        [InlineKeyboardButton(_pad_label("👥   Family"), callback_data="menu:family")],
-        [InlineKeyboardButton(_pad_label("🎯   Goals & milestones"), callback_data="menu:goals")],
-        [InlineKeyboardButton(_pad_label("⚙️   Settings"), callback_data="menu:settings")],
+        [
+            _cell("➕ Add", "menu:cash"),
+            _cell("📊 Today", "menu:today"),
+            _cell("🔔 Alerts", "menu:alerts"),
+        ],
+        [
+            _cell("👥 Family", "menu:family"),
+            _cell("🎯 Goals", "menu:goals"),
+            _cell("⚙️ Settings", "menu:settings"),
+        ],
     ]
     return InlineKeyboardMarkup(rows)
 
