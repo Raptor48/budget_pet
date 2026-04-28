@@ -532,9 +532,8 @@ function SettingsForm({ initial }: { initial: CoupleSettings }) {
         label="Morning brief"
         hint="Bundles overnight P1 alerts into one push."
       >
-        <PolishedInput
+        <TimePicker
           id="brief"
-          type="time"
           value={form.morning_brief_local}
           onChange={(v) =>
             setForm((f) => ({ ...f, morning_brief_local: v }))
@@ -584,9 +583,8 @@ function SettingsForm({ initial }: { initial: CoupleSettings }) {
         label="Quiet hours start"
         hint="Pushes pause until quiet end."
       >
-        <PolishedInput
+        <TimePicker
           id="quiet-start"
-          type="time"
           value={form.quiet_hours_start}
           onChange={(v) =>
             setForm((f) => ({ ...f, quiet_hours_start: v }))
@@ -600,9 +598,8 @@ function SettingsForm({ initial }: { initial: CoupleSettings }) {
         label="Quiet hours end"
         hint="Bundled brief lands at this time."
       >
-        <PolishedInput
+        <TimePicker
           id="quiet-end"
-          type="time"
           value={form.quiet_hours_end}
           onChange={(v) =>
             setForm((f) => ({ ...f, quiet_hours_end: v }))
@@ -629,9 +626,8 @@ function SettingsForm({ initial }: { initial: CoupleSettings }) {
       </Field>
 
       <Field icon={CalendarHeart} id="anniversary" label="Anniversary" hint={anniversaryHint ?? undefined}>
-        <PolishedInput
+        <DatePicker
           id="anniversary"
-          type="date"
           value={form.anniversary_date}
           onChange={(v) =>
             setForm((f) => ({ ...f, anniversary_date: v }))
@@ -677,30 +673,213 @@ function SettingsForm({ initial }: { initial: CoupleSettings }) {
 }
 
 /**
- * Native <input> wrapper that fixes the dark-mode look of the calendar /
- * clock indicator and keeps the height locked to h-9 across browsers.
- * Browsers paint the picker icon black-on-black in dark themes by default;
- * `dark:[color-scheme:dark]` flips it to a tone that reads on muted bg.
+ * Inline time picker built from two `Select` dropdowns.
+ *
+ * Native <input type="time"> looks ugly across browsers and the picker
+ * icon is invisible on dark backgrounds. Two compact selects (HH and MM)
+ * sit beside each other with a colon separator and use the same styling
+ * as every other dropdown in the app, so the form reads consistently.
+ *
+ * Granularity: 5 minutes for minute selection (12 options) — enough for
+ * a morning brief / quiet hours toggle. If the saved value isn't on a
+ * 5-minute boundary (e.g. legacy data), it's added to the list so the
+ * user doesn't see a blank trigger.
  */
-function PolishedInput({
+function TimePicker({
   id,
-  type,
   value,
   onChange,
 }: {
   id: string;
-  type: "time" | "date";
   value: string;
   onChange: (v: string) => void;
 }) {
+  const [rawHh, rawMm] = (value || "00:00").split(":");
+  const hh = (rawHh || "00").padStart(2, "0");
+  const mm = (rawMm || "00").padStart(2, "0");
+
+  const hourOptions = useMemo(
+    () => Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0")),
+    [],
+  );
+  const minuteOptions = useMemo(() => {
+    const base = Array.from({ length: 12 }, (_, i) =>
+      String(i * 5).padStart(2, "0"),
+    );
+    if (!base.includes(mm)) {
+      return Array.from(new Set([...base, mm])).sort();
+    }
+    return base;
+  }, [mm]);
+
   return (
-    <Input
-      id={id}
-      type={type}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="h-9 [color-scheme:light] dark:[color-scheme:dark]"
-    />
+    <div className="flex items-center gap-1">
+      <Select value={hh} onValueChange={(v) => onChange(`${v}:${mm}`)}>
+        <SelectTrigger id={id} className="h-9 w-[78px] tabular-nums">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent className="max-h-[260px]">
+          {hourOptions.map((h) => (
+            <SelectItem key={h} value={h} className="tabular-nums">
+              {h}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <span className="select-none px-0.5 text-base text-muted-foreground">:</span>
+      <Select value={mm} onValueChange={(v) => onChange(`${hh}:${v}`)}>
+        <SelectTrigger className="h-9 w-[78px] tabular-nums">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent className="max-h-[260px]">
+          {minuteOptions.map((m) => (
+            <SelectItem key={m} value={m} className="tabular-nums">
+              {m}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+const MONTH_NAMES = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+/**
+ * Inline date picker — three `Select`s for month/day/year.
+ *
+ * Beats native <input type="date"> on three counts: consistent styling
+ * across browsers (Safari and Firefox render the native picker very
+ * differently from Chrome), works in dark mode without the invisible
+ * calendar-icon problem, and the day list stays bounded to the actual
+ * days of the chosen month so 30 February isn't selectable.
+ *
+ * Empty value → placeholder text shown by SelectValue (passing
+ * `value={undefined}` to Radix Select keeps the trigger empty so the
+ * placeholder shows). Year range covers 60 years back through 20
+ * years forward to handle wedding dates and milestone projections
+ * without growing the list to absurd lengths.
+ */
+function DatePicker({
+  id,
+  value,
+  onChange,
+}: {
+  id: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const today = new Date();
+  const fallbackYear = today.getFullYear();
+
+  const parts = value ? value.split("-") : ["", "", ""];
+  const yyStr = parts[0] || "";
+  const mmStr = parts[1] || "";
+  const ddStr = parts[2] || "";
+
+  const yearOptions = useMemo(() => {
+    const start = fallbackYear - 60;
+    const length = 81; // 60 back + this year + 20 forward
+    return Array.from({ length }, (_, i) => String(start + i));
+  }, [fallbackYear]);
+
+  // Days available for the currently-selected month. When year/month are
+  // unset we default to a 31-day month so the user can pick day first.
+  const yearForCalc = Number(yyStr || fallbackYear);
+  const monthForCalc = Number(mmStr || 1);
+  const daysInMonth = new Date(yearForCalc, monthForCalc, 0).getDate();
+  const dayOptions = useMemo(
+    () =>
+      Array.from({ length: daysInMonth }, (_, i) =>
+        String(i + 1).padStart(2, "0"),
+      ),
+    [daysInMonth],
+  );
+
+  // Compose YYYY-MM-DD when all parts are present, clamping the day to
+  // the last valid day of the chosen month so flipping Mar 31 → Feb
+  // doesn't crash on Feb 31. Returns null while any part is still
+  // unset — caller leaves the form value empty until the user picks
+  // the missing pieces.
+  const compose = (newY: string, newM: string, newD: string) => {
+    if (!newY || !newM || !newD) return null;
+    const ymd = new Date(Number(newY), Number(newM) - 1, Number(newD));
+    if (Number.isNaN(ymd.getTime())) return null;
+    const lastDay = new Date(Number(newY), Number(newM), 0).getDate();
+    const safeDay = Math.min(Number(newD), lastDay);
+    return `${newY}-${newM.padStart(2, "0")}-${String(safeDay).padStart(2, "0")}`;
+  };
+
+  const currentMonthStr = String(today.getMonth() + 1).padStart(2, "0");
+  const setMonth = (v: string) => {
+    const next = compose(yyStr || String(fallbackYear), v, ddStr || "01");
+    if (next) onChange(next);
+  };
+  const setDay = (v: string) => {
+    const next = compose(
+      yyStr || String(fallbackYear),
+      mmStr || currentMonthStr,
+      v,
+    );
+    if (next) onChange(next);
+  };
+  const setYear = (v: string) => {
+    const next = compose(v, mmStr || currentMonthStr, ddStr || "01");
+    if (next) onChange(next);
+  };
+
+  return (
+    <div className="flex items-center gap-1">
+      <Select value={mmStr || undefined} onValueChange={setMonth}>
+        <SelectTrigger id={id} className="h-9 w-[88px]">
+          <SelectValue placeholder="Month" />
+        </SelectTrigger>
+        <SelectContent className="max-h-[260px]">
+          {MONTH_NAMES.map((label, i) => (
+            <SelectItem key={label} value={String(i + 1).padStart(2, "0")}>
+              {label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select value={ddStr || undefined} onValueChange={setDay}>
+        <SelectTrigger className="h-9 w-[68px] tabular-nums">
+          <SelectValue placeholder="Day" />
+        </SelectTrigger>
+        <SelectContent className="max-h-[260px]">
+          {dayOptions.map((d) => (
+            <SelectItem key={d} value={d} className="tabular-nums">
+              {d}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select value={yyStr || undefined} onValueChange={setYear}>
+        <SelectTrigger className="h-9 w-[86px] tabular-nums">
+          <SelectValue placeholder="Year" />
+        </SelectTrigger>
+        <SelectContent className="max-h-[260px]">
+          {yearOptions.map((y) => (
+            <SelectItem key={y} value={y} className="tabular-nums">
+              {y}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
   );
 }
 
