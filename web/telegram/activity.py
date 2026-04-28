@@ -17,7 +17,7 @@ Kinds (canonical strings — keep stable, the frontend filters on these):
 * ``incoming.command``     — "/start", "/menu", "/balance"…
 * ``incoming.text``        — free-text cash entry parse
 * ``incoming.photo``       — receipt photo upload
-* ``incoming.callback``    — inline button tap (menu drill, mood, tea, chore done)
+* ``incoming.callback``    — inline button tap (menu drill, tea, chore done)
 * ``outgoing.push``        — message sent FROM dispatcher (P0/P1/P2)
 * ``ocr.success`` / ``ocr.failure``
 * ``error``                — uncaught exception in any handler

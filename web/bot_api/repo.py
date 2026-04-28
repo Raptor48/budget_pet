@@ -18,9 +18,6 @@ from web.db import get_pool
 logger = logging.getLogger(__name__)
 
 
-# Default mood threshold = $300 (matches docs/CLAUDE.md and Settings UI).
-DEFAULT_MOOD_THRESHOLD_CENTS = 30000
-
 # Default morning brief — 09:00 in the household timezone (defaults to ET so
 # the legacy autosync schedule still feels right; overridable per user).
 DEFAULT_MORNING_BRIEF = time(9, 0)
@@ -74,32 +71,22 @@ DEFAULT_NOTIFICATION_PREFS: List[Dict[str, Any]] = [
         "description": "Tiny celebration when a saved milestone is reached.",
     },
     {
-        "alert_type": "mood_check",
-        "label": "Mood check",
-        "enabled": True,
-        "description": "Bundled into the morning brief — never wakes you up.",
-    },
-    {
-        "alert_type": "leaderboard",
-        "label": "Couple leaderboard",
-        "enabled": True,
-        "description": "Weekly snapshot of who topped each category.",
-    },
-    {
-        "alert_type": "sunday_brief",
-        "label": "Sunday Audit brief",
-        "enabled": True,
-        "description": "All-in-one Sunday morning summary right after sync.",
-    },
-    {
         "alert_type": "anniversary",
         "label": "Anniversary reminder",
         "enabled": True,
         "description": (
             "Heads-up 7 days before your anniversary, plus a celebration "
-            "on the day itself. Set the date on the Overview tab."
+            "on the day itself. Set the date on the settings form."
         ),
     },
+    # Note: ``leaderboard`` and ``sunday_brief`` used to live here but
+    # collided with the household-level toggles on couple_settings —
+    # users saw two visually identical switches that did slightly
+    # different things. They're now controlled exclusively by the
+    # couple_settings columns surfaced on the Settings tab.
+    # ``mood_check`` was removed entirely along with the rest of the
+    # mood feature (table data is preserved for safety; nothing reads
+    # or writes it any more).
 ]
 
 
@@ -329,16 +316,19 @@ class BotRepository:
             if row:
                 return dict(row)
             # Auto-seed defaults so the UI always gets a populated row.
+            # mood_threshold_cents column is still NOT NULL in legacy
+            # databases — pass 0 explicitly so the seed never fails on
+            # an old schema. The column is otherwise unused now that
+            # mood-check is gone.
             await conn.execute(
                 """
                 INSERT INTO couple_settings (
                     user_id, mood_threshold_cents,
                     morning_brief_local, morning_brief_tz
-                ) VALUES ($1, $2, $3, $4)
+                ) VALUES ($1, 0, $2, $3)
                 ON CONFLICT (user_id) DO NOTHING
                 """,
                 user_id,
-                DEFAULT_MOOD_THRESHOLD_CENTS,
                 DEFAULT_MORNING_BRIEF,
                 DEFAULT_TIMEZONE,
             )
@@ -842,59 +832,6 @@ class BotRepository:
                 threshold_cents,
             )
         return _row_to_dict(row)
-
-    # ------------------------------------------------------------------
-    # Mood log
-    # ------------------------------------------------------------------
-
-    async def upsert_mood(
-        self,
-        transaction_id: int,
-        user_id: int,
-        mood: str,
-        note: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        pool = await self._pool()
-        async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                """
-                INSERT INTO transaction_mood (transaction_id, user_id, mood, note)
-                VALUES ($1, $2, $3, $4)
-                ON CONFLICT (transaction_id) DO UPDATE SET
-                    user_id = EXCLUDED.user_id,
-                    mood = EXCLUDED.mood,
-                    note = EXCLUDED.note,
-                    created_at = NOW()
-                RETURNING *
-                """,
-                transaction_id,
-                user_id,
-                mood,
-                note,
-            )
-        return dict(row)
-
-    async def list_recent_moods(
-        self, user_id: int, limit: int = 50
-    ) -> List[Dict[str, Any]]:
-        pool = await self._pool()
-        async with pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT m.transaction_id, m.mood, m.note, m.created_at,
-                       t.amount_cents AS transaction_amount_cents,
-                       COALESCE(t.display_title, t.name) AS transaction_name,
-                       t.date AS transaction_date
-                FROM transaction_mood m
-                JOIN transactions t ON t.id = m.transaction_id
-                WHERE m.user_id = $1
-                ORDER BY m.created_at DESC
-                LIMIT $2
-                """,
-                user_id,
-                limit,
-            )
-        return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
     # Merchant-seen

@@ -381,70 +381,6 @@ async def detect_milestones() -> int:
 
 
 # ---------------------------------------------------------------------------
-# Mood check — bundled into morning brief, never wakes the user
-# ---------------------------------------------------------------------------
-
-
-async def detect_mood_check() -> int:
-    pool = await get_pool()
-    repo = get_bot_repo()
-    fired = 0
-    async with pool.acquire() as conn:
-        users = await conn.fetch(
-            "SELECT id FROM users WHERE telegram_chat_id IS NOT NULL"
-        )
-        if not users:
-            return 0
-        for u in users:
-            uid = int(u["id"])
-            if not await repo.is_alert_enabled(uid, "mood_check"):
-                continue
-            settings = await repo.get_couple_settings(uid)
-            threshold = int(settings.get("mood_threshold_cents") or 0)
-            if threshold <= 0:
-                continue
-            # Only ask the user about transactions on accounts they own —
-            # otherwise we'd nudge the partner about a purchase they didn't
-            # make (and possibly leak a private one). is_private is enforced
-            # by the same account-ownership join.
-            row = await conn.fetchrow(
-                """
-                SELECT t.id, t.amount_cents,
-                       COALESCE(t.display_title, t.name) AS name
-                FROM transactions t
-                JOIN accounts a ON a.id = t.account_id
-                LEFT JOIN transaction_mood m ON m.transaction_id = t.id
-                WHERE m.transaction_id IS NULL
-                  AND t.amount_cents >= $1
-                  AND COALESCE(t.transaction_class, 'expense') = 'expense'
-                  AND t.date >= CURRENT_DATE - INTERVAL '2 days'
-                  AND a.user_id = $2
-                  AND (NOT t.is_private OR a.user_id = $2)
-                ORDER BY t.amount_cents DESC, t.id DESC
-                LIMIT 1
-                """,
-                threshold,
-                uid,
-            )
-            if not row:
-                continue
-            new_id = await enqueue_notification(
-                user_id=uid,
-                type="mood_check",
-                priority="P1",
-                payload={
-                    "transaction_id": int(row["id"]),
-                    "transaction_name": row["name"],
-                    "amount_cents": int(row["amount_cents"]),
-                },
-                dedup_key=dedup_key_for("mood_check", uid, int(row["id"])),
-            )
-            if new_id:
-                fired += 1
-    return fired
-
-
-# ---------------------------------------------------------------------------
 # Anniversary — fires 7 days before and on the day itself.
 # ---------------------------------------------------------------------------
 
@@ -573,7 +509,6 @@ async def run_all_producers() -> Dict[str, int]:
         ("new_merchant", detect_new_merchants),
         ("subscription_creep", detect_subscription_changes),
         ("milestone", detect_milestones),
-        ("mood_check", detect_mood_check),
         ("anniversary", detect_anniversary),
     ]:
         try:

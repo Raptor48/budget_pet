@@ -33,8 +33,6 @@ from .models import (
     LinkedUser,
     MilestoneCreate,
     MilestoneOut,
-    MoodEntryOut,
-    MoodEntryUpsert,
     NotificationPrefOut,
     NotificationPrefUpdate,
     ReceiptLinesReplace,
@@ -365,29 +363,6 @@ async def delete_milestone(request: Request, milestone_id: int):
     """Any household member can delete a household milestone."""
     if not await get_bot_repo().delete_milestone(_user_id(request), milestone_id):
         raise HTTPException(status_code=404, detail="Milestone not found")
-
-
-# ---------------------------------------------------------------------------
-# Mood log
-# ---------------------------------------------------------------------------
-
-@router.get("/mood/recent", response_model=List[MoodEntryOut])
-async def list_recent_moods(request: Request, limit: int = Query(50, ge=1, le=200)):
-    return await get_bot_repo().list_recent_moods(_user_id(request), limit=limit)
-
-
-@router.put("/mood/{transaction_id}")
-async def upsert_mood(
-    request: Request, transaction_id: int, body: MoodEntryUpsert
-):
-    user_id = _user_id(request)
-    txn_repo = TransactionsRepository()
-    txn = await txn_repo.get_transaction(transaction_id)
-    if not txn:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-    return await get_bot_repo().upsert_mood(
-        transaction_id, user_id, body.mood, body.note
-    )
 
 
 # ---------------------------------------------------------------------------

@@ -65,7 +65,6 @@ class CoupleSettingsOut(BaseModel):
     anniversary_date: Optional[date] = None
     partner_user_id: Optional[int] = None
     partner_username: Optional[str] = None
-    mood_threshold_cents: int
     leaderboard_enabled: bool
     morning_brief_local: time
     morning_brief_tz: str
@@ -77,7 +76,6 @@ class CoupleSettingsOut(BaseModel):
 class CoupleSettingsUpdate(BaseModel):
     anniversary_date: Optional[date] = None
     partner_user_id: Optional[int] = None
-    mood_threshold_cents: Optional[int] = Field(None, ge=0)
     leaderboard_enabled: Optional[bool] = None
     morning_brief_local: Optional[time] = None
     morning_brief_tz: Optional[str] = None
@@ -200,25 +198,6 @@ class StreakOut(BaseModel):
     current_count: int
     longest_count: int
     last_event_at: Optional[datetime] = None
-
-
-# ---------------------------------------------------------------------------
-# Mood log
-# ---------------------------------------------------------------------------
-
-class MoodEntryOut(BaseModel):
-    transaction_id: int
-    mood: str
-    note: Optional[str] = None
-    created_at: datetime
-    transaction_amount_cents: int
-    transaction_name: str
-    transaction_date: date
-
-
-class MoodEntryUpsert(BaseModel):
-    mood: str = Field(..., pattern=r"^(happy|meh|regret)$")
-    note: Optional[str] = Field(None, max_length=500)
 
 
 # ---------------------------------------------------------------------------

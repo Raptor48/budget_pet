@@ -14,7 +14,6 @@
 import { useMemo, useState } from "react";
 import {
   Activity,
-  Bell,
   Bot as BotIcon,
   CheckSquare,
   ClipboardList,
@@ -35,7 +34,6 @@ import { Card } from "@/components/ui/card";
 import { AppLayout } from "@/components/layout/app-layout";
 
 import { BotOverviewTab } from "@/components/bot/bot-overview-tab";
-import { BotNotificationsTab } from "@/components/bot/bot-notifications-tab";
 import { BotAuditTab } from "@/components/bot/bot-audit-tab";
 import { BotChoresTab } from "@/components/bot/bot-chores-tab";
 import { BotFamilyTab } from "@/components/bot/bot-family-tab";
@@ -49,9 +47,12 @@ interface TabSpec {
   icon: LucideIcon;
 }
 
+// Settings used to live in two tabs (Overview + Notifications) that
+// shared duplicate household-vs-alert toggles. They're now merged into
+// a single Settings tab — link, schedule, rituals, alerts, linked
+// users all live there.
 const TABS: TabSpec[] = [
-  { value: "overview", label: "Overview", icon: Settings2 },
-  { value: "notifications", label: "Notifications", icon: Bell },
+  { value: "overview", label: "Settings", icon: Settings2 },
   { value: "audit", label: "Audit", icon: ClipboardList },
   { value: "chores", label: "Chores", icon: CheckSquare },
   { value: "family", label: "Family", icon: Heart },
@@ -66,7 +67,7 @@ export default function BotPage() {
 
   return (
     <AppLayout>
-      <div className="mx-auto max-w-5xl">
+      <div className="mx-auto max-w-6xl">
         <header className="mb-6">
           <div className="mb-1.5 flex items-center gap-2.5">
             <span className="grid h-9 w-9 place-items-center rounded-xl bg-primary/10 text-primary ring-1 ring-primary/15">
@@ -103,12 +104,6 @@ export default function BotPage() {
               className="m-0 outline-none data-[state=active]:animate-in data-[state=active]:fade-in-50 data-[state=active]:slide-in-from-bottom-1 data-[state=active]:duration-300"
             >
               <BotOverviewTab />
-            </TabsContent>
-            <TabsContent
-              value="notifications"
-              className="m-0 outline-none data-[state=active]:animate-in data-[state=active]:fade-in-50 data-[state=active]:slide-in-from-bottom-1 data-[state=active]:duration-300"
-            >
-              <BotNotificationsTab />
             </TabsContent>
             <TabsContent
               value="audit"

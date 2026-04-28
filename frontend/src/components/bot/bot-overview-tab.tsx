@@ -1,33 +1,47 @@
 "use client";
 
 /**
- * Overview tab — link your Telegram chat, see core settings, tweak the
- * morning brief / quiet hours / mood threshold from one place.
+ * Settings tab — single home for everything that configures the bot:
+ * the Telegram link, when/how the brief lands, household-level rituals
+ * (Sunday brief, leaderboard), every alert toggle, plus the owner-only
+ * roster of linked users.
  *
- * Layout note (V2.3 polish): the brief/quiet-hours fields live in a 2-col
- * grid where every cell shares the same height + icon treatment so the
- * column doesn't look ragged on narrow screens. Anniversary computes the
- * *next* occurrence client-side so a wedding date in the past still
- * surfaces "next anniversary in N days" — the bot fires on T-7 and T-0.
+ * Layout (V2.4): full-width Telegram-link card on top, then a 2-column
+ * grid where the LEFT column holds the timing/ritual form (one Save
+ * button) and the RIGHT column holds the alert toggles (each saves on
+ * flip — no commit step, you can fan-toggle without losing place).
+ * Below: linked household members for owners.
+ *
+ * Anniversary computes the *next* occurrence client-side so a wedding
+ * date in the past still surfaces "next anniversary in N days" — the
+ * bot fires on T-7 and T-0.
  */
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNowStrict } from "date-fns";
 import {
+  AlertTriangle,
+  ArrowDownToDot,
+  Bell,
+  CalendarClock,
   CalendarHeart,
   Check,
   Clock,
   Copy,
-  DollarSign,
   Globe,
   Link as LinkIcon,
   Loader2,
   MoonStar,
+  Plug,
+  Settings as SettingsIcon,
   Shield,
+  Sparkles,
   Sun,
   Trophy,
+  TrendingUp,
   Unlink,
   Users,
+  type LucideIcon,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -50,14 +64,15 @@ import {
   type CoupleSettings,
   type CoupleSettingsUpdate,
   type LinkedUser,
+  type NotificationPref,
 } from "@/lib/api";
 import { getCurrentUser } from "@/lib/auth";
 import { notify, onMutationError } from "@/lib/notify";
 
-import { formatCents, formatDate } from "./bot-helpers";
+import { formatDate } from "./bot-helpers";
 
-// Curated short list — covers ~99% of household setups. Anything else can
-// be typed via the "Other (custom)" branch.
+// Curated short list — covers ~99% of household setups. Anything else
+// can be typed via the "Other (custom)" branch.
 const TIMEZONE_PRESETS = [
   "America/New_York",
   "America/Chicago",
@@ -78,6 +93,26 @@ const TIMEZONE_PRESETS = [
 ];
 
 const TZ_CUSTOM_VALUE = "__custom__";
+
+// Per-alert icon used in the right-column toggle list. Falls back to a
+// neutral warning glyph for any alert_type not enumerated here.
+const ALERT_ICONS: Record<string, LucideIcon> = {
+  budget_threshold: TrendingUp,
+  recurring_tomorrow: CalendarClock,
+  plaid_reauth: Plug,
+  new_merchant: Sparkles,
+  subscription_creep: ArrowDownToDot,
+  milestone: Trophy,
+  anniversary: CalendarHeart,
+};
+
+// P0 / P1 / P2 labels live next to each toggle so the user can decide
+// at a glance whether flipping something off is "I miss it tomorrow
+// morning" (P1) or "the bank stays broken until I notice" (P0).
+function priorityFor(alertType: string): { tier: "P0" | "P1" | "P2"; tone: string } {
+  if (alertType === "plaid_reauth") return { tier: "P0", tone: "text-destructive" };
+  return { tier: "P1", tone: "text-muted-foreground" };
+}
 
 export function BotOverviewTab() {
   const qc = useQueryClient();
@@ -108,115 +143,195 @@ export function BotOverviewTab() {
     },
     onError: onMutationError("Couldn't unlink Telegram."),
   });
+
   return (
-    <div className="space-y-8">
-      <section>
-        <h2 className="mb-3 flex items-center gap-2 text-base font-semibold">
-          <LinkIcon className="h-4 w-4 text-muted-foreground" />
-          Telegram link
-        </h2>
-        {status.isLoading ? (
-          <div className="space-y-2">
-            <Skeleton className="h-5 w-48" />
-            <Skeleton className="h-3 w-72" />
-          </div>
-        ) : status.data?.linked ? (
-          <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/30 px-3 py-2.5">
-            <Badge variant="secondary" className="gap-1.5">
-              <Check className="h-3 w-3" />
-              Linked
-            </Badge>
-            <span className="text-sm">
-              Chat&nbsp;
-              <code className="rounded bg-background px-1.5 py-0.5 text-xs">
-                {status.data.chat_id}
-              </code>
-              {status.data.telegram_username
-                ? ` (@${status.data.telegram_username})`
-                : null}
-            </span>
-            <div className="ml-auto flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => unlink.mutate()}
-                disabled={unlink.isPending}
-              >
-                {unlink.isPending ? (
-                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Unlink className="mr-1 h-3.5 w-3.5" />
-                )}
-                Unlink
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Generate a one-time code, then send <code>/link CODE</code> to your
-              Telegram bot to pair this account.
-            </p>
-            {status.data?.pending_code ? (
-              <PendingCodeCard
-                code={status.data.pending_code}
-                expiresAt={status.data.pending_expires_at}
-              />
-            ) : null}
-            <Button
-              size="sm"
-              onClick={() => generateCode.mutate()}
-              disabled={generateCode.isPending}
-            >
-              {generateCode.isPending ? (
-                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <LinkIcon className="mr-1 h-3.5 w-3.5" />
-              )}
-              Generate code
-            </Button>
-          </div>
-        )}
-      </section>
+    <div className="space-y-6">
+      <TelegramLinkCard
+        status={status.data}
+        loading={status.isLoading}
+        onGenerate={() => generateCode.mutate()}
+        onUnlink={() => unlink.mutate()}
+        generating={generateCode.isPending}
+        unlinking={unlink.isPending}
+      />
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+        <Panel
+          icon={SettingsIcon}
+          title="Schedule & rituals"
+          description="When the bot reaches you, in whose timezone, and which household-wide rituals are on."
+        >
+          {settings.isLoading || !settings.data ? (
+            <SettingsFormSkeleton />
+          ) : (
+            <SettingsForm initial={settings.data} />
+          )}
+        </Panel>
+
+        <Panel
+          icon={Bell}
+          title="Alerts"
+          description={
+            <>
+              Each toggle controls whether the bot enqueues that alert.{" "}
+              <Badge variant="outline" className="border-destructive/40 text-destructive align-middle">
+                P0
+              </Badge>{" "}
+              push immediately ·{" "}
+              <Badge variant="outline" className="align-middle">
+                P1
+              </Badge>{" "}
+              wait for the morning brief.
+            </>
+          }
+        >
+          <AlertsPanel />
+        </Panel>
+      </div>
 
       {me.data?.is_owner ? <LinkedUsersSection /> : null}
-
-      <Separator />
-
-      <section>
-        <h2 className="mb-1 flex items-center gap-2 text-base font-semibold">
-          <Sun className="h-4 w-4 text-muted-foreground" />
-          Morning brief & quiet hours
-        </h2>
-        <p className="mb-4 text-xs text-muted-foreground">
-          The bot bundles overnight notifications and pushes them all in one
-          message at your morning brief time. Quiet hours block every push
-          except P0 (bank re-auth).
-        </p>
-        {settings.isLoading || !settings.data ? (
-          <SettingsSkeleton />
-        ) : (
-          <SettingsForm initial={settings.data} />
-        )}
-      </section>
     </div>
   );
 }
 
-function SettingsSkeleton() {
+// ---------------------------------------------------------------------
+// Telegram link card — full-width, clearly separated from the rest of
+// the form so the link state is the first thing the eye lands on.
+// ---------------------------------------------------------------------
+
+function TelegramLinkCard({
+  status,
+  loading,
+  onGenerate,
+  onUnlink,
+  generating,
+  unlinking,
+}: {
+  status?: {
+    linked: boolean;
+    chat_id?: number | null;
+    telegram_username?: string | null;
+    pending_code?: string | null;
+    pending_expires_at?: string | null;
+  };
+  loading: boolean;
+  onGenerate: () => void;
+  onUnlink: () => void;
+  generating: boolean;
+  unlinking: boolean;
+}) {
   return (
-    <div className="grid gap-4 sm:grid-cols-2">
-      {Array.from({ length: 6 }).map((_, i) => (
+    <Panel icon={LinkIcon} title="Telegram link">
+      {loading ? (
+        <div className="space-y-2">
+          <Skeleton className="h-5 w-48" />
+          <Skeleton className="h-3 w-72" />
+        </div>
+      ) : status?.linked ? (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/30 px-3 py-2.5">
+          <Badge variant="secondary" className="gap-1.5">
+            <Check className="h-3 w-3" />
+            Linked
+          </Badge>
+          <span className="text-sm">
+            Chat&nbsp;
+            <code className="rounded bg-background px-1.5 py-0.5 text-xs">
+              {status.chat_id}
+            </code>
+            {status.telegram_username ? ` (@${status.telegram_username})` : null}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onUnlink}
+            disabled={unlinking}
+            className="ml-auto"
+          >
+            {unlinking ? (
+              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Unlink className="mr-1 h-3.5 w-3.5" />
+            )}
+            Unlink
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Generate a one-time code, then send <code>/link CODE</code> to
+            your Telegram bot to pair this account.
+          </p>
+          {status?.pending_code ? (
+            <PendingCodeCard
+              code={status.pending_code}
+              expiresAt={status.pending_expires_at}
+            />
+          ) : null}
+          <Button size="sm" onClick={onGenerate} disabled={generating}>
+            {generating ? (
+              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <LinkIcon className="mr-1 h-3.5 w-3.5" />
+            )}
+            Generate code
+          </Button>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+// ---------------------------------------------------------------------
+// Generic card shell — title + optional description in the header,
+// border + bg-muted/20 so panels read as visually distinct from the
+// surrounding tab. Used by every section on this page.
+// ---------------------------------------------------------------------
+
+function Panel({
+  icon: Icon,
+  title,
+  description,
+  children,
+}: {
+  icon: LucideIcon;
+  title: string;
+  description?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-lg border bg-muted/10 p-4">
+      <div className="mb-3 flex items-start gap-2.5">
+        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
+          <Icon className="h-3.5 w-3.5" />
+        </span>
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold leading-tight">{title}</h2>
+          {description ? (
+            <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+          ) : null}
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function SettingsFormSkeleton() {
+  return (
+    <div className="space-y-3">
+      {Array.from({ length: 5 }).map((_, i) => (
         <div key={i} className="grid gap-1.5">
           <Skeleton className="h-3.5 w-28" />
           <Skeleton className="h-9 w-full" />
         </div>
       ))}
-      <Skeleton className="h-14 w-full sm:col-span-2" />
-      <Skeleton className="h-14 w-full sm:col-span-2" />
     </div>
   );
 }
+
+// ---------------------------------------------------------------------
+// Linked household roster (admin-only)
+// ---------------------------------------------------------------------
 
 function LinkedUsersSection() {
   const linked = useQuery({
@@ -226,15 +341,11 @@ function LinkedUsersSection() {
   });
 
   return (
-    <section>
-      <h2 className="mb-1 flex items-center gap-2 text-base font-semibold">
-        <Users className="h-4 w-4 text-muted-foreground" />
-        Linked household members
-      </h2>
-      <p className="mb-3 text-xs text-muted-foreground">
-        Everyone in the household with the bot wired up. Visible to owners
-        only — useful when someone says &ldquo;did you get the alert?&rdquo;.
-      </p>
+    <Panel
+      icon={Users}
+      title="Linked household members"
+      description="Everyone in the household with the bot wired up. Visible to owners only."
+    >
       {linked.isLoading ? (
         <div className="space-y-2">
           <Skeleton className="h-12 w-full" />
@@ -251,7 +362,7 @@ function LinkedUsersSection() {
           ))}
         </ul>
       )}
-    </section>
+    </Panel>
   );
 }
 
@@ -289,6 +400,10 @@ function LinkedUserRow({ user }: { user: LinkedUser }) {
   );
 }
 
+// ---------------------------------------------------------------------
+// Pending link-code card — countdown timer + copy button.
+// ---------------------------------------------------------------------
+
 function PendingCodeCard({
   code,
   expiresAt,
@@ -296,7 +411,6 @@ function PendingCodeCard({
   code: string;
   expiresAt?: string | null;
 }) {
-  // Re-render every 10s so the countdown stays current without thrashing.
   const [, setTick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setTick((n) => n + 1), 10_000);
@@ -376,19 +490,19 @@ function PendingCodeCard({
             : null}
       </div>
       <div className="mt-1 text-xs text-muted-foreground">
-        Send <code>/link {code}</code> in your Telegram bot before it expires.
-        Codes are intentionally short-lived so a leaked screen can&apos;t be
-        used to hijack your account.
+        Send <code>/link {code}</code> in your Telegram bot before it
+        expires. Codes are intentionally short-lived so a leaked screen
+        can&apos;t be used to hijack your account.
       </div>
     </div>
   );
 }
 
-/**
- * Project an anniversary date onto today's calendar. Mirrors
- * `_next_anniversary` in web/notifications/producers.py — kept in sync so
- * the UI hint and the actual notification agree on what "next" means.
- */
+// ---------------------------------------------------------------------
+// Anniversary projector — mirror of the backend `_next_anniversary`
+// helper so the inline hint and the producer agree on what "next" is.
+// ---------------------------------------------------------------------
+
 function nextAnniversary(originalIso: string, today: Date): Date | null {
   const [yStr, mStr, dStr] = originalIso.split("-");
   const y = Number(yStr);
@@ -399,8 +513,6 @@ function nextAnniversary(originalIso: string, today: Date): Date | null {
   }
   const tryDate = (year: number) => {
     const dt = new Date(year, m, day);
-    // Handle Feb 29 in a non-leap year — JS rolls over to Mar 1, so detect
-    // the rollover and clamp to Feb 28.
     if (dt.getMonth() !== m) return new Date(year, m, 28);
     return dt;
   };
@@ -414,6 +526,13 @@ function nextAnniversary(originalIso: string, today: Date): Date | null {
   return candidate;
 }
 
+// ---------------------------------------------------------------------
+// Settings form (left column) — schedule, timezone, anniversary,
+// household-wide rituals (Sunday brief + leaderboard). Single Save
+// button at the bottom; the "All changes saved." badge appears when
+// the form matches the server snapshot.
+// ---------------------------------------------------------------------
+
 function SettingsForm({ initial }: { initial: CoupleSettings }) {
   const qc = useQueryClient();
 
@@ -422,7 +541,6 @@ function SettingsForm({ initial }: { initial: CoupleSettings }) {
     morning_brief_tz: s.morning_brief_tz,
     quiet_hours_start: s.quiet_hours_start.slice(0, 5),
     quiet_hours_end: s.quiet_hours_end.slice(0, 5),
-    mood_threshold_dollars: (s.mood_threshold_cents / 100).toFixed(0),
     sunday_brief_enabled: s.sunday_brief_enabled,
     leaderboard_enabled: s.leaderboard_enabled,
     anniversary_date: s.anniversary_date ?? "",
@@ -430,14 +548,10 @@ function SettingsForm({ initial }: { initial: CoupleSettings }) {
 
   const [form, setForm] = useState(buildForm(initial));
 
-  // Reset whenever the source row changes externally.
   useEffect(() => {
     setForm(buildForm(initial));
   }, [initial]);
 
-  // Track whether the timezone is one of the curated presets so we can
-  // show the "Other (custom)" branch when the user has typed something
-  // unusual (e.g. America/Indiana/Indianapolis).
   const tzIsPreset = TIMEZONE_PRESETS.includes(form.morning_brief_tz);
   const [tzMode, setTzMode] = useState<"preset" | "custom">(
     tzIsPreset || !form.morning_brief_tz ? "preset" : "custom",
@@ -467,19 +581,14 @@ function SettingsForm({ initial }: { initial: CoupleSettings }) {
       morning_brief_tz: form.morning_brief_tz,
       quiet_hours_start: `${form.quiet_hours_start}:00`,
       quiet_hours_end: `${form.quiet_hours_end}:00`,
-      mood_threshold_cents: Math.max(
-        0,
-        Math.round(Number(form.mood_threshold_dollars || 0) * 100),
-      ),
       sunday_brief_enabled: form.sunday_brief_enabled,
       leaderboard_enabled: form.leaderboard_enabled,
       anniversary_date: form.anniversary_date || null,
     });
   };
 
-  // Anniversary hint — show next computed anniversary so a wedding date in
-  // the past still feels meaningful. Computed client-side; the producer
-  // does the same projection on the server when it fires.
+  // Anniversary hint — show next computed anniversary so a wedding
+  // date in the past still feels meaningful.
   const anniversaryHint = useMemo(() => {
     if (!form.anniversary_date) {
       return "Bot pings 7 days before and on the day. Past dates are projected to this year.";
@@ -494,11 +603,11 @@ function SettingsForm({ initial }: { initial: CoupleSettings }) {
       ? next.getFullYear() - original.getFullYear()
       : null;
     const yearStr = years && years > 0 ? ` · ${years} years together` : "";
-    return `Next: ${formatDate(next.toISOString())} — in ${diffDays} day${diffDays === 1 ? "" : "s"}${yearStr}. Bot pings T-7 and on the day.`;
+    return `Next: ${formatDate(next.toISOString())} — in ${diffDays} day${diffDays === 1 ? "" : "s"}${yearStr}.`;
   }, [form.anniversary_date]);
 
   return (
-    <form className="grid gap-4 sm:grid-cols-2" onSubmit={submit}>
+    <form className="space-y-4" onSubmit={submit}>
       <Field
         icon={Sun}
         id="brief"
@@ -514,7 +623,12 @@ function SettingsForm({ initial }: { initial: CoupleSettings }) {
         />
       </Field>
 
-      <Field icon={Globe} id="tz" label="Timezone" hint="Used for brief + quiet hours.">
+      <Field
+        icon={Globe}
+        id="tz"
+        label="Timezone"
+        hint="Used for morning brief and quiet hours."
+      >
         <Select
           value={tzMode === "preset" ? form.morning_brief_tz : TZ_CUSTOM_VALUE}
           onValueChange={(v) => {
@@ -526,7 +640,7 @@ function SettingsForm({ initial }: { initial: CoupleSettings }) {
             }
           }}
         >
-          <SelectTrigger id="tz" className="h-9">
+          <SelectTrigger id="tz" className="h-9 w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -540,7 +654,7 @@ function SettingsForm({ initial }: { initial: CoupleSettings }) {
         </Select>
         {tzMode === "custom" ? (
           <Input
-            className="mt-1"
+            className="mt-1 h-9"
             placeholder="e.g. America/Indiana/Indianapolis"
             value={form.morning_brief_tz}
             onChange={(e) =>
@@ -550,55 +664,43 @@ function SettingsForm({ initial }: { initial: CoupleSettings }) {
         ) : null}
       </Field>
 
-      <Field
-        icon={MoonStar}
-        id="quiet-start"
-        label="Quiet hours start"
-        hint="Pushes pause until quiet end."
-      >
-        <TimePicker
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field
+          icon={MoonStar}
           id="quiet-start"
-          value={form.quiet_hours_start}
-          onChange={(v) =>
-            setForm((f) => ({ ...f, quiet_hours_start: v }))
-          }
-        />
-      </Field>
-
-      <Field
-        icon={Clock}
-        id="quiet-end"
-        label="Quiet hours end"
-        hint="Bundled brief lands at this time."
-      >
-        <TimePicker
+          label="Quiet hours start"
+          hint="Pushes pause until quiet end."
+        >
+          <TimePicker
+            id="quiet-start"
+            value={form.quiet_hours_start}
+            onChange={(v) =>
+              setForm((f) => ({ ...f, quiet_hours_start: v }))
+            }
+          />
+        </Field>
+        <Field
+          icon={Clock}
           id="quiet-end"
-          value={form.quiet_hours_end}
-          onChange={(v) =>
-            setForm((f) => ({ ...f, quiet_hours_end: v }))
-          }
-        />
-      </Field>
+          label="Quiet hours end"
+          hint="Bundled brief lands at this time."
+        >
+          <TimePicker
+            id="quiet-end"
+            value={form.quiet_hours_end}
+            onChange={(v) =>
+              setForm((f) => ({ ...f, quiet_hours_end: v }))
+            }
+          />
+        </Field>
+      </div>
 
       <Field
-        icon={DollarSign}
-        id="mood"
-        label="Mood-check threshold ($)"
-        hint={`Default ${formatCents(initial.mood_threshold_cents)}.`}
+        icon={CalendarHeart}
+        id="anniversary"
+        label="Anniversary"
+        hint={anniversaryHint ?? undefined}
       >
-        <Input
-          id="mood"
-          type="number"
-          min={0}
-          className="h-9"
-          value={form.mood_threshold_dollars}
-          onChange={(e) =>
-            setForm((f) => ({ ...f, mood_threshold_dollars: e.target.value }))
-          }
-        />
-      </Field>
-
-      <Field icon={CalendarHeart} id="anniversary" label="Anniversary" hint={anniversaryHint ?? undefined}>
         <DatePicker
           id="anniversary"
           value={form.anniversary_date}
@@ -608,23 +710,33 @@ function SettingsForm({ initial }: { initial: CoupleSettings }) {
         />
       </Field>
 
-      <ToggleRow
-        icon={Sun}
-        title="Sunday brief"
-        description="Audit-day digest right after Plaid sync."
-        checked={form.sunday_brief_enabled}
-        onChange={(v) => setForm((f) => ({ ...f, sunday_brief_enabled: v }))}
-      />
+      <Separator />
 
-      <ToggleRow
-        icon={Trophy}
-        title="Couple leaderboard"
-        description="Weekly per-category top spender, included in the Sunday brief."
-        checked={form.leaderboard_enabled}
-        onChange={(v) => setForm((f) => ({ ...f, leaderboard_enabled: v }))}
-      />
+      <div className="space-y-2">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Household rituals
+        </p>
+        <ToggleRow
+          icon={Sun}
+          title="Sunday brief"
+          description="Audit-day digest right after Plaid sync."
+          checked={form.sunday_brief_enabled}
+          onChange={(v) =>
+            setForm((f) => ({ ...f, sunday_brief_enabled: v }))
+          }
+        />
+        <ToggleRow
+          icon={Trophy}
+          title="Couple leaderboard"
+          description="Weekly per-category top spender, included in the Sunday brief."
+          checked={form.leaderboard_enabled}
+          onChange={(v) =>
+            setForm((f) => ({ ...f, leaderboard_enabled: v }))
+          }
+        />
+      </div>
 
-      <div className="flex items-center justify-end gap-3 sm:col-span-2">
+      <div className="flex items-center justify-end gap-3 border-t pt-3">
         {!dirty && !save.isPending ? (
           <span className="text-xs text-muted-foreground">All changes saved.</span>
         ) : null}
@@ -645,19 +757,146 @@ function SettingsForm({ initial }: { initial: CoupleSettings }) {
   );
 }
 
-/**
- * Inline time picker built from two `Select` dropdowns.
- *
- * Native <input type="time"> looks ugly across browsers and the picker
- * icon is invisible on dark backgrounds. Two compact selects (HH and MM)
- * sit beside each other with a colon separator and use the same styling
- * as every other dropdown in the app, so the form reads consistently.
- *
- * Granularity: 5 minutes for minute selection (12 options) — enough for
- * a morning brief / quiet hours toggle. If the saved value isn't on a
- * 5-minute boundary (e.g. legacy data), it's added to the list so the
- * user doesn't see a blank trigger.
- */
+// ---------------------------------------------------------------------
+// Alerts panel (right column)
+// ---------------------------------------------------------------------
+
+function AlertsPanel() {
+  const qc = useQueryClient();
+  const prefs = useQuery({
+    queryKey: ["bot", "notification-prefs"],
+    queryFn: botApi.listNotificationPrefs,
+  });
+
+  // Per-row pending tracking — Tanstack's mutation isPending is a single
+  // boolean shared across all calls, so it would block every switch when
+  // one is in flight. A Set scoped to alert_type keeps each row independent.
+  const [inFlight, setInFlight] = useState<Set<string>>(new Set());
+  const toggle = useMutation({
+    mutationFn: ({ key, enabled }: { key: string; enabled: boolean }) =>
+      botApi.setNotificationPref(key, enabled),
+    onMutate: ({ key }) =>
+      setInFlight((prev) => {
+        const next = new Set(prev);
+        next.add(key);
+        return next;
+      }),
+    onSettled: (_d, _e, vars) =>
+      setInFlight((prev) => {
+        const next = new Set(prev);
+        next.delete(vars.key);
+        return next;
+      }),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: ["bot", "notification-prefs"] }),
+    onError: onMutationError("Couldn't toggle that alert."),
+  });
+
+  if (prefs.isLoading) {
+    return (
+      <ul className="divide-y rounded-md border">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <li key={i} className="flex items-center justify-between px-3 py-2.5">
+            <div className="space-y-1.5">
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-3 w-56" />
+            </div>
+            <Skeleton className="h-5 w-9 rounded-full" />
+          </li>
+        ))}
+      </ul>
+    );
+  }
+
+  if (!prefs.data?.length) {
+    return (
+      <div className="grid place-items-center rounded-md border border-dashed py-8 text-center">
+        <Bell className="mb-2 h-5 w-5 text-muted-foreground" aria-hidden />
+        <p className="text-xs text-muted-foreground">No alert types defined.</p>
+      </div>
+    );
+  }
+
+  return (
+    <ul className="divide-y rounded-md border">
+      {prefs.data.map((p) => (
+        <AlertRow
+          key={p.alert_type}
+          pref={p}
+          pending={inFlight.has(p.alert_type)}
+          onToggle={(enabled) => toggle.mutate({ key: p.alert_type, enabled })}
+        />
+      ))}
+    </ul>
+  );
+}
+
+function AlertRow({
+  pref,
+  pending,
+  onToggle,
+}: {
+  pref: NotificationPref;
+  pending: boolean;
+  onToggle: (enabled: boolean) => void;
+}) {
+  const Icon = ALERT_ICONS[pref.alert_type] ?? AlertTriangle;
+  const { tier, tone } = priorityFor(pref.alert_type);
+  return (
+    <li
+      className={cn(
+        "flex items-start justify-between gap-3 px-3 py-2.5 transition-colors",
+        "hover:bg-muted/40",
+        !pref.enabled && "opacity-70",
+      )}
+    >
+      <div className="flex min-w-0 items-start gap-2.5">
+        <span
+          className={cn(
+            "mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md transition-colors",
+            pref.enabled
+              ? "bg-primary/10 text-primary"
+              : "bg-muted text-muted-foreground",
+          )}
+        >
+          <Icon className="h-3.5 w-3.5" aria-hidden />
+        </span>
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-sm font-medium">
+            {pref.label}
+            <span className={cn("text-[10px] font-semibold tracking-wider", tone)}>
+              {tier}
+            </span>
+          </div>
+          {pref.description ? (
+            <div className="text-xs leading-snug text-muted-foreground">
+              {pref.description}
+            </div>
+          ) : null}
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-2 pt-1">
+        {pending ? (
+          <Loader2
+            className="h-3.5 w-3.5 animate-spin text-muted-foreground"
+            aria-label="Saving"
+          />
+        ) : null}
+        <Switch
+          checked={pref.enabled}
+          onCheckedChange={onToggle}
+          disabled={pending}
+          aria-label={`Toggle ${pref.label}`}
+        />
+      </div>
+    </li>
+  );
+}
+
+// ---------------------------------------------------------------------
+// TimePicker — two-Select inline picker (HH : MM, 5-minute granularity).
+// ---------------------------------------------------------------------
+
 function TimePicker({
   id,
   value,
@@ -731,21 +970,11 @@ const MONTH_NAMES = [
   "Dec",
 ];
 
-/**
- * Inline date picker — three `Select`s for month/day/year.
- *
- * Beats native <input type="date"> on three counts: consistent styling
- * across browsers (Safari and Firefox render the native picker very
- * differently from Chrome), works in dark mode without the invisible
- * calendar-icon problem, and the day list stays bounded to the actual
- * days of the chosen month so 30 February isn't selectable.
- *
- * Empty value → placeholder text shown by SelectValue (passing
- * `value={undefined}` to Radix Select keeps the trigger empty so the
- * placeholder shows). Year range covers 60 years back through 20
- * years forward to handle wedding dates and milestone projections
- * without growing the list to absurd lengths.
- */
+// ---------------------------------------------------------------------
+// DatePicker — Month / Day / Year inline selects, day list bounded to
+// the actual days of the chosen month.
+// ---------------------------------------------------------------------
+
 function DatePicker({
   id,
   value,
@@ -765,12 +994,10 @@ function DatePicker({
 
   const yearOptions = useMemo(() => {
     const start = fallbackYear - 60;
-    const length = 81; // 60 back + this year + 20 forward
+    const length = 81;
     return Array.from({ length }, (_, i) => String(start + i));
   }, [fallbackYear]);
 
-  // Days available for the currently-selected month. When year/month are
-  // unset we default to a 31-day month so the user can pick day first.
   const yearForCalc = Number(yyStr || fallbackYear);
   const monthForCalc = Number(mmStr || 1);
   const daysInMonth = new Date(yearForCalc, monthForCalc, 0).getDate();
@@ -782,11 +1009,6 @@ function DatePicker({
     [daysInMonth],
   );
 
-  // Compose YYYY-MM-DD when all parts are present, clamping the day to
-  // the last valid day of the chosen month so flipping Mar 31 → Feb
-  // doesn't crash on Feb 31. Returns null while any part is still
-  // unset — caller leaves the form value empty until the user picks
-  // the missing pieces.
   const compose = (newY: string, newM: string, newD: string) => {
     if (!newY || !newM || !newD) return null;
     const ymd = new Date(Number(newY), Number(newM) - 1, Number(newD));
@@ -901,21 +1123,21 @@ function ToggleRow({
   return (
     <div
       className={cn(
-        "flex items-center justify-between gap-3 rounded-md border p-3 transition-colors sm:col-span-2",
+        "flex items-center justify-between gap-3 rounded-md border bg-background/40 p-2.5 transition-colors",
         "hover:bg-muted/30",
       )}
     >
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 items-center gap-2.5">
         <span
           className={cn(
-            "grid h-8 w-8 place-items-center rounded-md transition-colors",
+            "grid h-7 w-7 shrink-0 place-items-center rounded-md transition-colors",
             checked ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground",
           )}
         >
-          <Icon className="h-4 w-4" />
+          <Icon className="h-3.5 w-3.5" />
         </span>
-        <div>
-          <div className="text-sm font-medium">{title}</div>
+        <div className="min-w-0">
+          <div className="text-sm font-medium leading-tight">{title}</div>
           <div className="text-xs text-muted-foreground">{description}</div>
         </div>
       </div>

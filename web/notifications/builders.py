@@ -86,24 +86,6 @@ def _render_milestone(payload: Dict[str, Any]) -> str:
     )
 
 
-def _render_mood_check(payload: Dict[str, Any]) -> Tuple[str, List[List[Tuple[str, str]]]]:
-    name = payload.get("transaction_name", "a purchase")
-    amount = payload.get("amount_cents", 0)
-    txn_id = payload.get("transaction_id")
-    text = _line(
-        "🤔",
-        f"How does <b>{name}</b> ({_money(amount)}) feel now?",
-    )
-    if txn_id:
-        return (
-            text,
-            [[("👍", f"mood:{txn_id}:happy"),
-              ("🤷", f"mood:{txn_id}:meh"),
-              ("👎", f"mood:{txn_id}:regret")]],
-        )
-    return (text, [])
-
-
 def _render_leaderboard(payload: Dict[str, Any]) -> str:
     entries = payload.get("entries", [])
     if not entries:
@@ -154,7 +136,6 @@ _RENDERERS = {
     "new_merchant": _render_new_merchant,
     "subscription_creep": _render_subscription_creep,
     "milestone": _render_milestone,
-    "mood_check": _render_mood_check,
     "leaderboard": _render_leaderboard,
     "streak_milestone": _render_streak_milestone,
     "anniversary": _render_anniversary,
@@ -198,7 +179,6 @@ _SECTION_ORDER = [
     ("streak_milestone", "🔥 Streaks"),
     ("anniversary", "💌 Anniversary"),
     ("leaderboard", "🏆 Leaderboard"),
-    ("mood_check", "🤔 Mood check"),
 ]
 
 

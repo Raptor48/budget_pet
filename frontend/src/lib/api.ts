@@ -885,7 +885,7 @@ export const auditApi = {
 export type { AuditEntry, AuditListResponse, AutosyncConfig, AutosyncConfigUpdate };
 
 // ---------------------------------------------------------------------------
-// Bot (/api/bot/*) — settings, chores, audit, milestones, mood, receipts
+// Bot (/api/bot/*) — settings, chores, audit, milestones, receipts
 // ---------------------------------------------------------------------------
 
 export interface TelegramLinkStatus {
@@ -907,7 +907,6 @@ export interface CoupleSettings {
   anniversary_date?: string | null;
   partner_user_id?: number | null;
   partner_username?: string | null;
-  mood_threshold_cents: number;
   leaderboard_enabled: boolean;
   morning_brief_local: string;
   morning_brief_tz: string;
@@ -919,7 +918,6 @@ export interface CoupleSettings {
 export interface CoupleSettingsUpdate {
   anniversary_date?: string | null;
   partner_user_id?: number | null;
-  mood_threshold_cents?: number;
   leaderboard_enabled?: boolean;
   morning_brief_local?: string;
   morning_brief_tz?: string;
@@ -991,16 +989,6 @@ export interface StreakRow {
   current_count: number;
   longest_count: number;
   last_event_at?: string | null;
-}
-
-export interface MoodEntry {
-  transaction_id: number;
-  mood: 'happy' | 'meh' | 'regret';
-  note?: string | null;
-  created_at: string;
-  transaction_amount_cents: number;
-  transaction_name: string;
-  transaction_date: string;
 }
 
 export interface ReceiptLine {
@@ -1153,19 +1141,6 @@ export const botApi = {
     }),
   deleteMilestone: (id: number): Promise<void> =>
     apiRequest(`/api/bot/milestones/${id}`, { method: 'DELETE' }),
-
-  // Mood
-  listRecentMoods: (limit = 50): Promise<MoodEntry[]> =>
-    apiRequest(`/api/bot/mood/recent?limit=${limit}`),
-  upsertMood: (
-    transactionId: number,
-    mood: 'happy' | 'meh' | 'regret',
-    note?: string,
-  ): Promise<unknown> =>
-    apiRequest(`/api/bot/mood/${transactionId}`, {
-      method: 'PUT',
-      body: JSON.stringify({ mood, note }),
-    }),
 
   // Receipts
   listReceipts: (limit = 40): Promise<ReceiptRow[]> =>

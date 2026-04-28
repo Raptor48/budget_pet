@@ -7,7 +7,7 @@ UX rules:
       stack — never let the user get lost.
     * Callback data is short — ``action[:arg[:arg]]`` — Telegram caps
       callback_data at 64 bytes.
-    * Long-form input (mood note, anniversary date, milestone amount) uses
+    * Long-form input (anniversary date, milestone amount) uses
       a tiny ``ConversationHandler`` state machine.
 """
 from __future__ import annotations
@@ -66,23 +66,21 @@ async def _user_for_chat(chat_id: int) -> Optional[Dict[str, Any]]:
 
 
 def _main_menu_kb() -> InlineKeyboardMarkup:
-    # Layout note: the previous 3-column grid produced cramped buttons that
-    # were tricky to tap with a thumb. Switching to mostly full-width rows
-    # makes the primary action (Add) prominent and every option a fat tap
-    # target. Keep two pairs in the middle so the menu doesn't feel like a
-    # phonebook. Telegram doesn't expose button height directly — width
-    # comes from the row layout, and longer/centred labels help fill it.
+    # Layout note: Telegram sizes the whole inline keyboard to the width
+    # of its widest row. The earlier mixed 1+2+2+1 grid had short widest
+    # rows ("Today | Alerts" ≈ 14 chars) so the keyboard collapsed
+    # narrow and every button looked tiny. Switching to single-column
+    # rows with descriptive labels (longest ≈ 22 chars) forces a wide
+    # keyboard and every row stretches to the same comfortable tap
+    # target. Trade-off: more vertical space, but every action is a
+    # full-width thumb-friendly button.
     rows = [
-        [InlineKeyboardButton("➕  Add transaction", callback_data="menu:cash")],
-        [
-            InlineKeyboardButton("📊 Today", callback_data="menu:today"),
-            InlineKeyboardButton("🔔 Alerts", callback_data="menu:alerts"),
-        ],
-        [
-            InlineKeyboardButton("👥 Family", callback_data="menu:family"),
-            InlineKeyboardButton("🎯 Goals", callback_data="menu:goals"),
-        ],
-        [InlineKeyboardButton("⚙️  Settings", callback_data="menu:settings")],
+        [InlineKeyboardButton("➕   Add transaction", callback_data="menu:cash")],
+        [InlineKeyboardButton("📊   Today's snapshot", callback_data="menu:today")],
+        [InlineKeyboardButton("🔔   Alert preferences", callback_data="menu:alerts")],
+        [InlineKeyboardButton("👥   Family", callback_data="menu:family")],
+        [InlineKeyboardButton("🎯   Goals & milestones", callback_data="menu:goals")],
+        [InlineKeyboardButton("⚙️   Settings", callback_data="menu:settings")],
     ]
     return InlineKeyboardMarkup(rows)
 
@@ -271,10 +269,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parts = data.split(":", 3)
     head = parts[0]
 
-    # Activity log — record only "action" callbacks (mood, tea, chore done,
+    # Activity log — record only "action" callbacks (tea, chore done,
     # receipt action, reauth deep-link). Menu navigation taps are skipped
     # to keep the log readable.
-    if head in {"mood", "tea", "chore", "receipt", "reauth"}:
+    if head in {"tea", "chore", "receipt", "reauth"}:
         from web.telegram.activity import log_bot_activity
 
         await log_bot_activity(
@@ -296,8 +294,6 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _on_goals(query, user, parts)
     elif head == "settings":
         await _on_settings(query, user, parts)
-    elif head == "mood":
-        await _on_mood(query, user, parts)
     elif head == "tea":
         await _on_tea(query, user, parts)
     elif head == "reauth":
@@ -502,26 +498,6 @@ async def _on_settings(query, user, parts):
             reply_markup=_settings_menu_kb(),
             parse_mode=ParseMode.HTML,
         )
-
-
-async def _on_mood(query, user, parts):
-    """Inline buttons attached to a mood-check brief: ``mood:<txn_id>:<value>``."""
-    if len(parts) < 3:
-        return
-    try:
-        txn_id = int(parts[1])
-    except ValueError:
-        return
-    mood = parts[2]
-    if mood not in {"happy", "meh", "regret"}:
-        return
-    await get_bot_repo().upsert_mood(txn_id, user["id"], mood)
-    emoji = {"happy": "👍", "meh": "🤷", "regret": "👎"}[mood]
-    try:
-        await query.edit_message_reply_markup(reply_markup=None)
-    except Exception:
-        pass
-    await query.message.reply_text(f"Logged {emoji}")
 
 
 async def _on_tea(query, user, parts):
