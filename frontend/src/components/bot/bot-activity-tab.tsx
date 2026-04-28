@@ -31,6 +31,7 @@ import {
   MousePointerClick,
   ReceiptText,
   RefreshCw,
+  Sparkles,
 } from "lucide-react";
 import { formatDistanceToNowStrict } from "date-fns";
 
@@ -128,6 +129,24 @@ export function BotActivityTab() {
       notify.success("Activity cleared.");
     },
     onError: onMutationError("Couldn't clear activity."),
+  });
+
+  // "Send test" lives here (instead of Overview) because the user runs
+  // it to verify push delivery — and the resulting outgoing.push row
+  // shows up right below in the live feed within ~10 seconds.
+  const sendTest = useMutation({
+    mutationFn: () => botApi.sendTestAlert(),
+    onSuccess: (res) => {
+      if (res.sent) {
+        notify.success("Test alert queued — should pop up in Telegram any moment.");
+        // Nudge the activity list so the new row appears without
+        // waiting for the 10s auto-refresh tick.
+        qc.invalidateQueries({ queryKey: ["bot", "activity"] });
+      } else if (res.deduped) {
+        notify.info("Already sent one in the last second — check Telegram.");
+      }
+    },
+    onError: onMutationError("Couldn't send the test alert."),
   });
 
   const requestClear = async () => {
@@ -246,11 +265,25 @@ export function BotActivityTab() {
           </Select>
         ) : null}
         <Button
+          variant="outline"
+          size="sm"
+          onClick={() => sendTest.mutate()}
+          disabled={sendTest.isPending}
+          className="ml-auto"
+          title="Push a one-shot test message through the full pipeline"
+        >
+          {sendTest.isPending ? (
+            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Sparkles className="mr-1 h-3.5 w-3.5" />
+          )}
+          Send test
+        </Button>
+        <Button
           variant="ghost"
           size="sm"
           onClick={() => list.refetch()}
           disabled={list.isFetching}
-          className="ml-auto"
         >
           {list.isFetching ? (
             <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />

@@ -738,22 +738,47 @@ class BotRepository:
     # Net-worth milestones
     # ------------------------------------------------------------------
 
-    async def list_milestones(self, user_id: int) -> List[Dict[str, Any]]:
+    async def list_milestones(
+        self, user_id: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
+        """Return every milestone in the household.
+
+        Milestones are family-wide — net worth is a household number, so
+        a goal one partner sets is also a goal the other partner sees
+        and is celebrated for. We keep ``user_id`` in the row to credit
+        whoever added it; the join to ``users`` surfaces the username so
+        the UI can render a "by @denis" tag.
+
+        ``user_id`` is accepted (and ignored) for callers that
+        used to scope the query — keeps wiring simple without a refactor
+        of every callsite.
+        """
         pool = await self._pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT * FROM user_milestones
-                WHERE user_id = $1
-                ORDER BY threshold_cents
+                SELECT m.*,
+                       m.user_id AS created_by_user_id,
+                       u.username AS created_by_username
+                  FROM user_milestones m
+                  LEFT JOIN users u ON u.id = m.user_id
+                 ORDER BY m.threshold_cents
                 """,
-                user_id,
             )
         return [dict(r) for r in rows]
 
     async def add_milestone(
         self, user_id: int, threshold_cents: int, label: Optional[str] = None
     ) -> Dict[str, Any]:
+        """Add a household milestone, credited to ``user_id`` as creator.
+
+        The ``ON CONFLICT (user_id, threshold_cents)`` upsert is preserved
+        so a single user re-adding the same threshold just refreshes the
+        label rather than failing. Two partners adding the same threshold
+        will produce two rows (different user_id) — UI dedupes by
+        threshold for the household view, but both rows stay in the
+        table for honest "who added this" history.
+        """
         pool = await self._pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
@@ -761,37 +786,59 @@ class BotRepository:
                 INSERT INTO user_milestones (user_id, threshold_cents, label)
                 VALUES ($1, $2, $3)
                 ON CONFLICT (user_id, threshold_cents) DO UPDATE SET label = EXCLUDED.label
-                RETURNING *
+                RETURNING *,
+                          user_id AS created_by_user_id
                 """,
                 user_id,
                 threshold_cents,
                 label,
             )
-        return dict(row)
+        if not row:
+            return {}
+        result = dict(row)
+        # Hydrate creator username for the response.
+        async with pool.acquire() as conn:
+            uname = await conn.fetchval(
+                "SELECT username FROM users WHERE id = $1", user_id
+            )
+        result["created_by_username"] = uname
+        return result
 
-    async def delete_milestone(self, user_id: int, milestone_id: int) -> bool:
+    async def delete_milestone(
+        self, user_id: Optional[int], milestone_id: int
+    ) -> bool:
+        """Delete a milestone by id. Any household member can clean up
+        a goal the family no longer cares about — there's no per-user
+        ownership for shared targets. ``user_id`` is accepted
+        for backwards-compatibility with the previous signature."""
         pool = await self._pool()
         async with pool.acquire() as conn:
             res = await conn.execute(
-                "DELETE FROM user_milestones WHERE id = $1 AND user_id = $2",
+                "DELETE FROM user_milestones WHERE id = $1",
                 milestone_id,
-                user_id,
             )
         return res.endswith(" 1")
 
     async def mark_milestone_reached(
-        self, user_id: int, threshold_cents: int
+        self, user_id: Optional[int], threshold_cents: int
     ) -> Optional[Dict[str, Any]]:
+        """Stamp ``reached_at`` on every household row at this threshold.
+
+        Net-worth crossings are a household event, so when one partner's
+        producer fires we mark the threshold reached for everyone.
+        Subsequent producer passes skip the row because ``reached_at``
+        is no longer NULL. The ``user_id`` arg is kept for callsite
+        compatibility but no longer scopes the update.
+        """
         pool = await self._pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
                 UPDATE user_milestones
                    SET reached_at = COALESCE(reached_at, NOW())
-                 WHERE user_id = $1 AND threshold_cents = $2
+                 WHERE threshold_cents = $1
                 RETURNING *
                 """,
-                user_id,
                 threshold_cents,
             )
         return _row_to_dict(row)
@@ -1041,21 +1088,19 @@ class BotRepository:
                     FROM receipts r
                     LEFT JOIN transactions t ON t.id = r.transaction_id
                     LEFT JOIN accounts a ON a.id = t.account_id
-                    WHERE r.id = $1 AND r.user_id = $2
+                    WHERE r.id = $1
                     """,
                     receipt_id,
-                    user_id,
                 )
                 if not prev:
                     return None
                 row = await conn.fetchrow(
                     """
-                    UPDATE receipts SET transaction_id = $3
-                    WHERE id = $1 AND user_id = $2
+                    UPDATE receipts SET transaction_id = $2
+                    WHERE id = $1
                     RETURNING id
                     """,
                     receipt_id,
-                    user_id,
                     transaction_id,
                 )
                 if not row:
@@ -1075,16 +1120,15 @@ class BotRepository:
 
     async def update_receipt(
         self,
-        user_id: int,
+        user_id: Optional[int],
         receipt_id: int,
         patch: Dict[str, Any],
     ) -> Optional[Dict[str, Any]]:
         """Patch the editable header fields of a receipt.
 
-        Only keys present in ``patch`` are applied — Pydantic on the
-        route filters None-valued fields out of ``model_dump`` for us.
-        Returns the refreshed row (with lines) or None if the receipt
-        doesn't belong to ``user_id``.
+        Receipts are family-wide — any household member can correct an
+        OCR mistake. ``user_id`` is kept for callsite
+        compatibility but no longer scopes the row.
         """
         allowed = {
             "merchant_name",
@@ -1096,15 +1140,13 @@ class BotRepository:
         cols = [k for k in patch.keys() if k in allowed]
         if not cols:
             return await self.get_receipt(user_id, receipt_id)
-        set_sql = ", ".join(f"{c} = ${i + 3}" for i, c in enumerate(cols))
+        set_sql = ", ".join(f"{c} = ${i + 2}" for i, c in enumerate(cols))
         values = [patch[c] for c in cols]
         pool = await self._pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                f"UPDATE receipts SET {set_sql} "
-                "WHERE id = $1 AND user_id = $2 RETURNING id",
+                f"UPDATE receipts SET {set_sql} WHERE id = $1 RETURNING id",
                 receipt_id,
-                user_id,
                 *values,
             )
         if not row:
@@ -1128,9 +1170,8 @@ class BotRepository:
         async with pool.acquire() as conn:
             async with conn.transaction():
                 owned = await conn.fetchval(
-                    "SELECT 1 FROM receipts WHERE id = $1 AND user_id = $2",
+                    "SELECT 1 FROM receipts WHERE id = $1",
                     receipt_id,
-                    user_id,
                 )
                 if not owned:
                     return None
@@ -1157,14 +1198,15 @@ class BotRepository:
 
     async def get_receipt_by_transaction(
         self,
-        user_id: int,
+        user_id: Optional[int],
         transaction_id: int,
     ) -> Optional[Dict[str, Any]]:
         """Find the receipt attached to a specific transaction (with lines).
 
         Used by the transactions detail modal to show a receipt
-        breakdown next to the Plaid transaction. Scoped by ``user_id``
-        (matches the privacy + auth model used everywhere else).
+        breakdown next to the Plaid transaction. Receipts are
+        family-wide so the lookup is scoped only by ``transaction_id``;
+        ``user_id`` is kept for callsite compatibility.
         Returns the first match — schema permits multiple receipts per
         tx, but real-world flows always link 1:1 today.
         """
@@ -1173,31 +1215,34 @@ class BotRepository:
             row = await conn.fetchrow(
                 """
                 SELECT id FROM receipts
-                WHERE transaction_id = $1 AND user_id = $2
+                WHERE transaction_id = $1
                 ORDER BY created_at DESC
                 LIMIT 1
                 """,
                 transaction_id,
-                user_id,
             )
         if not row:
             return None
         return await self.get_receipt(user_id, int(row["id"]))
 
     async def list_unlinked_receipts(
-        self, user_id: int, *, older_than_days: Optional[int] = None
+        self, user_id: Optional[int] = None, *, older_than_days: Optional[int] = None
     ) -> List[Dict[str, Any]]:
-        """Receipts with ``transaction_id IS NULL``. ``older_than_days`` is
-        used by the Insights nag — set to 7 to surface receipts the user
-        forgot about for a week."""
+        """Receipts with ``transaction_id IS NULL``, scanned household-wide.
+
+        Used by the Insights nag — set ``older_than_days=7`` to surface
+        receipts the family forgot to link for a week. ``user_id``
+        is kept for callsite compatibility but no longer narrows the row
+        set, since receipts are family-wide.
+        """
         pool = await self._pool()
         sql = (
             "SELECT id, merchant_name, receipt_date, total_cents, currency,"
             "       parse_status, created_at "
             "FROM receipts "
-            "WHERE user_id = $1 AND transaction_id IS NULL"
+            "WHERE transaction_id IS NULL"
         )
-        args: List[Any] = [user_id]
+        args: List[Any] = []
         if older_than_days is not None:
             args.append(int(older_than_days))
             sql += f" AND created_at < NOW() - make_interval(days => ${len(args)})"
@@ -1207,35 +1252,48 @@ class BotRepository:
         return [dict(r) for r in rows]
 
     async def list_receipts(
-        self, user_id: int, limit: int = 40
+        self, user_id: Optional[int] = None, limit: int = 40
     ) -> List[Dict[str, Any]]:
+        """Return every household receipt, joined with the uploader's
+        username so the UI can show a "by @denis" tag on each card.
+
+        Receipts are now family-wide (the household sees the same list);
+        ``user_id`` is accepted for callsite compatibility but
+        no longer scopes the query.
+        """
         pool = await self._pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT id, transaction_id, merchant_name, receipt_date,
-                       total_cents, tax_cents, currency, parse_status,
-                       image_mime, created_at,
-                       (image_data IS NOT NULL) AS has_image
-                FROM receipts
-                WHERE user_id = $1
-                ORDER BY created_at DESC
-                LIMIT $2
+                SELECT r.id, r.transaction_id, r.merchant_name, r.receipt_date,
+                       r.total_cents, r.tax_cents, r.currency, r.parse_status,
+                       r.image_mime, r.created_at,
+                       (r.image_data IS NOT NULL) AS has_image,
+                       r.user_id AS created_by_user_id,
+                       u.username AS created_by_username
+                  FROM receipts r
+                  LEFT JOIN users u ON u.id = r.user_id
+                 ORDER BY r.created_at DESC
+                 LIMIT $1
                 """,
-                user_id,
                 limit,
             )
         return [dict(r) for r in rows]
 
     async def get_receipt(
-        self, user_id: int, receipt_id: int, with_image: bool = False
+        self, user_id: Optional[int], receipt_id: int, with_image: bool = False
     ) -> Optional[Dict[str, Any]]:
+        """Fetch one receipt by id. Visible household-wide — the
+        ``user_id`` arg is kept for callsite compatibility but no
+        longer restricts which row can be read."""
         pool = await self._pool()
         cols = (
             "r.id, r.transaction_id, r.merchant_name, r.receipt_date, "
             "r.total_cents, r.tax_cents, r.currency, r.parse_status, "
             "r.image_mime, r.created_at, "
             "(r.image_data IS NOT NULL) AS has_image, "
+            "r.user_id AS created_by_user_id, "
+            "uc.username AS created_by_username, "
             # ``linked_is_manual_cash`` tells the FE whether the smart
             # confirm-dialog should ask "also delete the linked cash
             # transaction?". The flag is only true when the receipt is
@@ -1254,10 +1312,10 @@ class BotRepository:
                 FROM receipts r
                 LEFT JOIN transactions t ON t.id = r.transaction_id
                 LEFT JOIN accounts a ON a.id = t.account_id
-                WHERE r.id = $1 AND r.user_id = $2
+                LEFT JOIN users uc ON uc.id = r.user_id
+                WHERE r.id = $1
                 """,
                 receipt_id,
-                user_id,
             )
             if not row:
                 return None
@@ -1277,12 +1335,16 @@ class BotRepository:
 
     async def delete_receipt(
         self,
-        user_id: int,
+        user_id: Optional[int],
         receipt_id: int,
         *,
         delete_linked_cash: bool = False,
     ) -> bool:
         """Delete a receipt (and its lines via ON DELETE CASCADE).
+
+        Receipts are family-wide — any household member can clean up the
+        archive. ``user_id`` is kept for callsite compatibility
+        but no longer scopes the delete.
 
         When ``delete_linked_cash=True`` and the receipt is linked to a
         manual cash transaction (``source = 'manual'`` on a non-Plaid
@@ -1290,10 +1352,7 @@ class BotRepository:
         transaction so the user doesn't end up with an orphaned spend
         line in their wallet. Plaid-imported transactions are NEVER
         deleted by this path — Plaid is the source of truth and the row
-        will reappear on next sync anyway. The receipt's
-        ``transaction_id`` column has ``ON DELETE SET NULL``, which would
-        otherwise leave the cash row standing without any trace of where
-        it came from.
+        will reappear on next sync anyway.
         """
         pool = await self._pool()
         async with pool.acquire() as conn:
@@ -1306,17 +1365,15 @@ class BotRepository:
                     FROM receipts r
                     LEFT JOIN transactions t ON t.id = r.transaction_id
                     LEFT JOIN accounts a ON a.id = t.account_id
-                    WHERE r.id = $1 AND r.user_id = $2
+                    WHERE r.id = $1
                     """,
                     receipt_id,
-                    user_id,
                 )
                 if not row:
                     return False
                 res = await conn.execute(
-                    "DELETE FROM receipts WHERE id = $1 AND user_id = $2",
+                    "DELETE FROM receipts WHERE id = $1",
                     receipt_id,
-                    user_id,
                 )
                 if not res.endswith(" 1"):
                     return False

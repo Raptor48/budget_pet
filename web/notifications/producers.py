@@ -321,7 +321,9 @@ async def detect_subscription_changes() -> int:
 
 
 # ---------------------------------------------------------------------------
-# Net-worth milestones — fires once per (user, threshold)
+# Net-worth milestones — household-wide. When the family net worth crosses
+# a threshold, every linked user gets one alert; the row is marked reached
+# globally so subsequent passes skip it.
 # ---------------------------------------------------------------------------
 
 
@@ -340,26 +342,38 @@ async def detect_milestones() -> int:
         users = await conn.fetch(
             "SELECT id FROM users WHERE telegram_chat_id IS NOT NULL"
         )
-    for u in users:
-        uid = int(u["id"])
-        if not await repo.is_alert_enabled(uid, "milestone"):
+    if not users:
+        return 0
+    # Iterate every household milestone once (de-duped by threshold so
+    # rows added by different partners at the same threshold collapse to
+    # one celebration). Whoever's row we mark first carries the
+    # ``reached_at`` flag, but ``mark_milestone_reached`` updates every
+    # matching row to keep listings consistent.
+    seen_thresholds: set[int] = set()
+    for m in await repo.list_milestones():
+        threshold = int(m["threshold_cents"])
+        if threshold in seen_thresholds:
             continue
-        for m in await repo.list_milestones(uid):
-            if m["reached_at"]:
+        seen_thresholds.add(threshold)
+        if m["reached_at"]:
+            continue
+        if net < threshold:
+            continue
+        await repo.mark_milestone_reached(None, threshold)
+        for u in users:
+            uid = int(u["id"])
+            if not await repo.is_alert_enabled(uid, "milestone"):
                 continue
-            if net < int(m["threshold_cents"]):
-                continue
-            await repo.mark_milestone_reached(uid, int(m["threshold_cents"]))
             new_id = await enqueue_notification(
                 user_id=uid,
                 type="milestone",
                 priority="P1",
                 payload={
-                    "threshold_cents": int(m["threshold_cents"]),
+                    "threshold_cents": threshold,
                     "label": m.get("label"),
                     "current_cents": net,
                 },
-                dedup_key=dedup_key_for("milestone", uid, int(m["threshold_cents"])),
+                dedup_key=dedup_key_for("milestone", uid, threshold),
             )
             if new_id:
                 fired += 1

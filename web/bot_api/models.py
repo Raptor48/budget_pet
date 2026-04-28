@@ -178,6 +178,11 @@ class MilestoneOut(BaseModel):
     threshold_cents: int
     label: Optional[str] = None
     reached_at: Optional[datetime] = None
+    # Creator metadata — milestones are family-wide, but we still show
+    # who set each one so a partner can ask "why did you add a $250k
+    # one?" without poking at the DB.
+    created_by_user_id: Optional[int] = None
+    created_by_username: Optional[str] = None
 
 
 class MilestoneCreate(BaseModel):
@@ -246,6 +251,11 @@ class ReceiptOut(BaseModel):
     # uses this to gate the "also delete the linked cash transaction"
     # checkbox on delete/detach so we never offer to delete a Plaid row.
     linked_is_manual_cash: bool = False
+    # Creator metadata — receipts are visible household-wide, but every
+    # row keeps a pointer to whoever uploaded it. The FE renders a
+    # "@denis" tag on each card so partners can spot who added what.
+    created_by_user_id: Optional[int] = None
+    created_by_username: Optional[str] = None
     lines: List[ReceiptLineOut] = []
 
 

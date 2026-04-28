@@ -979,6 +979,10 @@ export interface MilestoneRow {
   threshold_cents: number;
   label?: string | null;
   reached_at?: string | null;
+  /** Creator metadata — milestones are family-wide; this tells the UI
+   * who originally added the goal so we can show a "by @denis" tag. */
+  created_by_user_id?: number | null;
+  created_by_username?: string | null;
 }
 
 export interface StreakRow {
@@ -1026,6 +1030,10 @@ export interface ReceiptRow {
    * transaction" affordance in the receipt-delete / detach flows.
    */
   linked_is_manual_cash: boolean;
+  /** Creator metadata — receipts are family-wide; this tells the UI who
+   * uploaded the receipt so each card can carry an "@denis" tag. */
+  created_by_user_id?: number | null;
+  created_by_username?: string | null;
   lines: ReceiptLine[];
 }
 

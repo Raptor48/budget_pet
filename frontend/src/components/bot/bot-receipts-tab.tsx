@@ -201,8 +201,9 @@ export function BotReceiptsTab() {
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
         Send a photo of any receipt to the Telegram bot — it gets parsed via
-        OCR and saved as a cash transaction. Tap a row to see the photo and
-        line items.
+        OCR and saved as a cash transaction. Receipts are shared
+        household-wide; each card carries an <em>@username</em> tag so you
+        can spot who uploaded it. Tap a row to see the photo and line items.
       </p>
 
       {list.isLoading ? (
@@ -252,8 +253,16 @@ export function BotReceiptsTab() {
                   <ReceiptIcon className="h-4 w-4" />
                 </span>
                 <div className="min-w-0">
-                  <div className="font-medium">
+                  <div className="flex items-center gap-1.5 font-medium">
                     {r.merchant_name || "Receipt"}
+                    {r.created_by_username ? (
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] font-normal text-muted-foreground"
+                      >
+                        @{r.created_by_username}
+                      </Badge>
+                    ) : null}
                   </div>
                   <div className="text-xs text-muted-foreground">
                     {formatDate(r.receipt_date)} · captured{" "}

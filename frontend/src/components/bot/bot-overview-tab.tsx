@@ -24,7 +24,6 @@ import {
   Loader2,
   MoonStar,
   Shield,
-  Sparkles,
   Sun,
   Trophy,
   Unlink,
@@ -109,18 +108,6 @@ export function BotOverviewTab() {
     },
     onError: onMutationError("Couldn't unlink Telegram."),
   });
-  const sendTest = useMutation({
-    mutationFn: () => botApi.sendTestAlert(),
-    onSuccess: (res) => {
-      if (res.sent) {
-        notify.success("Test alert queued — should pop up in Telegram any moment.");
-      } else if (res.deduped) {
-        notify.info("Already sent one in the last second — check Telegram.");
-      }
-    },
-    onError: onMutationError("Couldn't send the test alert."),
-  });
-
   return (
     <div className="space-y-8">
       <section>
@@ -149,20 +136,6 @@ export function BotOverviewTab() {
                 : null}
             </span>
             <div className="ml-auto flex items-center gap-1">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => sendTest.mutate()}
-                disabled={sendTest.isPending}
-                title="Push a one-shot test message through the full pipeline"
-              >
-                {sendTest.isPending ? (
-                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Sparkles className="mr-1 h-3.5 w-3.5" />
-                )}
-                Send test
-              </Button>
               <Button
                 variant="ghost"
                 size="sm"

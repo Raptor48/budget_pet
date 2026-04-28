@@ -344,11 +344,17 @@ async def list_streaks(request: Request):
 
 @router.get("/milestones", response_model=List[MilestoneOut])
 async def list_milestones(request: Request):
-    return await get_bot_repo().list_milestones(_user_id(request))
+    """Household-wide milestones. Auth still required; listing returns
+    every row, joined with the creator's username so the UI can render a
+    "by @denis" tag."""
+    _user_id(request)
+    return await get_bot_repo().list_milestones()
 
 
 @router.post("/milestones", response_model=MilestoneOut, status_code=201)
 async def add_milestone(request: Request, body: MilestoneCreate):
+    """Add a milestone, credited to the caller as creator. The row is
+    visible to every household member."""
     return await get_bot_repo().add_milestone(
         _user_id(request), body.threshold_cents, body.label
     )
@@ -356,6 +362,7 @@ async def add_milestone(request: Request, body: MilestoneCreate):
 
 @router.delete("/milestones/{milestone_id}", status_code=204)
 async def delete_milestone(request: Request, milestone_id: int):
+    """Any household member can delete a household milestone."""
     if not await get_bot_repo().delete_milestone(_user_id(request), milestone_id):
         raise HTTPException(status_code=404, detail="Milestone not found")
 

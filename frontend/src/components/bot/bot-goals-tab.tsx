@@ -91,8 +91,10 @@ export function BotGoalsTab() {
           Net-worth milestones
         </h2>
         <p className="mb-3 text-sm text-muted-foreground">
-          The bot pings you in the morning brief the first time net worth crosses
-          each threshold. Reached milestones stay listed for posterity.
+          Family-wide goals — every household member sees the same list and
+          gets pinged when net worth crosses a threshold. The bot fires
+          once per milestone in the morning brief. Reached milestones stay
+          listed for posterity.
         </p>
 
         {milestones.isLoading ? (
@@ -143,6 +145,11 @@ export function BotGoalsTab() {
                     <span className="font-medium">{formatCents(m.threshold_cents)}</span>
                     {m.label ? (
                       <span className="text-muted-foreground">— {m.label}</span>
+                    ) : null}
+                    {m.created_by_username ? (
+                      <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                        by @{m.created_by_username}
+                      </Badge>
                     ) : null}
                     {m.reached_at ? (
                       <Badge variant="secondary" className="ml-1">
