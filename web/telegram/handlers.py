@@ -65,20 +65,23 @@ async def _user_for_chat(chat_id: int) -> Optional[Dict[str, Any]]:
     return await get_bot_repo().find_user_by_chat_id(chat_id)
 
 
-_MENU_PAD_TARGET = 30  # visual width target for every main-menu row
+_MENU_PAD_TARGET = 36  # visual width target for every main-menu row
 
 
 def _pad_label(label: str, target: int = _MENU_PAD_TARGET) -> str:
-    """Right-pad ``label`` with NBSP so Telegram renders a wider keyboard.
+    """Right-pad ``label`` so the inline keyboard renders at the chat bubble's
+    maximum width.
 
-    Telegram sizes the whole inline keyboard to the widest button text;
-    short labels collapse the menu to ~75% of chat width on phones. NBSP
-    (\\u00A0) is preserved (not trimmed) and invisible, so we can force a
-    consistent thumb-friendly width without changing the visible label.
-    Emojis count roughly as 2 chars in Telegram's width math, so we just
-    pad on raw character count — close enough to keep all rows uniform.
+    NBSP renders the same width as a regular space - too narrow to push past
+    Telegram's natural keyboard sizing on iOS, so the menu still looked
+    compressed. IDEOGRAPHIC SPACE (U+3000) renders roughly twice as wide and
+    is preserved (never trimmed) by every Telegram client. Padding every
+    single-column button to the same wide target forces the keyboard to
+    render at the bubble's max width on every screen, so each row is a
+    full-width thumb-friendly tap target regardless of how short the visible
+    label is.
     """
-    return label + (" " * max(0, target - len(label)))
+    return label + ("　" * max(0, target - len(label)))
 
 
 def _main_menu_kb() -> InlineKeyboardMarkup:

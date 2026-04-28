@@ -43,7 +43,15 @@ async def _register_menu_button(application) -> None:
     """
     url = _webapp_url()
     if not url:
-        logger.info("TELEGRAM_WEBAPP_URL unset — skipping MenuButton setup")
+        # MenuButton was opt-in via TELEGRAM_WEBAPP_URL; we currently do not
+        # use the Mini App and want the chat to show the default Commands
+        # menu. Resetting on every startup is idempotent and ensures any
+        # WebApp button left over from a previous deploy gets cleared.
+        try:
+            await application.bot.set_chat_menu_button()
+            logger.info("Telegram MenuButton reset to default (Commands)")
+        except Exception:
+            logger.exception("Failed to reset MenuButton to default")
         return
     try:
         from telegram import MenuButtonWebApp, WebAppInfo
