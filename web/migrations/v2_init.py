@@ -371,6 +371,23 @@ APP_SETTINGS_INTERNAL_TRANSFER_COLUMN = (
     "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS internal_transfer_names TEXT[] NOT NULL DEFAULT '{}'::TEXT[]"
 )
 
+# Auto-prune toggles for the two log surfaces. Both default to keeping a
+# rolling 7-day window when ON; OFF means the daily prune skips that table
+# (manual clear still works). Stored as separate columns so the user can
+# turn one on and the other off independently — debugging the bot can
+# benefit from a tighter window than the security audit log, where the
+# default is to keep history forever.
+APP_SETTINGS_LOG_PRUNE_COLUMNS = [
+    (
+        "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "
+        "bot_activity_auto_prune_enabled BOOLEAN NOT NULL DEFAULT TRUE"
+    ),
+    (
+        "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS "
+        "audit_log_auto_prune_enabled BOOLEAN NOT NULL DEFAULT FALSE"
+    ),
+]
+
 AUDIT_LOG_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log(created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_audit_log_event_type ON audit_log(event_type, created_at DESC)",
@@ -393,6 +410,7 @@ ALL_STATEMENTS = [
     ALTER_APP_SETTINGS_WEBHOOKS,
     ALTER_APP_SETTINGS_FREQUENCY,
     APP_SETTINGS_INTERNAL_TRANSFER_COLUMN,
+    *APP_SETTINGS_LOG_PRUNE_COLUMNS,
     BACKFILL_APP_SETTINGS_FREQUENCY,
     DROP_APP_SETTINGS_ENABLED,
     ADD_APP_SETTINGS_FREQUENCY_CHK,

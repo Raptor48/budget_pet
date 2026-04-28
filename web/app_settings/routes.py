@@ -27,6 +27,12 @@ def _row_to_out(
         hour_utc=int(row["autosync_hour_utc"]),
         minute_utc=int(row["autosync_minute_utc"]),
         webhooks_enabled=bool(row.get("webhooks_enabled", True)),
+        bot_activity_auto_prune_enabled=bool(
+            row.get("bot_activity_auto_prune_enabled", True)
+        ),
+        audit_log_auto_prune_enabled=bool(
+            row.get("audit_log_auto_prune_enabled", False)
+        ),
         updated_at=row.get("updated_at"),
         updated_by_username=row.get("updated_by_username"),
         next_run_at=next_run_at,
@@ -75,6 +81,8 @@ async def update_app_settings(body: AutosyncConfigUpdate, request: Request):
             hour_utc=body.hour_utc,
             minute_utc=body.minute_utc,
             webhooks_enabled=body.webhooks_enabled,
+            bot_activity_auto_prune_enabled=body.bot_activity_auto_prune_enabled,
+            audit_log_auto_prune_enabled=body.audit_log_auto_prune_enabled,
             updated_by=uid_int,
         )
     except ValueError as exc:

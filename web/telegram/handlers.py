@@ -66,17 +66,23 @@ async def _user_for_chat(chat_id: int) -> Optional[Dict[str, Any]]:
 
 
 def _main_menu_kb() -> InlineKeyboardMarkup:
+    # Layout note: the previous 3-column grid produced cramped buttons that
+    # were tricky to tap with a thumb. Switching to mostly full-width rows
+    # makes the primary action (Add) prominent and every option a fat tap
+    # target. Keep two pairs in the middle so the menu doesn't feel like a
+    # phonebook. Telegram doesn't expose button height directly — width
+    # comes from the row layout, and longer/centred labels help fill it.
     rows = [
+        [InlineKeyboardButton("➕  Add transaction", callback_data="menu:cash")],
         [
-            InlineKeyboardButton("💰 Cash", callback_data="menu:cash"),
             InlineKeyboardButton("📊 Today", callback_data="menu:today"),
             InlineKeyboardButton("🔔 Alerts", callback_data="menu:alerts"),
         ],
         [
             InlineKeyboardButton("👥 Family", callback_data="menu:family"),
             InlineKeyboardButton("🎯 Goals", callback_data="menu:goals"),
-            InlineKeyboardButton("⚙️ Settings", callback_data="menu:settings"),
         ],
+        [InlineKeyboardButton("⚙️  Settings", callback_data="menu:settings")],
     ]
     return InlineKeyboardMarkup(rows)
 
@@ -313,8 +319,8 @@ async def _on_menu(query, user, parts):
         await query.edit_message_text("Main menu:", reply_markup=_main_menu_kb())
     elif section == "cash":
         await query.edit_message_text(
-            "💰 <b>Cash</b>\nTap <b>Type</b> for a quick entry, or <b>Receipt</b> "
-            "to upload a photo.",
+            "➕ <b>Add transaction</b>\nTap <b>Type</b> for a quick entry, "
+            "or <b>Receipt</b> to upload a photo.",
             reply_markup=_cash_menu_kb(),
             parse_mode=ParseMode.HTML,
         )
@@ -368,15 +374,19 @@ async def _on_cash(query, user, parts, context):
     elif len(parts) > 1 and parts[1] == "recent":
         rows = await _list_recent_cash(user["id"])
         text = (
-            "<b>Recent cash entries</b>\n\n" + "\n".join(rows)
+            "<b>Recent entries</b>\n\n" + "\n".join(rows)
             if rows
-            else "No cash entries yet."
+            else "No entries yet."
         )
         await query.edit_message_text(
             text, reply_markup=_back_kb("menu:cash"), parse_mode=ParseMode.HTML
         )
     else:
-        await query.edit_message_text("💰 <b>Cash</b>", reply_markup=_cash_menu_kb(), parse_mode=ParseMode.HTML)
+        await query.edit_message_text(
+            "➕ <b>Add transaction</b>",
+            reply_markup=_cash_menu_kb(),
+            parse_mode=ParseMode.HTML,
+        )
 
 
 async def _on_family(query, user, parts):
@@ -437,7 +447,7 @@ async def _on_goals(query, user, parts):
     if sub == "milestones":
         rows = await repo.list_milestones(user["id"])
         if not rows:
-            text = "No milestones yet. Use /milestone <amount> to add one."
+            text = "No milestones yet. Use <code>/milestone &lt;amount&gt;</code> to add one."
         else:
             lines = ["🎯 <b>Net-worth milestones</b>"]
             for r in rows:

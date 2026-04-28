@@ -17,6 +17,8 @@ DEFAULTS: Dict[str, Any] = {
     "autosync_hour_utc": 3,
     "autosync_minute_utc": 0,
     "webhooks_enabled": True,
+    "bot_activity_auto_prune_enabled": True,
+    "audit_log_auto_prune_enabled": False,
 }
 
 
@@ -45,6 +47,8 @@ class AppSettingsRepository:
                 """
                 SELECT s.autosync_frequency, s.autosync_hour_utc, s.autosync_minute_utc,
                        s.webhooks_enabled,
+                       s.bot_activity_auto_prune_enabled,
+                       s.audit_log_auto_prune_enabled,
                        s.updated_at, s.updated_by,
                        u.username AS updated_by_username
                 FROM app_settings s
@@ -61,14 +65,21 @@ class AppSettingsRepository:
         hour_utc: Optional[int] = None,
         minute_utc: Optional[int] = None,
         webhooks_enabled: Optional[bool] = None,
+        bot_activity_auto_prune_enabled: Optional[bool] = None,
+        audit_log_auto_prune_enabled: Optional[bool] = None,
         updated_by: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Patch the singleton row. Returns the fresh row."""
-        if (
-            frequency is None
-            and hour_utc is None
-            and minute_utc is None
-            and webhooks_enabled is None
+        if all(
+            v is None
+            for v in (
+                frequency,
+                hour_utc,
+                minute_utc,
+                webhooks_enabled,
+                bot_activity_auto_prune_enabled,
+                audit_log_auto_prune_enabled,
+            )
         ):
             return await self.get()
 
@@ -80,6 +91,16 @@ class AppSettingsRepository:
         new_minute = current["autosync_minute_utc"] if minute_utc is None else int(minute_utc)
         new_webhooks = (
             current["webhooks_enabled"] if webhooks_enabled is None else bool(webhooks_enabled)
+        )
+        new_bot_prune = (
+            current.get("bot_activity_auto_prune_enabled", True)
+            if bot_activity_auto_prune_enabled is None
+            else bool(bot_activity_auto_prune_enabled)
+        )
+        new_audit_prune = (
+            current.get("audit_log_auto_prune_enabled", False)
+            if audit_log_auto_prune_enabled is None
+            else bool(audit_log_auto_prune_enabled)
         )
 
         if new_frequency not in AUTOSYNC_FREQUENCIES:
@@ -100,14 +121,18 @@ class AppSettingsRepository:
                     autosync_hour_utc = $2,
                     autosync_minute_utc = $3,
                     webhooks_enabled = $4,
+                    bot_activity_auto_prune_enabled = $5,
+                    audit_log_auto_prune_enabled = $6,
                     updated_at = NOW(),
-                    updated_by = $5
+                    updated_by = $7
                 WHERE id = 1
                 """,
                 new_frequency,
                 new_hour,
                 new_minute,
                 new_webhooks,
+                new_bot_prune,
+                new_audit_prune,
                 updated_by,
             )
         return await self.get()

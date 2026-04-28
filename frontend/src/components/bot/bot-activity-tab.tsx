@@ -19,8 +19,10 @@ import {
   AlertTriangle,
   ArrowUpFromLine,
   Camera,
+  Check,
   ChevronDown,
   CircleAlert,
+  Copy,
   Eraser,
   Info,
   Keyboard,
@@ -35,6 +37,7 @@ import { formatDistanceToNowStrict } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -43,7 +46,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { botApi, type BotActivityEntry } from "@/lib/api";
+import { appSettingsApi, botApi, type BotActivityEntry } from "@/lib/api";
 import { getCurrentUser } from "@/lib/auth";
 import { confirm, notify, onMutationError } from "@/lib/notify";
 
@@ -147,13 +150,28 @@ export function BotActivityTab() {
     };
   }, [list.data]);
 
+  // Auto-prune toggle — owner-only since it changes household-wide config.
+  // 7-day window when on; 30-day safety cap when off (set in dispatcher).
+  const appSettings = useQuery({
+    queryKey: ["app", "settings"],
+    queryFn: appSettingsApi.get,
+    enabled: isOwner,
+    staleTime: 60_000,
+  });
+  const updateAutoPrune = useMutation({
+    mutationFn: (enabled: boolean) =>
+      appSettingsApi.update({ bot_activity_auto_prune_enabled: enabled }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["app", "settings"] }),
+    onError: onMutationError("Couldn't change auto-clean."),
+  });
+  const autoPruneOn = !!appSettings.data?.bot_activity_auto_prune_enabled;
+
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
         Live feed of what the bot has been up to — every photo it received,
         every push it sent, every uncaught error. Auto-refreshes every 10s.
-        Errors and warnings show a click-to-expand traceback. Storage is
-        capped at 30 days.
+        Errors and warnings show a click-to-expand traceback.
         {isOwner ? (
           <span className="ml-1">
             Owners can switch scope to <em>Everyone</em> to see rows from
@@ -161,6 +179,25 @@ export function BotActivityTab() {
           </span>
         ) : null}
       </p>
+
+      {isOwner ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+          <div className="min-w-0">
+            <div className="font-medium">Auto-clean every 7 days</div>
+            <div className="text-xs text-muted-foreground">
+              When on, the daily prune deletes rows older than 7 days. When
+              off, a 30-day safety cap still applies so storage doesn&apos;t
+              grow forever.
+            </div>
+          </div>
+          <Switch
+            checked={autoPruneOn}
+            onCheckedChange={(v) => updateAutoPrune.mutate(v)}
+            disabled={appSettings.isLoading || updateAutoPrune.isPending}
+            aria-label="Auto-clean every 7 days"
+          />
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
         <Select
@@ -372,6 +409,11 @@ function ActivityRow({ entry }: { entry: BotActivityEntry }) {
       </div>
       {open ? (
         <div className="pl-10 pr-2 pb-1">
+          {entry.error || Object.keys(entry.payload || {}).length > 0 ? (
+            <div className="mb-1 flex items-center justify-end">
+              <CopyButton entry={entry} />
+            </div>
+          ) : null}
           {entry.error ? (
             <pre className="max-h-[280px] overflow-auto rounded-md border bg-muted/30 p-2 text-[11px] leading-snug">
               {entry.error}
@@ -385,5 +427,59 @@ function ActivityRow({ entry }: { entry: BotActivityEntry }) {
         </div>
       ) : null}
     </li>
+  );
+}
+
+/**
+ * Copy the row's traceback + payload + headline to the clipboard so the
+ * user can paste it back into chat without a back-and-forth screenshot.
+ * Uses navigator.clipboard with a 1.2s "copied" confirmation state.
+ */
+function CopyButton({ entry }: { entry: BotActivityEntry }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = async () => {
+    const lines: string[] = [
+      `[${entry.severity.toUpperCase()}] ${entry.kind}`,
+      entry.summary,
+      `at ${entry.created_at}`,
+    ];
+    if (entry.username) lines.push(`user: @${entry.username}`);
+    if (entry.error) lines.push("", "Error:", entry.error);
+    if (Object.keys(entry.payload || {}).length > 0) {
+      lines.push("", "Payload:", JSON.stringify(entry.payload, null, 2));
+    }
+    const text = lines.join("\n");
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        await navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+      } else {
+        notify.error("Clipboard not available in this browser.");
+      }
+    } catch {
+      notify.error("Couldn't copy to clipboard.");
+    }
+  };
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      onClick={onCopy}
+      className="h-7 px-2 text-xs"
+    >
+      {copied ? (
+        <>
+          <Check className="mr-1 h-3.5 w-3.5" />
+          Copied
+        </>
+      ) : (
+        <>
+          <Copy className="mr-1 h-3.5 w-3.5" />
+          Copy
+        </>
+      )}
+    </Button>
   );
 }

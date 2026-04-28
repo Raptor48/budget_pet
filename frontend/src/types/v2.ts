@@ -820,6 +820,10 @@ export interface AutosyncConfig {
   hour_utc: number;
   minute_utc: number;
   webhooks_enabled: boolean;
+  /** When true, the daily prune deletes bot_activity_log rows older than 7 days. */
+  bot_activity_auto_prune_enabled: boolean;
+  /** When true, the daily prune deletes audit_log rows older than 7 days. */
+  audit_log_auto_prune_enabled: boolean;
   updated_at: string | null;
   updated_by_username: string | null;
   next_run_at: string | null;
@@ -834,6 +838,8 @@ export interface AutosyncConfigUpdate {
   hour_utc?: number;
   minute_utc?: number;
   webhooks_enabled?: boolean;
+  bot_activity_auto_prune_enabled?: boolean;
+  audit_log_auto_prune_enabled?: boolean;
 }
 
 // ---------------------------------------------------------------------------

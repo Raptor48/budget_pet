@@ -38,6 +38,12 @@ class AutosyncConfig(BaseModel):
     hour_utc: int = Field(3, ge=0, le=23)
     minute_utc: int = Field(0, ge=0, le=59)
     webhooks_enabled: bool = True
+    # Auto-prune toggles for the two log surfaces. Window is fixed at 7
+    # days when the toggle is on; off means the daily prune skips the
+    # table (manual clear from the UI still works). Defaults match the
+    # DB: bot activity rolls fast, audit log is kept by default.
+    bot_activity_auto_prune_enabled: bool = True
+    audit_log_auto_prune_enabled: bool = False
 
 
 class WebhookReconcileResult(BaseModel):
@@ -62,3 +68,5 @@ class AutosyncConfigUpdate(BaseModel):
     hour_utc: Optional[int] = Field(None, ge=0, le=23)
     minute_utc: Optional[int] = Field(None, ge=0, le=59)
     webhooks_enabled: Optional[bool] = None
+    bot_activity_auto_prune_enabled: Optional[bool] = None
+    audit_log_auto_prune_enabled: Optional[bool] = None

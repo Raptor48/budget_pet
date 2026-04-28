@@ -273,10 +273,12 @@ def start_dispatcher():
         max_instances=1,
         replace_existing=True,
     )
-    # Daily prune of bot_activity_log — caps storage at ~30 days so the
-    # log stays useful for debugging without growing forever.
+    # Daily prune of the two log surfaces. Window is 7 days when the
+    # corresponding toggle on the app_settings row is on; the daily 30-day
+    # safety cap on bot_activity_log stays in place even when the toggle
+    # is off so storage can't grow without bound.
     _scheduler.add_job(
-        _daily_prune_activity,
+        _daily_prune_logs,
         trigger=IntervalTrigger(hours=24),
         id="bot_activity_log_prune",
         coalesce=True,
@@ -287,15 +289,65 @@ def start_dispatcher():
     return _scheduler
 
 
-async def _daily_prune_activity() -> None:
+async def _daily_prune_logs() -> None:
+    """Daily prune for both bot_activity_log and audit_log.
+
+    Each side honours its own toggle on ``app_settings``:
+      * ``bot_activity_auto_prune_enabled`` — 7d window when on; otherwise
+        we still apply a 30-day safety cap so the table can't grow forever.
+      * ``audit_log_auto_prune_enabled`` — 7d window when on; otherwise no
+        prune (audit history is normally kept indefinitely).
+    """
+    try:
+        from web.app_settings.repo import get_app_settings_repo
+
+        settings = await get_app_settings_repo().get()
+    except Exception:
+        logger.exception("daily prune: failed to read app_settings")
+        settings = {}
+
+    # bot_activity_log
     try:
         from web.telegram.activity import prune_activity
 
-        deleted = await prune_activity(older_than_days=30)
+        bot_window = (
+            7 if bool(settings.get("bot_activity_auto_prune_enabled", True)) else 30
+        )
+        deleted = await prune_activity(older_than_days=bot_window)
         if deleted:
-            logger.info("bot_activity_log: pruned %d rows older than 30d", deleted)
+            logger.info(
+                "bot_activity_log: pruned %d rows older than %dd",
+                deleted,
+                bot_window,
+            )
     except Exception:
         logger.exception("bot_activity_log prune failed")
+
+    # audit_log — only when explicitly opted in
+    if bool(settings.get("audit_log_auto_prune_enabled", False)):
+        try:
+            from web.audit.repo import get_audit_repo
+            from datetime import datetime, timedelta, timezone as _tz
+
+            cutoff = datetime.now(_tz.utc) - timedelta(days=7)
+            from web.db import get_pool
+
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                # Use direct SQL so we bound by created_at, not the id
+                # cursor that AuditRepository.delete supports.
+                status = await conn.execute(
+                    "DELETE FROM audit_log WHERE created_at < $1", cutoff
+                )
+            deleted = 0
+            try:
+                deleted = int(status.split()[-1])
+            except Exception:
+                pass
+            if deleted:
+                logger.info("audit_log: pruned %d rows older than 7d", deleted)
+        except Exception:
+            logger.exception("audit_log prune failed")
 
 
 async def trigger_drain_now() -> None:
