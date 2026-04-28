@@ -1,7 +1,13 @@
 # Budget Pet
 
+<a href="https://www.loom.com/share/e9eba267ccd24963a013de2d6e3079c6">
+  <img src="https://cdn.loom.com/sessions/thumbnails/e9eba267ccd24963a013de2d6e3079c6-with-play.gif" width="640" alt="Watch the 5-minute walkthrough on Loom">
+</a>
+
 Family budget app: **FastAPI** backend, **Next.js** frontend, **PostgreSQL** (asyncpg) on Railway. **Plaid** is the source of truth for linked banks, transactions, categories (PFC), recurring streams, liabilities, and investments.
 
+> 🎥 **[Watch the 5-minute walkthrough on Loom](https://www.loom.com/share/e9eba267ccd24963a013de2d6e3079c6)** — live demo + code tour.
+>
 > 📺 **Live sandbox demo (no Telegram bot):** see [`DEMO.md`](DEMO.md) for the URL, login, and Plaid Sandbox walkthrough.
 >
 > 🧠 **Engineering decisions log:** [`docs/engineering-decisions.md`](docs/engineering-decisions.md) — the design calls behind the codebase, with the trade-offs.
