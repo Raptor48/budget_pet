@@ -163,14 +163,3 @@ async def mark_failed(notif_id: int, error: str) -> None:
         )
 
 
-async def mark_bundled(child_ids: List[int], parent_id: int) -> None:
-    if not child_ids:
-        return
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE notifications_queue SET bundled_into_id = $2, sent_at = NOW() "
-            "WHERE id = ANY($1::bigint[])",
-            child_ids,
-            parent_id,
-        )

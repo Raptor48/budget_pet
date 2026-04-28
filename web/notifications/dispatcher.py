@@ -11,8 +11,8 @@ Runs every minute via APScheduler. For each user with a Telegram chat:
   (composed alongside the morning brief on Sunday).
 
 The whole loop is idempotent: ``mark_sent`` flips ``sent_at`` so the row
-is excluded from the next pass, and ``mark_bundled`` removes child rows
-from future considerations once they've been folded into a brief.
+is excluded from the next pass — both for P0 sends and for the children
+of a brief.
 """
 from __future__ import annotations
 
@@ -25,7 +25,6 @@ from web.bot_api.repo import get_bot_repo
 from web.notifications import builders
 from web.notifications.queue import (
     list_pending_for_user,
-    mark_bundled,
     mark_failed,
     mark_sent,
 )
@@ -186,8 +185,11 @@ async def _drain_user(user_row: Dict[str, Any]) -> None:
         return
     try:
         await _send_to_chat(chat_id, text, keyboard)
-        # Treat the brief itself as a fresh queue row so we can dedup on it.
-        await mark_bundled([n["id"] for n in pending], parent_id=0)
+        # The brief is a one-shot Telegram message, not a queue row, so there
+        # is no parent id to point children at. Just stamp sent_at — that
+        # alone excludes them from the next tick (list_pending_for_user
+        # already filters on sent_at IS NULL).
+        await mark_sent([n["id"] for n in pending])
         await log_bot_activity(
             kind="outgoing.push",
             summary=f"Sent {title} ({len(pending)} item{'s' if len(pending) != 1 else ''})",
