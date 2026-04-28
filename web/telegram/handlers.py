@@ -65,22 +65,33 @@ async def _user_for_chat(chat_id: int) -> Optional[Dict[str, Any]]:
     return await get_bot_repo().find_user_by_chat_id(chat_id)
 
 
+_MENU_PAD_TARGET = 30  # visual width target for every main-menu row
+
+
+def _pad_label(label: str, target: int = _MENU_PAD_TARGET) -> str:
+    """Right-pad ``label`` with NBSP so Telegram renders a wider keyboard.
+
+    Telegram sizes the whole inline keyboard to the widest button text;
+    short labels collapse the menu to ~75% of chat width on phones. NBSP
+    (\\u00A0) is preserved (not trimmed) and invisible, so we can force a
+    consistent thumb-friendly width without changing the visible label.
+    Emojis count roughly as 2 chars in Telegram's width math, so we just
+    pad on raw character count — close enough to keep all rows uniform.
+    """
+    return label + (" " * max(0, target - len(label)))
+
+
 def _main_menu_kb() -> InlineKeyboardMarkup:
-    # Layout note: Telegram sizes the whole inline keyboard to the width
-    # of its widest row. The earlier mixed 1+2+2+1 grid had short widest
-    # rows ("Today | Alerts" ≈ 14 chars) so the keyboard collapsed
-    # narrow and every button looked tiny. Switching to single-column
-    # rows with descriptive labels (longest ≈ 22 chars) forces a wide
-    # keyboard and every row stretches to the same comfortable tap
-    # target. Trade-off: more vertical space, but every action is a
-    # full-width thumb-friendly button.
+    # Single-column layout with NBSP padding so every button stretches to
+    # the same wide tap target regardless of label length. See _pad_label
+    # for why we can't just rely on the longest label setting the width.
     rows = [
-        [InlineKeyboardButton("➕   Add transaction", callback_data="menu:cash")],
-        [InlineKeyboardButton("📊   Today's snapshot", callback_data="menu:today")],
-        [InlineKeyboardButton("🔔   Alert preferences", callback_data="menu:alerts")],
-        [InlineKeyboardButton("👥   Family", callback_data="menu:family")],
-        [InlineKeyboardButton("🎯   Goals & milestones", callback_data="menu:goals")],
-        [InlineKeyboardButton("⚙️   Settings", callback_data="menu:settings")],
+        [InlineKeyboardButton(_pad_label("➕   Add transaction"), callback_data="menu:cash")],
+        [InlineKeyboardButton(_pad_label("📊   Today's snapshot"), callback_data="menu:today")],
+        [InlineKeyboardButton(_pad_label("🔔   Alert preferences"), callback_data="menu:alerts")],
+        [InlineKeyboardButton(_pad_label("👥   Family"), callback_data="menu:family")],
+        [InlineKeyboardButton(_pad_label("🎯   Goals & milestones"), callback_data="menu:goals")],
+        [InlineKeyboardButton(_pad_label("⚙️   Settings"), callback_data="menu:settings")],
     ]
     return InlineKeyboardMarkup(rows)
 
