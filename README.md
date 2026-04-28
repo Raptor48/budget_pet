@@ -2,6 +2,10 @@
 
 Family budget app: **FastAPI** backend, **Next.js** frontend, **PostgreSQL** (asyncpg) on Railway. **Plaid** is the source of truth for linked banks, transactions, categories (PFC), recurring streams, liabilities, and investments.
 
+> 📺 **Live sandbox demo (no Telegram bot):** see [`DEMO.md`](DEMO.md) for the URL, login, and Plaid Sandbox walkthrough.
+>
+> 🧠 **Engineering decisions log:** [`docs/engineering-decisions.md`](docs/engineering-decisions.md) — the design calls behind the codebase, with the trade-offs.
+
 ## Documentation
 
 Authoritative specs live in [`docs/`](docs/README.md):
