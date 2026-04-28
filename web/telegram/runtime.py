@@ -23,8 +23,42 @@ def _token() -> Optional[str]:
     return (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip() or None
 
 
+def _webapp_url() -> Optional[str]:
+    return (os.getenv("TELEGRAM_WEBAPP_URL") or "").strip() or None
+
+
 def get_bot_app():
     return _app
+
+
+async def _register_menu_button(application) -> None:
+    """Configure the chat-level Menu button to open our Mini App.
+
+    Inline reply keyboards are capped at the message bubble width and
+    can't be made wider on iPhone. The persistent Menu button (bottom-
+    left of the chat) opens a full-screen WebApp instead — this is how
+    we actually deliver a thumb-friendly main surface. Skipped silently
+    when ``TELEGRAM_WEBAPP_URL`` is unset so dev environments don't
+    accidentally point users at a stale URL.
+    """
+    url = _webapp_url()
+    if not url:
+        logger.info("TELEGRAM_WEBAPP_URL unset — skipping MenuButton setup")
+        return
+    try:
+        from telegram import MenuButtonWebApp, WebAppInfo
+
+        await application.bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(
+                text="Open app",
+                web_app=WebAppInfo(url=url),
+            )
+        )
+        logger.info("Telegram MenuButton set to WebApp at %s", url)
+    except Exception:
+        # Don't take down bot startup if Telegram is briefly unhappy;
+        # the inline /menu fallback still works.
+        logger.exception("Failed to register WebApp MenuButton")
 
 
 async def start_bot_runtime():
@@ -57,6 +91,8 @@ async def start_bot_runtime():
     await application.start()
     _app = application
     logger.info("Telegram bot runtime initialized")
+
+    await _register_menu_button(application)
     return _app
 
 

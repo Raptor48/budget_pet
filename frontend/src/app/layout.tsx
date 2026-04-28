@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Script from "next/script";
 import { Toaster } from "sonner";
 import { Providers } from "@/components/providers";
 import { ProtectedRoute } from "@/components/auth/protected-route";
@@ -47,6 +48,16 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="dark">
+      <head>
+        {/* Telegram WebApp SDK — required so window.Telegram.WebApp exists
+            when the page is opened from the bot's MenuButton. Loads early
+            so the auth-context can read initData on first render. Harmless
+            no-op when the page is opened in a normal browser. */}
+        <Script
+          src="https://telegram.org/js/telegram-web-app.js"
+          strategy="beforeInteractive"
+        />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground app-noise`}
       >

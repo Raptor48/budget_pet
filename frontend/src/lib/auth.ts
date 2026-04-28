@@ -100,6 +100,42 @@ export async function login(credentials: LoginData): Promise<AuthResponse> {
   return { success: data.success, message: data.message, user: data.user };
 }
 
+/**
+ * Sign in via Telegram Mini App initData.
+ *
+ * Returns null on failure (not running inside Telegram, account not linked,
+ * bad signature, server error) so the caller can fall through to the
+ * regular login screen — never throws.
+ *
+ * On success we store the bearer token exactly the same way the password
+ * flow does, so all subsequent API calls work unchanged.
+ */
+export async function loginWithTelegramWebApp(): Promise<AuthResponse | null> {
+  if (typeof window === "undefined") return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tg = (window as any).Telegram?.WebApp;
+  const initData: string | undefined = tg?.initData;
+  if (!initData) return null;
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/auth/telegram-webapp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ init_data: initData }),
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (data.token) {
+      setStoredToken(data.token);
+    }
+    return { success: data.success, message: data.message, user: data.user };
+  } catch {
+    return null;
+  }
+}
+
+
 export async function logout(): Promise<void> {
   await fetch(`${API_BASE_URL}/api/auth/logout`, {
     method: 'POST',
