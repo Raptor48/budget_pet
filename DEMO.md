@@ -1,5 +1,7 @@
 # Live Demo
 
+> [▶️ Watch 5-minute walkthrough](https://www.loom.com/share/e9eba267ccd24963a013de2d6e3079c6)
+
 This branch (`demo`) is the public, sandbox-only deployment of Budget Pet for
 portfolio / hiring review. The Telegram bot surface is suppressed so the app
 reads as a focused web product; everything else is the real V2.3 codebase.
