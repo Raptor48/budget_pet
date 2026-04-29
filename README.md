@@ -66,7 +66,7 @@ Plaid and domain logic should be covered in `tests/v2/` only.
 
 ## Railway checklist (short)
 
-The project (`protective-clarity` on Railway) hosts two environments:
+The project hosts two environments:
 
 | Environment | Branch | Purpose |
 |---|---|---|
