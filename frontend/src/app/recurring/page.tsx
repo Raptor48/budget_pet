@@ -12,6 +12,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  RotateCcw,
   Square,
   TrendingDown,
   TrendingUp,
@@ -302,7 +303,7 @@ export default function RecurringPage() {
 
   const handleSingleAction = async (
     stream: RecurringStream,
-    action: "cancel" | "snooze_price_change",
+    action: "cancel" | "snooze_price_change" | "reactivate",
   ) => {
     if (action === "cancel") {
       const ok = await confirm({
@@ -347,6 +348,17 @@ export default function RecurringPage() {
   const visibleRows = streams; // already filtered server-side
   const allVisibleSelected =
     visibleRows.length > 0 && visibleRows.every((r) => selected.has(r.id));
+
+  // Determines whether the bulk action bar should offer Reactivate vs Cancel.
+  // We swap the destructive button for Reactivate only when the whole
+  // selection is already cancelled — otherwise the user might accidentally
+  // un-cancel rows they only meant to bulk-snooze, etc.
+  const allSelectedCancelled = useMemo(() => {
+    if (selected.size === 0) return false;
+    const selectedRows = visibleRows.filter((r) => selected.has(r.id));
+    if (selectedRows.length === 0) return false;
+    return selectedRows.every((r) => effectiveUserStatus(r) === "cancelled");
+  }, [selected, visibleRows]);
 
   return (
     <AppLayout>
@@ -498,6 +510,7 @@ export default function RecurringPage() {
               .filter((s) => selected.has(s.id))
               .reduce((acc, s) => acc + monthlyCostCents(s), 0)}
             disabled={bulkMutation.isPending}
+            allSelectedCancelled={allSelectedCancelled}
             onClear={() => setSelected(new Set())}
             onCancel={async () => {
               const ok = await confirm({
@@ -515,6 +528,12 @@ export default function RecurringPage() {
                 action: "cancel",
               });
             }}
+            onReactivate={() =>
+              bulkMutation.mutate({
+                ids: Array.from(selected),
+                action: "reactivate",
+              })
+            }
             onSnooze={() =>
               bulkMutation.mutate({
                 ids: Array.from(selected),
@@ -991,7 +1010,7 @@ type ListViewProps = {
   isUpdating: boolean;
   onAction: (
     stream: RecurringStream,
-    action: "cancel" | "snooze_price_change",
+    action: "cancel" | "snooze_price_change" | "reactivate",
   ) => void;
   monthlyTotalCents: number;
   annualTotalCents: number;
@@ -1133,7 +1152,7 @@ function RecurringRow({
   isUpdating: boolean;
   editLockedByOther: boolean;
   onAction: (
-    action: "cancel" | "snooze_price_change",
+    action: "cancel" | "snooze_price_change" | "reactivate",
   ) => void;
 }) {
   const title = streamTitle(row);
@@ -1382,7 +1401,7 @@ function RowActionsMenu({
 }: {
   stream: RecurringStream;
   onAction: (
-    action: "cancel" | "snooze_price_change",
+    action: "cancel" | "snooze_price_change" | "reactivate",
   ) => void;
   onStartEdit: () => void;
   editLockedByOther: boolean;
@@ -1420,7 +1439,16 @@ function RowActionsMenu({
             onAction("snooze_price_change");
           }}
         />
-        {status !== "cancelled" ? (
+        {status === "cancelled" ? (
+          <RowActionItem
+            icon={<RotateCcw className="size-4" />}
+            label="Reactivate"
+            onClick={() => {
+              setOpen(false);
+              onAction("reactivate");
+            }}
+          />
+        ) : (
           <RowActionItem
             icon={<XCircle className="size-4" />}
             label="Mark cancelled"
@@ -1430,7 +1458,7 @@ function RowActionsMenu({
               onAction("cancel");
             }}
           />
-        ) : null}
+        )}
       </PopoverContent>
     </Popover>
   );
@@ -1476,15 +1504,19 @@ function BulkActionBar({
   count,
   monthlySavingsCents,
   disabled,
+  allSelectedCancelled,
   onClear,
   onCancel,
+  onReactivate,
   onSnooze,
 }: {
   count: number;
   monthlySavingsCents: number;
   disabled: boolean;
+  allSelectedCancelled: boolean;
   onClear: () => void;
   onCancel: () => void;
+  onReactivate: () => void;
   onSnooze: () => void;
 }) {
   return (
@@ -1501,13 +1533,22 @@ function BulkActionBar({
           disabled={disabled}
           onClick={onSnooze}
         />
-        <BulkButton
-          icon={<XCircle className="size-3.5" />}
-          label="Cancel"
-          variant="destructive"
-          disabled={disabled}
-          onClick={onCancel}
-        />
+        {allSelectedCancelled ? (
+          <BulkButton
+            icon={<RotateCcw className="size-3.5" />}
+            label="Reactivate"
+            disabled={disabled}
+            onClick={onReactivate}
+          />
+        ) : (
+          <BulkButton
+            icon={<XCircle className="size-3.5" />}
+            label="Cancel"
+            variant="destructive"
+            disabled={disabled}
+            onClick={onCancel}
+          />
+        )}
         <button
           type="button"
           onClick={onClear}
@@ -1568,7 +1609,7 @@ function ByCategoryView({
   onToggleSelect: (id: number) => void;
   onAction: (
     stream: RecurringStream,
-    action: "cancel" | "snooze_price_change",
+    action: "cancel" | "snooze_price_change" | "reactivate",
   ) => void;
 }) {
   type Group = {
@@ -1629,7 +1670,7 @@ function CategoryGroup({
   onToggleSelect: (id: number) => void;
   onAction: (
     stream: RecurringStream,
-    action: "cancel" | "snooze_price_change",
+    action: "cancel" | "snooze_price_change" | "reactivate",
   ) => void;
 }) {
   const [open, setOpen] = useState(true);
@@ -1692,7 +1733,7 @@ function CategoryGroupRow({
   isSelected: boolean;
   onToggleSelect: () => void;
   onAction: (
-    action: "cancel" | "snooze_price_change",
+    action: "cancel" | "snooze_price_change" | "reactivate",
   ) => void;
 }) {
   const title = streamTitle(row);
