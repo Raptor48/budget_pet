@@ -838,14 +838,21 @@ class BotRepository:
     # ------------------------------------------------------------------
 
     async def remember_merchant(self, merchant_key: str) -> Dict[str, Any]:
-        """Insert an entry; returns ``{"new": True}`` only on the first sighting."""
+        """Record a sighting; returns ``{"new": True}`` on the first one only.
+
+        ``merchant_key`` is expected to be the canonical key from
+        ``web/merchant_rules/keys.py`` (``eid:…`` or ``name:…``). The legacy
+        ``merchant_key`` column is kept in sync with ``canonical_key`` so the
+        old UNIQUE invariant stays valid; the partial unique index on
+        ``canonical_key`` is what the conflict actually rides on.
+        """
         pool = await self._pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                INSERT INTO merchant_seen (merchant_key)
-                VALUES ($1)
-                ON CONFLICT (merchant_key) DO NOTHING
+                INSERT INTO merchant_seen (merchant_key, canonical_key)
+                VALUES ($1, $1)
+                ON CONFLICT (canonical_key) DO NOTHING
                 RETURNING id, first_seen_at
                 """,
                 merchant_key,
@@ -858,9 +865,43 @@ class BotRepository:
         pool = await self._pool()
         async with pool.acquire() as conn:
             await conn.execute(
-                "UPDATE merchant_seen SET notified_at = NOW() WHERE merchant_key = $1",
+                "UPDATE merchant_seen SET notified_at = NOW() WHERE canonical_key = $1",
                 merchant_key,
             )
+
+    async def mark_subscription_alerted(self, recurring_id: int) -> None:
+        """Stamp ``recurring_streams.subscription_alerted_at`` so the
+        first-detection notification only fires once per stream lifetime.
+
+        Called immediately after enqueueing the "🆕 new subscription" alert.
+        Subsequent producer passes see the stamp and skip enqueueing again,
+        even after the 24h ``notifications_queue`` dedup window expires.
+        """
+        pool = await self._pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE recurring_streams SET subscription_alerted_at = NOW() "
+                "WHERE id = $1 AND subscription_alerted_at IS NULL",
+                recurring_id,
+            )
+
+    async def resolve_merchant_alias(self, merchant_key: str) -> Optional[str]:
+        """Return the user's alias for ``merchant_key`` (e.g.
+        ``name:nyflower`` → ``Rent``), or ``None`` when no alias is set.
+
+        Producers call this to surface the user-chosen display name in
+        notifications instead of the raw Plaid label. ``merchant_aliases``
+        is a tiny family-global table — a direct lookup is cheap.
+        """
+        if not merchant_key:
+            return None
+        pool = await self._pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchval(
+                "SELECT display_name FROM merchant_aliases WHERE merchant_key = $1",
+                merchant_key,
+            )
+        return row
 
     # ------------------------------------------------------------------
     # Recurring price snapshots
