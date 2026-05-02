@@ -733,7 +733,18 @@ class PlaidRepository:
                     ON CONFLICT (plaid_transaction_id) DO UPDATE SET
                         account_id          = EXCLUDED.account_id,
                         category_id         = COALESCE(transactions.category_id, EXCLUDED.category_id),
-                        amount_cents        = EXCLUDED.amount_cents,
+                        -- Honour ``manual_amount_override``: when an admin
+                        -- has hand-corrected ``amount_cents`` on a row, the
+                        -- override flag is set TRUE and we keep the local
+                        -- value across syncs. Same pattern as
+                        -- ``is_internal_transfer_manual`` and
+                        -- ``manual_class_override`` below — see
+                        -- ``web/migrations/v2_init.py::_migrate_transactions_manual_amount_override``.
+                        amount_cents        = CASE
+                            WHEN transactions.manual_amount_override
+                                THEN transactions.amount_cents
+                            ELSE EXCLUDED.amount_cents
+                        END,
                         date                = EXCLUDED.date,
                         authorized_date     = EXCLUDED.authorized_date,
                         datetime            = EXCLUDED.datetime,

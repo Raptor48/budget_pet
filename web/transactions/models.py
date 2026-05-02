@@ -133,6 +133,10 @@ class TransactionUpdate(BaseModel):
     classification. The legacy ``is_internal_transfer`` boolean remains
     accepted for older clients; both paths set ``manual_class_override``
     under the hood so user intent survives the next auto rescan.
+
+    ``amount_cents`` is owner-only and forces ``manual_amount_override =
+    TRUE`` on the row, so the value sticks across Plaid syncs. The route
+    layer enforces the owner gate; the repo enforces the splits invariant.
     """
 
     model_config = ConfigDict(extra="ignore")
@@ -143,6 +147,14 @@ class TransactionUpdate(BaseModel):
     is_private: Optional[bool] = None
     is_internal_transfer: Optional[bool] = None
     transaction_class: Optional[TransactionClassLiteral] = None
+    amount_cents: Optional[int] = None
+
+    @field_validator("amount_cents")
+    @classmethod
+    def amount_nonzero(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v == 0:
+            raise ValueError("amount_cents must not be zero")
+        return v
 
 
 class SplitCreate(BaseModel):

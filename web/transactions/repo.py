@@ -532,10 +532,59 @@ class TransactionsRepository:
             "is_private",
             "is_internal_transfer",
             "transaction_class",
+            # Owner-only override of the bank-reported amount. The route
+            # layer is responsible for gating this on ``is_owner``; the
+            # repo just enforces invariants below (positive int, no
+            # outstanding splits) and stamps ``manual_amount_override``
+            # so the next Plaid sync doesn't undo the change.
+            "amount_cents",
         }
         fields = {k: v for k, v in data.items() if k in allowed}
         if not fields:
             return await self.get_transaction(transaction_id)
+
+        # ------------------------------------------------------------------
+        # amount_cents — input validation + invariants. Done up front so we
+        # never reach the SET clause with a value that would corrupt
+        # downstream aggregates or break the splits invariant.
+        # ------------------------------------------------------------------
+        if "amount_cents" in fields:
+            try:
+                new_amount = int(fields["amount_cents"])
+            except (TypeError, ValueError) as exc:
+                raise ValueError("amount_cents must be an integer") from exc
+            if new_amount == 0:
+                # Zero amount has no meaning in any of our aggregates and is
+                # almost certainly a UX mistake (empty input → 0 → silent
+                # wipeout of the row's contribution to budgets / reports).
+                raise ValueError("amount_cents must not be zero")
+            fields["amount_cents"] = new_amount
+
+            # Splits invariant — ``SUM(splits.amount_cents) == parent.amount_cents``
+            # is enforced by ``SplitsRepository.set_splits``. If splits already
+            # exist, an amount edit would silently leave them mismatched and
+            # the next ``set_splits`` call would reject the row. Reject the
+            # edit up front with a clear message instead, so the user knows
+            # to clear splits first.
+            pool = await self._pool()
+            async with pool.acquire() as conn:
+                has_splits = await conn.fetchval(
+                    "SELECT EXISTS(SELECT 1 FROM transaction_splits "
+                    "WHERE parent_transaction_id = $1)",
+                    transaction_id,
+                )
+            if has_splits:
+                raise ValueError(
+                    "Cannot edit amount on a transaction with splits — "
+                    "delete the splits first, then re-create them after "
+                    "the new amount is saved."
+                )
+
+            # Stamp the protection flag so Plaid sync won't overwrite this
+            # value on the next ``/transactions/sync`` upsert. Mirrors the
+            # ``manual_class_override`` / ``is_internal_transfer_manual``
+            # pattern (see web/plaid/repo.py upsert).
+            fields["manual_amount_override"] = True
 
         # Normalize the two ways a client can express "force this row to
         # internal_transfer" into a single ``manual_class_override`` write.

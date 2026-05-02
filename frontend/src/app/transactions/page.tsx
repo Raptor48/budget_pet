@@ -23,6 +23,7 @@ import {
   Clock,
   Columns2,
   CreditCard,
+  DollarSign,
   Download,
   ExternalLink,
   Eye,
@@ -86,6 +87,7 @@ import {
 import { PlaidTxnAmount } from "@/components/ui/plaid-txn-amount";
 import { formatAccountPickerLabel } from "@/lib/account-picker-label";
 import { getAuthHeaders } from "@/lib/auth";
+import { useAuth } from "@/contexts/auth-context";
 import {
   accountsApi,
   categoriesApi,
@@ -522,7 +524,18 @@ function TransactionDetailsDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
   categories: Category[];
-  onSave: (payload: { category_id: number | null; user_note: string }) => void | Promise<void>;
+  onSave: (payload: {
+    category_id: number | null;
+    user_note: string;
+    /**
+     * Owner-only: when set, the server pins ``manual_amount_override = TRUE``
+     * so the new value survives Plaid syncs. ``undefined`` means "leave the
+     * amount alone" — the dialog only emits this field when the user
+     * actually edited it. Sign of the integer matches the original
+     * transaction's sign (the input only edits the magnitude).
+     */
+    amount_cents?: number;
+  }) => void | Promise<void>;
   isSaving: boolean;
   onDeleteCash?: (id: number) => Promise<void>;
   isDeletingCash?: boolean;
@@ -545,6 +558,17 @@ function TransactionDetailsDialog({
   // signal that there is anything to save).
   const [initialNote, setInitialNote] = useState("");
   const [initialCategoryId, setInitialCategoryId] = useState(ALL);
+
+  // Amount edit (owner-only). The input shows the magnitude in dollars,
+  // not the signed cents — the user almost never wants to flip an income
+  // into an expense or vice-versa via this field, and the sign is restored
+  // on save from the original transaction. Empty string means "field has
+  // not been touched" so we can distinguish blank from explicit zero.
+  const [editAmountStr, setEditAmountStr] = useState("");
+  const [initialAmountStr, setInitialAmountStr] = useState("");
+
+  const { user } = useAuth();
+  const isOwner = Boolean(user?.is_owner);
 
   const queryClient = useQueryClient();
 
@@ -577,21 +601,84 @@ function TransactionDetailsDialog({
     if (!transaction) return;
     const note = transaction.user_note ?? "";
     const cat = transaction.category_id == null ? ALL : String(transaction.category_id);
+    // Magnitude only — the input doesn't expose the sign, so income vs
+    // expense stays unambiguous. Two-decimal fixed format keeps the input
+    // stable even when the original is "12.10" (would otherwise round-trip
+    // through Number → string and lose the trailing zero).
+    const amountStr = (Math.abs(transaction.amount_cents) / 100).toFixed(2);
     setEditNote(note);
     setEditCategoryId(cat);
+    setEditAmountStr(amountStr);
     setInitialNote(note);
     setInitialCategoryId(cat);
+    setInitialAmountStr(amountStr);
     setShowMore(false);
   }, [transaction]);
 
-  const isDirty = editNote !== initialNote || editCategoryId !== initialCategoryId;
+  // Parse the edit input back into signed integer cents. Returns either
+  // {ok: true, cents} when the value passes validation, or {ok: false, …}
+  // describing what's wrong. Same rules as the server enforces, so the
+  // UI catches them without a round-trip.
+  const parseAmountInput = (
+    raw: string,
+    sourceCents: number,
+  ):
+    | { ok: true; cents: number }
+    | { ok: false; reason: string } => {
+    const trimmed = raw.trim();
+    if (!trimmed) return { ok: false, reason: "Amount is required" };
+    // Accept "12", "12.5", "12.50". Reject anything with letters or
+    // multiple dots. Negative not accepted — sign is preserved from the
+    // original transaction.
+    if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) {
+      return { ok: false, reason: "Use a positive number, e.g. 12.34" };
+    }
+    const dollars = Number(trimmed);
+    if (!Number.isFinite(dollars) || dollars <= 0) {
+      return { ok: false, reason: "Amount must be greater than zero" };
+    }
+    const magnitude = Math.round(dollars * 100);
+    // Preserve the original sign so an inflow row stays an inflow.
+    // sourceCents is never zero in practice (server validator forbids).
+    const sign = sourceCents < 0 ? -1 : 1;
+    return { ok: true, cents: sign * magnitude };
+  };
+
+  const amountChanged = editAmountStr !== initialAmountStr;
+  const amountParse = transaction && amountChanged
+    ? parseAmountInput(editAmountStr, transaction.amount_cents)
+    : null;
+  const amountInvalid = amountParse !== null && amountParse.ok === false;
+
+  // Don't allow saving when:
+  //  * nothing changed, or
+  //  * the amount field is in an invalid state — let the user fix it
+  //    before we bother the server with a 422.
+  const isDirty =
+    editNote !== initialNote ||
+    editCategoryId !== initialCategoryId ||
+    amountChanged;
+  const canSave = isDirty && !amountInvalid;
 
   const handleSave = async () => {
+    if (amountInvalid) return;
     try {
-      await onSave({
+      const payload: {
+        category_id: number | null;
+        user_note: string;
+        amount_cents?: number;
+      } = {
         user_note: editNote,
         category_id: editCategoryId === ALL ? null : Number(editCategoryId),
-      });
+      };
+      // Only emit amount_cents when (a) the field changed and (b) the
+      // current user is allowed to edit it. The route layer drops the
+      // field for non-owners anyway, but keeping the FE silent stops a
+      // partner's edit from quietly losing on the server.
+      if (amountChanged && transaction && amountParse?.ok && isOwner) {
+        payload.amount_cents = amountParse.cents;
+      }
+      await onSave(payload);
     } catch {
       /* onSave's mutation reports the error via toast */
     }
@@ -939,6 +1026,42 @@ function TransactionDetailsDialog({
                   />
                 </div>
               ) : null}
+              {/* Amount edit — owner-only. Pinned above Note so it's
+                  visually grouped with the other primary editable fields
+                  (category, note). The dialog stays untouched for non-
+                  owners; the partner sees the same form they always saw,
+                  no extra row, no badge. */}
+              {isOwner ? (
+                <div className="flex items-center gap-2">
+                  <DollarSign
+                    className="size-4 shrink-0 text-muted-foreground"
+                    aria-label="Amount"
+                  />
+                  <Input
+                    id="txn-detail-amount"
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    value={editAmountStr}
+                    onChange={(e) => setEditAmountStr(e.target.value)}
+                    className={cn(
+                      "flex-1",
+                      amountInvalid && "border-destructive focus-visible:ring-destructive",
+                    )}
+                    aria-invalid={amountInvalid || undefined}
+                    aria-describedby={
+                      amountInvalid ? "txn-detail-amount-error" : undefined
+                    }
+                  />
+                </div>
+              ) : null}
+              {amountInvalid && amountParse && !amountParse.ok ? (
+                <p
+                  id="txn-detail-amount-error"
+                  className="-mt-1 ml-6 text-xs text-destructive"
+                >
+                  {amountParse.reason}
+                </p>
+              ) : null}
               <div className="flex items-center gap-2">
                 <StickyNote
                   className="size-4 shrink-0 text-muted-foreground"
@@ -1089,9 +1212,15 @@ function TransactionDetailsDialog({
               <Button
                 type="button"
                 onClick={handleSave}
-                disabled={isSaving || isDeletingCash || !isDirty}
-                variant={isDirty ? "default" : "secondary"}
-                title={isDirty ? undefined : "No changes to save"}
+                disabled={isSaving || isDeletingCash || !canSave}
+                variant={canSave ? "default" : "secondary"}
+                title={
+                  amountInvalid
+                    ? (amountParse && !amountParse.ok ? amountParse.reason : "Invalid amount")
+                    : isDirty
+                      ? undefined
+                      : "No changes to save"
+                }
               >
                 {isSaving ? (
                   <>
@@ -1617,14 +1746,31 @@ export default function TransactionsPage() {
   }, [categories]);
 
   const updateMutation = useMutation({
-    mutationFn: (payload: { id: number; category_id?: number | null; user_note?: string }) =>
+    mutationFn: (payload: {
+      id: number;
+      category_id?: number | null;
+      user_note?: string;
+      // Owner-only — the dialog gates emission and the server gates
+      // acceptance, so the field is safe to include unconditionally here.
+      amount_cents?: number;
+    }) =>
       transactionsApi.update(payload.id, {
         category_id: payload.category_id,
         user_note: payload.user_note,
+        amount_cents: payload.amount_cents,
       }),
     onSuccess: async (_, variables) => {
       await queryClient.invalidateQueries({ queryKey: ["transactions"] });
       await queryClient.invalidateQueries({ queryKey: ["transaction", variables.id] });
+      // Amount edits invalidate Reports / Budgets / Insights aggregates
+      // (everything that does SUM(amount_cents)). Drop those caches too
+      // so the Reports tab doesn't keep showing the pre-edit total.
+      if (variables.amount_cents != null) {
+        await queryClient.invalidateQueries({ queryKey: ["reports"] });
+        await queryClient.invalidateQueries({ queryKey: ["budgets"] });
+        await queryClient.invalidateQueries({ queryKey: ["insights"] });
+        await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      }
     },
     onError: onMutationError("Failed to save changes."),
   });
@@ -2087,6 +2233,7 @@ export default function TransactionsPage() {
               id: detailTxId,
               category_id: payload.category_id,
               user_note: payload.user_note,
+              amount_cents: payload.amount_cents,
             });
           }}
           isSaving={updateMutation.isPending}

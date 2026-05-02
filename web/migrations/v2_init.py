@@ -1313,6 +1313,28 @@ async def _migrate_insights_persistence(conn) -> None:
     )
 
 
+async def _migrate_transactions_manual_amount_override(conn) -> None:
+    """V2.3: per-transaction "do not let Plaid sync overwrite my amount" flag.
+
+    Plaid's ``/transactions/sync`` upsert (``web/plaid/repo.py``) refreshes
+    every column on conflict, including ``amount_cents``. Without a guard,
+    an admin who hand-corrects a transaction amount sees the value silently
+    revert on the next sync (~6h later).
+
+    The override mirrors the pattern already used for class
+    (``manual_class_override``) and internal-transfer flag
+    (``is_internal_transfer_manual``): a boolean column the Plaid upsert
+    explicitly checks before deciding whether to overwrite.
+
+    Default is FALSE so existing rows are unaffected. Idempotent.
+    """
+    await _ddl(
+        conn,
+        "ALTER TABLE transactions "
+        "ADD COLUMN IF NOT EXISTS manual_amount_override BOOLEAN NOT NULL DEFAULT FALSE",
+    )
+
+
 async def run_v2_migrations(pool) -> None:
     """Execute all V2 DDL statements against the provided asyncpg pool."""
     logger.info("Running V2 database migrations...")
@@ -1338,4 +1360,5 @@ async def run_v2_migrations(pool) -> None:
         await _migrate_transactions_transaction_class(conn)
         await _migrate_fix_internal_transfer_class_drift(conn)
         await _migrate_insights_persistence(conn)
+        await _migrate_transactions_manual_amount_override(conn)
     logger.info("V2 database migrations completed successfully.")

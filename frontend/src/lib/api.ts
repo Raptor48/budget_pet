@@ -313,6 +313,11 @@ export const transactionsApi = {
    * maps to override='internal_transfer' when true, back to 'auto' when
    * false). Changing `category_id` re-runs the classifier on just that
    * row.
+   *
+   * `amount_cents` is owner-only — non-owners have it dropped server-side.
+   * Setting it pins `manual_amount_override = TRUE` so subsequent Plaid
+   * syncs leave the value alone. The server rejects edits on transactions
+   * that already have splits (delete the splits first).
    */
   update: (
     id: number,
@@ -323,6 +328,7 @@ export const transactionsApi = {
       is_private?: boolean;
       is_internal_transfer?: boolean;
       transaction_class?: import('@/types/v2').TransactionClass;
+      amount_cents?: number;
     },
   ): Promise<Transaction> =>
     apiRequest(`/api/transactions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),

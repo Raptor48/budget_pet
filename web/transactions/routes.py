@@ -314,7 +314,18 @@ async def update_transaction(transaction_id: int, body: TransactionUpdate, reque
     update_data = body.model_dump(exclude_none=True)
     if not current_user.get("is_owner") and txn.get("account_user_id") != current_id:
         update_data.pop("is_private", None)
-    updated = await repo.update_transaction(transaction_id, update_data)
+    # Amount edits are admin-only — they bypass the bank's reported number
+    # and pin a ``manual_amount_override`` flag that survives Plaid syncs.
+    # Drop the field silently for non-owners rather than 403'ing the whole
+    # request: a partner editing the category should still succeed.
+    if "amount_cents" in update_data and not current_user.get("is_owner"):
+        update_data.pop("amount_cents", None)
+    try:
+        updated = await repo.update_transaction(transaction_id, update_data)
+    except ValueError as exc:
+        # Repo raises ValueError for amount_cents invariants (zero, splits
+        # exist, type) and for unknown ``transaction_class`` values.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if not updated:
         raise HTTPException(status_code=404, detail="Transaction not found")
     return await _enrich(updated, repo)
