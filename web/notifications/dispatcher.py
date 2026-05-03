@@ -154,6 +154,18 @@ async def _drain_user(user_row: Dict[str, Any]) -> None:
     if not is_brief_due or in_quiet:
         return
 
+    # Per-day idempotency: the dispatcher fires every minute and the brief
+    # window is 15 minutes wide, so without this gate every minute inside
+    # that window would compose and send a fresh brief. On weekdays the
+    # "no pending rows ⇒ skip" check below would self-stop after the first
+    # tick, but on Sunday the streak summary + audit invite always render
+    # even with zero queue items — that's how the user ended up receiving
+    # one Sunday brief per minute. Read the stamp set by the previous send.
+    today_local = now_local.date()
+    last_sent = settings.get("last_brief_sent_date")
+    if last_sent == today_local:
+        return
+
     is_sunday = now_local.weekday() == 6
     priorities = ["P1"]
     if is_sunday and settings.get("sunday_brief_enabled", True):
@@ -190,6 +202,16 @@ async def _drain_user(user_row: Dict[str, Any]) -> None:
         # alone excludes them from the next tick (list_pending_for_user
         # already filters on sent_at IS NULL).
         await mark_sent([n["id"] for n in pending])
+        # Stamp the per-day sentinel so subsequent ticks inside the same
+        # local day skip out at the gate above. Best-effort — if the stamp
+        # fails the worst case is the user gets one extra brief next minute
+        # before the queue empties out, which beats failing the whole send.
+        try:
+            await repo.mark_brief_sent(user_id, now_local.date())
+        except Exception:
+            logger.exception(
+                "Failed to stamp last_brief_sent_date for user=%s", user_id
+            )
         await log_bot_activity(
             kind="outgoing.push",
             summary=f"Sent {title} ({len(pending)} item{'s' if len(pending) != 1 else ''})",

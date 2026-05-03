@@ -343,6 +343,39 @@ class BotRepository:
             )
         return dict(row)
 
+    async def mark_brief_sent(self, user_id: int, local_date: date) -> None:
+        """Stamp ``couple_settings.last_brief_sent_date`` after a successful
+        morning/Sunday brief delivery.
+
+        The dispatcher reads the existing value to decide whether the brief
+        for today has already gone out — together this turns the 15-minute
+        brief window into "send once, then skip" instead of "send once a
+        minute for fifteen minutes".
+
+        Idempotent ON CONFLICT so this works even if ``get_couple_settings``
+        hasn't seeded a row yet (rare path, but possible during a fresh
+        Telegram link).
+        """
+        pool = await self._pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO couple_settings (
+                    user_id, mood_threshold_cents,
+                    morning_brief_local, morning_brief_tz,
+                    last_brief_sent_date
+                )
+                VALUES ($1, 0, $2, $3, $4)
+                ON CONFLICT (user_id) DO UPDATE
+                   SET last_brief_sent_date = EXCLUDED.last_brief_sent_date,
+                       updated_at = NOW()
+                """,
+                user_id,
+                DEFAULT_MORNING_BRIEF,
+                DEFAULT_TIMEZONE,
+                local_date,
+            )
+
     async def update_couple_settings(
         self, user_id: int, patch: Dict[str, Any]
     ) -> Dict[str, Any]:

@@ -461,6 +461,28 @@ async def _migrate_merchant_seen_by_key(conn) -> None:
     )
 
 
+async def _migrate_couple_settings_last_brief_sent(conn) -> None:
+    """V2.3: add ``couple_settings.last_brief_sent_date`` so the dispatcher can
+    de-dup the morning/Sunday brief within a single local day.
+
+    The dispatcher fires once a minute and the brief window is 15 minutes
+    wide. On weekdays the early-return guard in ``_drain_user`` (no pending
+    rows ⇒ skip) makes the loop self-stopping after the first send. On
+    Sunday that guard is bypassed (the Sunday brief always carries the
+    streak summary + audit invite even with zero queue items), so without
+    a per-day sentinel the same brief was being delivered every minute
+    until the window closed.
+
+    Backfill leaves the column NULL — the very next dispatcher tick after
+    deploy will send today's brief if it's due, then stamp the date and
+    skip subsequent ticks.
+    """
+    await _ddl(
+        conn,
+        "ALTER TABLE couple_settings ADD COLUMN IF NOT EXISTS last_brief_sent_date DATE",
+    )
+
+
 async def run_bot_migrations(pool) -> None:
     """Idempotent migration entry point — called from main.py startup."""
     logger.info("Running bot v1 migrations…")
@@ -474,4 +496,5 @@ async def run_bot_migrations(pool) -> None:
                 )
                 raise
         await _migrate_merchant_seen_by_key(conn)
+        await _migrate_couple_settings_last_brief_sent(conn)
     logger.info("Bot v1 migrations complete.")
