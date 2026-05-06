@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -268,6 +269,47 @@ async def _hourly_producers() -> None:
         logger.exception("Hourly producers tick failed")
 
 
+async def _daily_warmup_frontend() -> None:
+    """Daily HTTP ping of the Next.js frontend to keep its container warm.
+
+    Why this exists:
+      The FastAPI process is kept warm by this very dispatcher (one tick a
+      minute). The Next.js container has no internal heartbeat — when the
+      user doesn't open the web UI for a while, the first pageload hits a
+      cold Node runtime + cold edge cache and can take ~30s.
+
+      A single GET per day is enough to keep the container, the Railway
+      edge router, and the TLS session warm without burning resources.
+
+    Configuration:
+      Reads ``PUBLIC_FRONTEND_URL`` (the same env var the bot uses to build
+      Mini App / deep links). When unset — typical of local dev or a
+      back-end-only deploy — the job no-ops.
+
+    Failure handling:
+      Best effort. Network errors, non-2xx responses, timeouts — all
+      logged at INFO level (not error), because a warmup miss is harmless:
+      the next user pageload will simply pay the cold-start cost once.
+    """
+    base = (os.getenv("PUBLIC_FRONTEND_URL") or "").strip().rstrip("/")
+    if not base:
+        logger.info("Daily warmup skipped: PUBLIC_FRONTEND_URL not set")
+        return
+    if "," in base:
+        # Match handlers.py convention — first entry of a CSV list.
+        base = base.split(",")[0].strip().rstrip("/")
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            resp = await client.get(base + "/")
+        logger.info(
+            "Daily warmup hit %s — status=%s", base, resp.status_code
+        )
+    except Exception as exc:
+        logger.info("Daily warmup ping failed (harmless): %s", exc)
+
+
 def start_dispatcher():
     """Start the per-minute dispatcher + hourly producer top-up.
 
@@ -305,6 +347,16 @@ def start_dispatcher():
         _daily_prune_logs,
         trigger=IntervalTrigger(hours=24),
         id="bot_activity_log_prune",
+        coalesce=True,
+        max_instances=1,
+        replace_existing=True,
+    )
+    # Daily HTTP ping to keep the Next.js container & Railway edge warm
+    # so the first morning pageload doesn't pay a 30s cold-start.
+    _scheduler.add_job(
+        _daily_warmup_frontend,
+        trigger=IntervalTrigger(hours=24),
+        id="frontend_daily_warmup",
         coalesce=True,
         max_instances=1,
         replace_existing=True,
