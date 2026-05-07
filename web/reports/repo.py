@@ -754,9 +754,16 @@ class ReportsRepository:
             debt = await conn.fetchval(
                 "SELECT COALESCE(SUM(current_balance_cents), 0) FROM accounts WHERE type IN ('credit','loan') AND is_active"
             )
-            liquid = liquid or 0
-            investments = investments or 0
-            debt = debt or 0
+            # Postgres SUM(BIGINT) returns NUMERIC, which asyncpg surfaces as
+            # Decimal. Downstream we feed these into the debt-payoff math
+            # ``(delta / span_days) * 30`` and ``debt / per_month``; mixing
+            # Decimal with a float literal raises ``TypeError`` (Python forbids
+            # implicit Decimal*float). Cast to int up front — these are cents,
+            # always whole numbers — so every derived value stays in plain
+            # ``int`` / ``float`` arithmetic.
+            liquid = int(liquid or 0)
+            investments = int(investments or 0)
+            debt = int(debt or 0)
             net = liquid + investments - debt
 
             # Per-account breakdown. Investment holdings are pre-aggregated
@@ -816,8 +823,12 @@ class ReportsRepository:
                     span_days = (today - trajectory_snap["snapshot_date"]).days
                     delta_total = net - int(trajectory_snap["net_worth_cents"])
                     if span_days > 0 and delta_total > 0:
-                        # Cents per day → cents per month (assume 30 days)
-                        per_month = (delta_total / span_days) * 30.0
+                        # Cents per day → cents per month (assume 30 days).
+                        # ``delta_total / span_days`` is float in Py3; the
+                        # ``30`` multiplier is an int on purpose — see the
+                        # int() casts above for the original Decimal/float
+                        # mixing trap.
+                        per_month = (delta_total / span_days) * 30
                         if per_month > 0:
                             months = int(round(debt / per_month))
                             # Cap at 600mo (50yr) — anything longer is noise
@@ -910,9 +921,11 @@ class ReportsRepository:
             debt = await conn.fetchval(
                 "SELECT COALESCE(SUM(current_balance_cents), 0) FROM accounts WHERE type IN ('credit','loan') AND is_active"
             )
-            liquid = liquid or 0
-            investments = investments or 0
-            debt = debt or 0
+            # Same int() cast as get_net_worth — keeps the snapshot row
+            # writing ints into the BIGINT columns and matches the read path.
+            liquid = int(liquid or 0)
+            investments = int(investments or 0)
+            debt = int(debt or 0)
             net = liquid + investments - debt
             today = date.today()
             row = await conn.fetchrow(
