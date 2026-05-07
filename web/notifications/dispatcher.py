@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -154,6 +155,18 @@ async def _drain_user(user_row: Dict[str, Any]) -> None:
     if not is_brief_due or in_quiet:
         return
 
+    # Per-day idempotency: the dispatcher fires every minute and the brief
+    # window is 15 minutes wide, so without this gate every minute inside
+    # that window would compose and send a fresh brief. On weekdays the
+    # "no pending rows ⇒ skip" check below would self-stop after the first
+    # tick, but on Sunday the streak summary + audit invite always render
+    # even with zero queue items — that's how the user ended up receiving
+    # one Sunday brief per minute. Read the stamp set by the previous send.
+    today_local = now_local.date()
+    last_sent = settings.get("last_brief_sent_date")
+    if last_sent == today_local:
+        return
+
     is_sunday = now_local.weekday() == 6
     priorities = ["P1"]
     if is_sunday and settings.get("sunday_brief_enabled", True):
@@ -190,6 +203,16 @@ async def _drain_user(user_row: Dict[str, Any]) -> None:
         # alone excludes them from the next tick (list_pending_for_user
         # already filters on sent_at IS NULL).
         await mark_sent([n["id"] for n in pending])
+        # Stamp the per-day sentinel so subsequent ticks inside the same
+        # local day skip out at the gate above. Best-effort — if the stamp
+        # fails the worst case is the user gets one extra brief next minute
+        # before the queue empties out, which beats failing the whole send.
+        try:
+            await repo.mark_brief_sent(user_id, now_local.date())
+        except Exception:
+            logger.exception(
+                "Failed to stamp last_brief_sent_date for user=%s", user_id
+            )
         await log_bot_activity(
             kind="outgoing.push",
             summary=f"Sent {title} ({len(pending)} item{'s' if len(pending) != 1 else ''})",
@@ -246,6 +269,47 @@ async def _hourly_producers() -> None:
         logger.exception("Hourly producers tick failed")
 
 
+async def _daily_warmup_frontend() -> None:
+    """Daily HTTP ping of the Next.js frontend to keep its container warm.
+
+    Why this exists:
+      The FastAPI process is kept warm by this very dispatcher (one tick a
+      minute). The Next.js container has no internal heartbeat — when the
+      user doesn't open the web UI for a while, the first pageload hits a
+      cold Node runtime + cold edge cache and can take ~30s.
+
+      A single GET per day is enough to keep the container, the Railway
+      edge router, and the TLS session warm without burning resources.
+
+    Configuration:
+      Reads ``PUBLIC_FRONTEND_URL`` (the same env var the bot uses to build
+      Mini App / deep links). When unset — typical of local dev or a
+      back-end-only deploy — the job no-ops.
+
+    Failure handling:
+      Best effort. Network errors, non-2xx responses, timeouts — all
+      logged at INFO level (not error), because a warmup miss is harmless:
+      the next user pageload will simply pay the cold-start cost once.
+    """
+    base = (os.getenv("PUBLIC_FRONTEND_URL") or "").strip().rstrip("/")
+    if not base:
+        logger.info("Daily warmup skipped: PUBLIC_FRONTEND_URL not set")
+        return
+    if "," in base:
+        # Match handlers.py convention — first entry of a CSV list.
+        base = base.split(",")[0].strip().rstrip("/")
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            resp = await client.get(base + "/")
+        logger.info(
+            "Daily warmup hit %s — status=%s", base, resp.status_code
+        )
+    except Exception as exc:
+        logger.info("Daily warmup ping failed (harmless): %s", exc)
+
+
 def start_dispatcher():
     """Start the per-minute dispatcher + hourly producer top-up.
 
@@ -283,6 +347,16 @@ def start_dispatcher():
         _daily_prune_logs,
         trigger=IntervalTrigger(hours=24),
         id="bot_activity_log_prune",
+        coalesce=True,
+        max_instances=1,
+        replace_existing=True,
+    )
+    # Daily HTTP ping to keep the Next.js container & Railway edge warm
+    # so the first morning pageload doesn't pay a 30s cold-start.
+    _scheduler.add_job(
+        _daily_warmup_frontend,
+        trigger=IntervalTrigger(hours=24),
+        id="frontend_daily_warmup",
         coalesce=True,
         max_instances=1,
         replace_existing=True,

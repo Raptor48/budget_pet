@@ -775,6 +775,48 @@ async def _migrate_recurring_user_status(conn) -> None:
         )
 
 
+async def _migrate_recurring_first_detected_alerted(conn) -> None:
+    """V2.3: per-stream "we already alerted the user about this stream" stamp.
+
+    Without this column the Morning Brief produced a "🆕 N new subscriptions"
+    block every single day for streams whose price has never changed:
+
+    * ``recurring_price_snapshots`` only inserts a row when the amount
+      actually changes, so a stable stream has only ONE snapshot for its
+      whole life.
+    * ``detect_subscription_changes`` interprets ``len(history) < 2`` as
+      "brand-new stream" and fires "🆕 new subscription detected".
+    * The ``notifications_queue`` dedup window is 24h, so the same
+      "new subscription" line fires every morning forever.
+
+    The fix: stamp ``subscription_alerted_at`` the moment we first emit the
+    "new subscription" notification, and refuse to emit it again if the stamp
+    is set. Price-change alerts are unaffected (they use the snapshot
+    history and a separate code path).
+
+    The column is backfilled to NOW() for every existing stream on first
+    apply so the next morning brief is silent rather than dumping the entire
+    catalogue as "new".
+    """
+    await _ddl(
+        conn,
+        "ALTER TABLE recurring_streams ADD COLUMN IF NOT EXISTS subscription_alerted_at TIMESTAMPTZ",
+    )
+    # Backfill: anything older than ~10 minutes was already known to the
+    # system at the time this migration runs, so mark it as already-alerted
+    # to suppress the historical flood. Streams ingested in the last 10
+    # minutes are likely from the Plaid sync that just kicked off; leave
+    # them NULL so they get a one-shot "new" alert.
+    await conn.execute(
+        """
+        UPDATE recurring_streams
+           SET subscription_alerted_at = NOW()
+         WHERE subscription_alerted_at IS NULL
+           AND COALESCE(last_synced_at, NOW()) < NOW() - INTERVAL '10 minutes'
+        """
+    )
+
+
 async def _migrate_merchant_rules_global_family(conn) -> None:
     """
     One global rule per merchant_key (family-wide). Legacy table had (user_id, merchant_key).
@@ -1271,6 +1313,28 @@ async def _migrate_insights_persistence(conn) -> None:
     )
 
 
+async def _migrate_transactions_manual_amount_override(conn) -> None:
+    """V2.3: per-transaction "do not let Plaid sync overwrite my amount" flag.
+
+    Plaid's ``/transactions/sync`` upsert (``web/plaid/repo.py``) refreshes
+    every column on conflict, including ``amount_cents``. Without a guard,
+    an admin who hand-corrects a transaction amount sees the value silently
+    revert on the next sync (~6h later).
+
+    The override mirrors the pattern already used for class
+    (``manual_class_override``) and internal-transfer flag
+    (``is_internal_transfer_manual``): a boolean column the Plaid upsert
+    explicitly checks before deciding whether to overwrite.
+
+    Default is FALSE so existing rows are unaffected. Idempotent.
+    """
+    await _ddl(
+        conn,
+        "ALTER TABLE transactions "
+        "ADD COLUMN IF NOT EXISTS manual_amount_override BOOLEAN NOT NULL DEFAULT FALSE",
+    )
+
+
 async def run_v2_migrations(pool) -> None:
     """Execute all V2 DDL statements against the provided asyncpg pool."""
     logger.info("Running V2 database migrations...")
@@ -1290,9 +1354,11 @@ async def run_v2_migrations(pool) -> None:
         await _migrate_categories_is_income(conn)
         await _migrate_recurring_price_change_signed(conn)
         await _migrate_recurring_user_status(conn)
+        await _migrate_recurring_first_detected_alerted(conn)
         await _migrate_merchant_aliases(conn)
         await _migrate_transactions_display_title_backfill(conn)
         await _migrate_transactions_transaction_class(conn)
         await _migrate_fix_internal_transfer_class_drift(conn)
         await _migrate_insights_persistence(conn)
+        await _migrate_transactions_manual_amount_override(conn)
     logger.info("V2 database migrations completed successfully.")

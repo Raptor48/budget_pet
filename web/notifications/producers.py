@@ -15,6 +15,7 @@ from typing import Any, Dict, List
 
 from web.bot_api.repo import get_bot_repo
 from web.db import get_pool
+from web.merchant_rules.keys import merchant_key as build_merchant_key
 from web.notifications.queue import dedup_key_for, enqueue_notification
 from web.transactions.display import normalize_transaction_title
 
@@ -190,6 +191,20 @@ async def detect_budget_thresholds() -> int:
 
 
 async def detect_recurring_tomorrow() -> int:
+    """Fire "📅 expected tomorrow" forecasts for active recurring streams.
+
+    Display name precedence in the payload:
+      1. User alias from ``merchant_aliases`` (e.g. Flower → Rent).
+      2. Brand-pretty name from ``_pretty_subscription_name`` (Patreon\\* …
+         → Patreon).
+      3. Raw ``description`` as a last resort.
+
+    Without this layering the brief used to read like
+    "Patreon\\* Membership Internet CA 04/01 expected tomorrow" — accurate
+    but unreadable. ``recurring_streams`` carries only ``merchant_name``
+    (no entity ID), so the alias join is restricted to the ``name:`` key
+    namespace, matching the existing list_streams contract.
+    """
     from web.reports.calculations import next_future_occurrence
 
     pool = await get_pool()
@@ -204,11 +219,19 @@ async def detect_recurring_tomorrow() -> int:
             return 0
         rows = await conn.fetch(
             """
-            SELECT id, description, frequency, average_amount_cents, last_date
-            FROM recurring_streams
-            WHERE is_active = TRUE
-              AND user_status = 'active'
-              AND last_date IS NOT NULL
+            SELECT rs.id,
+                   rs.description,
+                   rs.merchant_name,
+                   rs.frequency,
+                   rs.average_amount_cents,
+                   rs.last_date,
+                   ma.display_name AS alias_display
+            FROM recurring_streams rs
+            LEFT JOIN merchant_aliases ma ON ma.merchant_key =
+                'name:' || lower(NULLIF(TRIM(rs.merchant_name), ''))
+            WHERE rs.is_active = TRUE
+              AND rs.user_status = 'active'
+              AND rs.last_date IS NOT NULL
             """,
         )
     for r in rows:
@@ -218,6 +241,16 @@ async def detect_recurring_tomorrow() -> int:
         nxt = next_future_occurrence(r["last_date"], r["frequency"] or "")
         if nxt != target:
             continue
+        raw = r["description"] or ""
+        if _looks_like_bank_artefact(raw):
+            # Skip bank-internal recurrences (auto-payments, fees) — same
+            # rationale as in detect_subscription_changes.
+            continue
+        display_name = (
+            r["alias_display"]
+            or _pretty_subscription_name(raw)
+            or raw
+        )
         for u in users:
             uid = int(u["id"])
             if not await repo.is_alert_enabled(uid, "recurring_tomorrow"):
@@ -227,9 +260,10 @@ async def detect_recurring_tomorrow() -> int:
                 type="recurring_tomorrow",
                 priority="P1",
                 payload={
-                    "name": r["description"],
+                    "name": display_name,
                     "amount_cents": int(r["average_amount_cents"] or 0),
                     "due_date": str(target),
+                    "stream_id": int(r["id"]),
                 },
                 dedup_key=dedup_key_for("recurring_tomorrow", int(r["id"]), target),
             )
@@ -288,6 +322,24 @@ async def detect_plaid_reauth() -> int:
 
 
 async def detect_new_merchants() -> int:
+    """Fire "🆕 first time at <merchant>" alerts.
+
+    Keyed by the canonical ``merchant_key`` (``eid:<entity>`` when Plaid
+    supplied an entity ID, otherwise ``name:<lower(merchant)>``) — the same
+    contract used by ``merchant_aliases`` and ``merchant_category_rules``.
+
+    Why not raw ``lower(merchant_name)`` like the legacy code did? Plaid
+    occasionally returns minor variants of the same merchant (``Apple`` vs
+    ``APPLE.COM/BILL`` vs ``Apple Inc.``). Each variant became its own
+    ``merchant_seen`` row under the old key, so the "first time at Apple"
+    alert fired multiple times. Using the structured merchant_key collapses
+    those variants when an entity ID is present.
+
+    The ``display_name`` we put in the payload prefers, in order:
+    user alias (from ``merchant_aliases``) → cleaned-up Plaid name. The
+    raw merchant_name is kept too so the rendering layer can fall back if
+    the alias is removed later.
+    """
     pool = await get_pool()
     repo = get_bot_repo()
     fired = 0
@@ -297,12 +349,23 @@ async def detect_new_merchants() -> int:
         )
         if not users:
             return 0
-        # Build a per-merchant view of who owns the underlying account, so we
-        # can decide which users may legitimately see the alert.
+        # Pull a per-(entity, account-owner) slice of recent expense
+        # transactions. We DISTINCT on the canonical merchant_key — built
+        # from merchant_entity_id when Plaid supplied one — so the same
+        # merchant under two name variants doesn't ride two rows. The
+        # ``2 days`` window is just lag-tolerance for late Plaid syncs;
+        # actual deduping is done by ``merchant_seen`` per canonical key.
         rows = await conn.fetch(
             """
-            SELECT DISTINCT ON (lower(t.merchant_name))
+            SELECT DISTINCT ON (
+                CASE
+                    WHEN NULLIF(TRIM(t.merchant_entity_id), '') IS NOT NULL
+                        THEN 'eid:' || lower(t.merchant_entity_id)
+                    ELSE 'name:' || lower(t.merchant_name)
+                END
+            )
                    t.merchant_name,
+                   t.merchant_entity_id,
                    t.amount_cents,
                    t.date,
                    t.is_private,
@@ -313,7 +376,13 @@ async def detect_new_merchants() -> int:
               AND t.merchant_name <> ''
               AND t.date >= CURRENT_DATE - INTERVAL '2 days'
               AND COALESCE(t.transaction_class, 'expense') = 'expense'
-            ORDER BY lower(t.merchant_name), t.date DESC
+            ORDER BY
+                CASE
+                    WHEN NULLIF(TRIM(t.merchant_entity_id), '') IS NOT NULL
+                        THEN 'eid:' || lower(t.merchant_entity_id)
+                    ELSE 'name:' || lower(t.merchant_name)
+                END,
+                t.date DESC
             """,
         )
     for r in rows:
@@ -327,11 +396,21 @@ async def detect_new_merchants() -> int:
         # Skip micro-charges — almost never a real first-merchant moment.
         if int(r["amount_cents"] or 0) < 100:
             continue
-        key = merchant.lower()
-        sighting = await repo.remember_merchant(key)
+        canonical = build_merchant_key(
+            merchant_entity_id=r["merchant_entity_id"],
+            merchant_name=merchant,
+        )
+        if not canonical:
+            continue
+        sighting = await repo.remember_merchant(canonical)
         if not sighting.get("new"):
             continue
-        await repo.mark_merchant_notified(key)
+        await repo.mark_merchant_notified(canonical)
+        # User-chosen rename wins over the Plaid label. Falls back to the
+        # cleaned merchant name so old transactions without enrichment still
+        # render reasonably.
+        alias = await repo.resolve_merchant_alias(canonical)
+        display_name = alias or _pretty_subscription_name(merchant) or merchant
         # If the source transaction is private, the only user allowed to be
         # alerted is whoever owns the account it's on. Otherwise everyone
         # with a linked Telegram chat may see it.
@@ -349,10 +428,12 @@ async def detect_new_merchants() -> int:
                 type="new_merchant",
                 priority="P1",
                 payload={
-                    "merchant_name": merchant,
+                    "merchant_name": display_name,
+                    "raw_merchant_name": merchant,
+                    "merchant_key": canonical,
                     "amount_cents": int(r["amount_cents"] or 0),
                 },
-                dedup_key=dedup_key_for("new_merchant", key, uid),
+                dedup_key=dedup_key_for("new_merchant", canonical, uid),
             )
             if new_id:
                 fired += 1
@@ -365,16 +446,44 @@ async def detect_new_merchants() -> int:
 
 
 async def detect_subscription_changes() -> int:
+    """Fire two distinct alerts off ``recurring_streams``:
+
+    * **First detection** — emitted at most once per stream lifetime,
+      gated by ``recurring_streams.subscription_alerted_at``. Without this
+      gate the ``recurring_price_snapshots`` table only inserts on a delta,
+      so a stable Netflix has ``len(history) == 1`` forever, the producer
+      reads ``prev_amount = None``, and the 24h queue dedup expires every
+      morning — yielding "🆕 N new subscriptions" daily. The persistent
+      stamp breaks that loop.
+    * **Price change** — fires whenever Plaid reports a different
+      ``last_amount_cents`` than the previous snapshot. Unaffected by
+      the first-detection stamp.
+
+    Both alerts go out as ``subscription_creep`` notifications; ``builders``
+    distinguishes them by the presence of ``previous_amount_cents``.
+    """
     pool = await get_pool()
     repo = get_bot_repo()
     fired = 0
     async with pool.acquire() as conn:
+        # ``alias_display`` resolves the user-chosen rename (Flower → Rent)
+        # via the same name-keyed alias used elsewhere. recurring_streams
+        # only carries merchant_name (no entity ID) so we restrict the join
+        # to the ``name:`` namespace, matching the SQL contract used by
+        # ``recurring/repo.py::list_streams``.
         streams = await conn.fetch(
             """
-            SELECT id, description, last_amount_cents
-            FROM recurring_streams
-            WHERE is_active = TRUE AND user_status = 'active'
-              AND last_amount_cents IS NOT NULL
+            SELECT rs.id,
+                   rs.description,
+                   rs.merchant_name,
+                   rs.last_amount_cents,
+                   rs.subscription_alerted_at,
+                   ma.display_name AS alias_display
+            FROM recurring_streams rs
+            LEFT JOIN merchant_aliases ma ON ma.merchant_key =
+                'name:' || lower(NULLIF(TRIM(rs.merchant_name), ''))
+            WHERE rs.is_active = TRUE AND rs.user_status = 'active'
+              AND rs.last_amount_cents IS NOT NULL
             """,
         )
         users = await conn.fetch(
@@ -387,27 +496,37 @@ async def detect_subscription_changes() -> int:
         # because they repeat monthly, but they are not actionable for the user.
         if _looks_like_bank_artefact(raw_description):
             continue
-        # Pretty-print the merchant name once at enqueue time so the brief
-        # never has to deal with raw ACH descriptors. Brand overrides catch
-        # common SaaS/utility names; everything else falls through to the
-        # generic display normalizer.
-        pretty_name = _pretty_subscription_name(raw_description)
+        # User alias > brand-pretty (Patreon* → Patreon) > raw description.
+        # Resolved once at enqueue time so the brief never has to JOIN.
+        pretty_name = (
+            s["alias_display"]
+            or _pretty_subscription_name(raw_description)
+        )
 
         history = await repo.get_recurring_price_history(int(s["id"]), limit=2)
         prev_amount = None
-        if history:
-            # Most recent snapshot (history[0]) is the current; check if there
-            # is an earlier one to compare against.
-            if len(history) >= 2:
-                prev_amount = int(history[1]["amount_cents"])
+        if history and len(history) >= 2:
+            # Most recent snapshot (history[0]) is the current; history[1]
+            # is the previous price to compare against.
+            prev_amount = int(history[1]["amount_cents"])
         # Always record the current price; helper is no-op when unchanged.
         await repo.record_recurring_amount(
             int(s["id"]), int(s["last_amount_cents"])
         )
-        # Brand-new stream → "subscription_creep" with prev=None.
-        # Existing stream that just changed → "subscription_creep" with prev set.
-        if prev_amount == int(s["last_amount_cents"]):
+
+        is_first_detection = prev_amount is None
+        is_price_change = (
+            prev_amount is not None and prev_amount != int(s["last_amount_cents"])
+        )
+
+        if is_first_detection and s["subscription_alerted_at"] is not None:
+            # Already alerted about this stream once. The 24h dedup would
+            # have re-fired this every morning before the stamp existed.
             continue
+        if not is_first_detection and not is_price_change:
+            # Stable stream, nothing to say.
+            continue
+
         for u in users:
             uid = int(u["id"])
             if not await repo.is_alert_enabled(uid, "subscription_creep"):
@@ -430,6 +549,11 @@ async def detect_subscription_changes() -> int:
             )
             if new_id:
                 fired += 1
+        if is_first_detection:
+            # Stamp regardless of whether anyone was actually notified —
+            # otherwise a user who later enables the alert would still get
+            # the historical flood. The stamp is "we *would have* alerted".
+            await repo.mark_subscription_alerted(int(s["id"]))
     return fired
 
 

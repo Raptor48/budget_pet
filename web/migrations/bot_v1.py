@@ -404,6 +404,85 @@ ALL_STATEMENTS = [
 ]
 
 
+async def _migrate_merchant_seen_by_key(conn) -> None:
+    """V2.3: switch ``merchant_seen`` from raw ``lower(merchant_name)`` to the
+    canonical ``merchant_key`` from ``web/merchant_rules/keys.py``.
+
+    Old behaviour: producer keyed merchant_seen by ``merchant_name.lower()``.
+    Plaid sometimes returns subtle variants of the same merchant
+    (``Apple``, ``APPLE.COM/BILL``, ``Apple Inc.``) — each variant became
+    its own ``merchant_seen`` row, so the same merchant fired a "first time
+    at X" alert multiple times.
+
+    New behaviour: ``canonical_key`` is ``eid:<entity_id>`` when Plaid
+    supplies a stable entity ID, otherwise ``name:<lower(name)>``. Same key
+    contract used by ``merchant_aliases`` and ``merchant_category_rules``.
+
+    Migration is additive and idempotent:
+
+    * Add ``canonical_key`` column (nullable until backfilled).
+    * Backfill it for every existing row from the legacy ``merchant_key``
+      column value, prepending ``name:`` when the row predates the
+      structured key namespace, so old rows fall through the same lookup
+      branch as new ``name:`` keys.
+    * Add a partial UNIQUE index on the new column so producers can
+      ON CONFLICT against it. The legacy ``UNIQUE (merchant_key)`` invariant
+      stays in place for backwards compat.
+    """
+    has_canonical = await conn.fetchval(
+        """
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'merchant_seen' AND column_name = 'canonical_key'
+        """
+    )
+    if not has_canonical:
+        await _ddl(
+            conn,
+            "ALTER TABLE merchant_seen ADD COLUMN canonical_key TEXT",
+        )
+        await conn.execute(
+            """
+            UPDATE merchant_seen
+               SET canonical_key = CASE
+                   WHEN merchant_key LIKE 'eid:%' OR merchant_key LIKE 'name:%'
+                       THEN merchant_key
+                   ELSE 'name:' || merchant_key
+               END
+             WHERE canonical_key IS NULL
+            """
+        )
+    await _ddl(
+        conn,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS merchant_seen_canonical_key_uidx
+            ON merchant_seen(canonical_key)
+            WHERE canonical_key IS NOT NULL
+        """,
+    )
+
+
+async def _migrate_couple_settings_last_brief_sent(conn) -> None:
+    """V2.3: add ``couple_settings.last_brief_sent_date`` so the dispatcher can
+    de-dup the morning/Sunday brief within a single local day.
+
+    The dispatcher fires once a minute and the brief window is 15 minutes
+    wide. On weekdays the early-return guard in ``_drain_user`` (no pending
+    rows ⇒ skip) makes the loop self-stopping after the first send. On
+    Sunday that guard is bypassed (the Sunday brief always carries the
+    streak summary + audit invite even with zero queue items), so without
+    a per-day sentinel the same brief was being delivered every minute
+    until the window closed.
+
+    Backfill leaves the column NULL — the very next dispatcher tick after
+    deploy will send today's brief if it's due, then stamp the date and
+    skip subsequent ticks.
+    """
+    await _ddl(
+        conn,
+        "ALTER TABLE couple_settings ADD COLUMN IF NOT EXISTS last_brief_sent_date DATE",
+    )
+
+
 async def run_bot_migrations(pool) -> None:
     """Idempotent migration entry point — called from main.py startup."""
     logger.info("Running bot v1 migrations…")
@@ -416,4 +495,6 @@ async def run_bot_migrations(pool) -> None:
                     "Bot migration failed: %s\nSQL: %s", exc, stmt.strip()[:160]
                 )
                 raise
+        await _migrate_merchant_seen_by_key(conn)
+        await _migrate_couple_settings_last_brief_sent(conn)
     logger.info("Bot v1 migrations complete.")

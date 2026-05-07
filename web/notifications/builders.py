@@ -169,11 +169,15 @@ def build_single(notification: Dict[str, Any]) -> Tuple[str, List[List[Tuple[str
 # Brief (P1 daily / P2 sunday) — sectioned digest
 # ---------------------------------------------------------------------------
 
+# Sections rendered in this order. ``subscription_creep`` and
+# ``recurring_tomorrow`` are folded into a single "📅 Recurring" block by
+# the merged formatter below — both target the same domain entity
+# (``recurring_streams``) and splitting them just confused users into
+# wondering why a subscription showed up under two different headers.
 _SECTION_ORDER = [
     ("plaid_reauth", "🚨 Needs attention"),
     ("budget_threshold", "📊 Budget"),
-    ("subscription_creep", "🔁 Subscriptions"),
-    ("recurring_tomorrow", "📅 Recurring"),
+    ("subscription_creep", "📅 Recurring"),  # merged with recurring_tomorrow
     ("new_merchant", "🆕 New merchants"),
     ("milestone", "🎉 Milestones"),
     ("streak_milestone", "🔥 Streaks"),
@@ -181,19 +185,39 @@ _SECTION_ORDER = [
     ("leaderboard", "🏆 Leaderboard"),
 ]
 
+# Types whose items are absorbed into a sibling section. The formatter for
+# the absorbing section reads from ``grouped`` directly via this map, and
+# the absorbed type is skipped during the main loop so it isn't rendered
+# twice.
+_ABSORBED_INTO = {
+    "recurring_tomorrow": "subscription_creep",
+}
+
 _TOP_N_PER_SECTION = 5  # show top N by amount, collapse the rest
 
 
-def _format_subscription_section(items: List[Dict[str, Any]]) -> List[str]:
-    """Aggregate subscription_creep events into a single bulleted section.
+def _format_recurring_section(
+    creep_items: List[Dict[str, Any]],
+    tomorrow_items: List[Dict[str, Any]],
+) -> List[str]:
+    """Render the merged "📅 Recurring" block.
 
-    Brand-new subscriptions (prev=None) collapse into one heading with a
-    total + top-N bullet list + "and N more"; price changes get a one-line
-    each since they're rarer and individually meaningful.
+    Three event flavours land here, each with its own marker:
+
+      * ``📅`` — expected tomorrow (from ``recurring_tomorrow``).
+      * ``📈/📉`` — confirmed price change (subscription_creep with
+        ``previous_amount_cents`` set; arrow direction matches sign).
+      * ``🆕`` — first-time detection of a stream (subscription_creep
+        with ``previous_amount_cents = None``). Producer guarantees
+        each stream fires here at most once over its lifetime.
+
+    First-detections are typically the volumey type, so they collapse into
+    a top-N + "+more" footer. Price changes and tomorrow charges render
+    one line each — they're rare and individually meaningful.
     """
     new_subs: List[Dict[str, Any]] = []
     price_changes: List[Dict[str, Any]] = []
-    for item in items:
+    for item in creep_items:
         payload = item.get("payload") or {}
         if payload.get("previous_amount_cents") is None:
             new_subs.append(payload)
@@ -201,10 +225,32 @@ def _format_subscription_section(items: List[Dict[str, Any]]) -> List[str]:
             price_changes.append(payload)
 
     out: List[str] = []
+
+    # 📅 Tomorrow charges — keep the calendar-style cue first since it's
+    # the most actionable ("don't get caught short on rent").
+    for item in tomorrow_items:
+        p = item.get("payload") or {}
+        out.append(
+            f"📅 <b>{p.get('name', '?')}</b> — "
+            f"{_money(int(p.get('amount_cents', 0)))} expected tomorrow"
+        )
+
+    # 📈 / 📉 Price changes — one line each, arrow follows sign.
+    for p in price_changes:
+        cur = int(p.get("amount_cents", 0))
+        prev = int(p.get("previous_amount_cents") or 0)
+        delta_pct = ((cur - prev) / max(prev, 1)) * 100
+        marker = "📈" if cur > prev else "📉"
+        out.append(
+            f"{marker} <b>{p.get('name', '?')}</b> "
+            f"{_money(prev)} → {_money(cur)} ({delta_pct:+.0f}%)"
+        )
+
+    # 🆕 First detections — collapse into a single heading + bullets.
     if new_subs:
-        # De-duplicate by name+amount within the same brief — Plaid sometimes
-        # emits the same subscription under two slightly different descriptors
-        # in one window.
+        # De-duplicate by name+amount within one brief — Plaid occasionally
+        # emits the same stream under two slightly different descriptors
+        # inside a single sync window.
         seen: set = set()
         unique: List[Dict[str, Any]] = []
         for p in new_subs:
@@ -215,10 +261,8 @@ def _format_subscription_section(items: List[Dict[str, Any]]) -> List[str]:
             unique.append(p)
         unique.sort(key=lambda p: int(p.get("amount_cents", 0)), reverse=True)
         total = sum(int(p.get("amount_cents", 0)) for p in unique)
-        plural = "s" if len(unique) != 1 else ""
         out.append(
-            f"🔁 <b>Subscriptions</b> — {len(unique)} new, "
-            f"{_money(total)} total"
+            f"🆕 <b>{len(unique)} new recurring</b>, {_money(total)} total"
         )
         for p in unique[:_TOP_N_PER_SECTION]:
             out.append(
@@ -229,24 +273,23 @@ def _format_subscription_section(items: List[Dict[str, Any]]) -> List[str]:
         if remainder > 0:
             out.append(f"  • +{remainder} more")
 
-    for p in price_changes:
-        cur = int(p.get("amount_cents", 0))
-        prev = int(p.get("previous_amount_cents") or 0)
-        delta_pct = ((cur - prev) / max(prev, 1)) * 100
-        out.append(
-            f"📈 <b>{p.get('name', '?')}</b> "
-            f"{_money(prev)} → {_money(cur)} ({delta_pct:+.0f}%)"
-        )
     return out
 
 
 def _format_new_merchant_section(items: List[Dict[str, Any]]) -> List[str]:
-    """Aggregate new_merchant events: heading with total + top-N bullets."""
+    """Aggregate new_merchant events: heading + top-N bullets.
+
+    Producer guarantees one alert per ``merchant_key`` lifetime (via
+    ``merchant_seen.canonical_key``), so a brief shows whatever the user
+    encountered for the first time since the previous brief — typically
+    the last 24 hours.
+    """
     payloads = [item.get("payload") or {} for item in items]
     payloads.sort(key=lambda p: int(p.get("amount_cents", 0)), reverse=True)
     total = sum(int(p.get("amount_cents", 0)) for p in payloads)
+    plural = "s" if len(payloads) != 1 else ""
     out: List[str] = [
-        f"🆕 <b>New merchants</b> — {len(payloads)} this week, "
+        f"🆕 <b>{len(payloads)} new merchant{plural}</b>, "
         f"{_money(total)} total"
     ]
     for p in payloads[:_TOP_N_PER_SECTION]:
@@ -260,10 +303,11 @@ def _format_new_merchant_section(items: List[Dict[str, Any]]) -> List[str]:
     return out
 
 
-# Sections whose items are merged into a single rendered block. Sections
-# absent from this map fall back to default per-item rendering.
+# Sections whose items are merged into a single rendered block via a
+# single-type aggregator. ``subscription_creep`` is handled specially in
+# ``build_brief`` because it absorbs ``recurring_tomorrow`` too — see
+# ``_format_recurring_section``.
 _SECTION_FORMATTERS = {
-    "subscription_creep": _format_subscription_section,
     "new_merchant": _format_new_merchant_section,
 }
 
@@ -288,9 +332,34 @@ def build_brief(
     keyboard: List[List[Tuple[str, str]]] = []
 
     for type_, heading in _SECTION_ORDER:
-        items = grouped.get(type_) or []
-        if not items:
+        if type_ in _ABSORBED_INTO:
+            # Skip — its items are rendered by the host section's formatter.
             continue
+        items = grouped.get(type_) or []
+        # Pull in any absorbed siblings so the host section sees its
+        # children alongside its own items. Currently only ``recurring_tomorrow``
+        # → ``subscription_creep``, but the structure is general so future
+        # mergers can reuse it.
+        absorbed: Dict[str, List[Dict[str, Any]]] = {}
+        for absorbed_type, host in _ABSORBED_INTO.items():
+            if host == type_:
+                absorbed[absorbed_type] = grouped.get(absorbed_type) or []
+        if not items and not any(absorbed.values()):
+            continue
+
+        # Special-case the merged Recurring section. Generic ``_SECTION_FORMATTERS``
+        # is for single-type aggregators; this one needs to mix two types.
+        if type_ == "subscription_creep":
+            block = _format_recurring_section(
+                creep_items=items,
+                tomorrow_items=absorbed.get("recurring_tomorrow", []),
+            )
+            if block:
+                lines.append("")
+                lines.append(heading)
+                lines.extend(block)
+            continue
+
         formatter = _SECTION_FORMATTERS.get(type_)
         if formatter is not None:
             block = formatter(items)
