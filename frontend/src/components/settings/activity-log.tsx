@@ -20,12 +20,13 @@ import {
   XCircle,
 } from "lucide-react";
 
-import { auditApi, plaidApi } from "@/lib/api";
+import { appSettingsApi, auditApi, plaidApi } from "@/lib/api";
 import type { AuditEntry } from "@/types/v2";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -218,6 +219,47 @@ function AuditRow({ entry }: { entry: AuditEntry }) {
   );
 }
 
+/**
+ * Auto-clean toggle for the audit log. When on, the daily prune deletes
+ * audit_log rows older than 7 days; when off, history is kept until
+ * someone hits "Clear log" manually. Owner-only — non-owners don't see
+ * this row at all (and the underlying `/api/settings/app` PATCH is
+ * gated by the same is_owner check on the backend).
+ */
+function AutoPruneRow() {
+  const queryClient = useQueryClient();
+  const { data, isLoading } = useQuery({
+    queryKey: ["app", "settings"],
+    queryFn: appSettingsApi.get,
+    staleTime: 60_000,
+  });
+  const update = useMutation({
+    mutationFn: (enabled: boolean) =>
+      appSettingsApi.update({ audit_log_auto_prune_enabled: enabled }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["app", "settings"] }),
+  });
+  const enabled = !!data?.audit_log_auto_prune_enabled;
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+      <div className="min-w-0">
+        <div className="font-medium">Auto-clean every 7 days</div>
+        <div className="text-xs text-muted-foreground">
+          When on, the daily prune deletes audit-log rows older than 7
+          days. When off, history is kept until someone hits Clear log.
+        </div>
+      </div>
+      <Switch
+        checked={enabled}
+        onCheckedChange={(v) => update.mutate(v)}
+        disabled={isLoading || update.isPending}
+        aria-label="Auto-clean audit log every 7 days"
+      />
+    </div>
+  );
+}
+
+
 function EventsFeed() {
   const { user } = useAuth();
   const isOwner = Boolean(user?.is_owner);
@@ -309,6 +351,7 @@ function EventsFeed() {
         )}
       </CardHeader>
       <CardContent className="space-y-4">
+        {isOwner ? <AutoPruneRow /> : null}
         <div className="flex flex-wrap gap-2">
           {CATEGORY_CHOICES.map((c) => (
             <Button

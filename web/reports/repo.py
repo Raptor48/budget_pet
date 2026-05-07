@@ -754,9 +754,16 @@ class ReportsRepository:
             debt = await conn.fetchval(
                 "SELECT COALESCE(SUM(current_balance_cents), 0) FROM accounts WHERE type IN ('credit','loan') AND is_active"
             )
-            liquid = liquid or 0
-            investments = investments or 0
-            debt = debt or 0
+            # Postgres SUM(BIGINT) returns NUMERIC, which asyncpg surfaces as
+            # Decimal. Downstream we feed these into the debt-payoff math
+            # ``(delta / span_days) * 30`` and ``debt / per_month``; mixing
+            # Decimal with a float literal raises ``TypeError`` (Python forbids
+            # implicit Decimal*float). Cast to int up front — these are cents,
+            # always whole numbers — so every derived value stays in plain
+            # ``int`` / ``float`` arithmetic.
+            liquid = int(liquid or 0)
+            investments = int(investments or 0)
+            debt = int(debt or 0)
             net = liquid + investments - debt
 
             # Per-account breakdown. Investment holdings are pre-aggregated
@@ -816,8 +823,12 @@ class ReportsRepository:
                     span_days = (today - trajectory_snap["snapshot_date"]).days
                     delta_total = net - int(trajectory_snap["net_worth_cents"])
                     if span_days > 0 and delta_total > 0:
-                        # Cents per day → cents per month (assume 30 days)
-                        per_month = (delta_total / span_days) * 30.0
+                        # Cents per day → cents per month (assume 30 days).
+                        # ``delta_total / span_days`` is float in Py3; the
+                        # ``30`` multiplier is an int on purpose — see the
+                        # int() casts above for the original Decimal/float
+                        # mixing trap.
+                        per_month = (delta_total / span_days) * 30
                         if per_month > 0:
                             months = int(round(debt / per_month))
                             # Cap at 600mo (50yr) — anything longer is noise
@@ -910,9 +921,11 @@ class ReportsRepository:
             debt = await conn.fetchval(
                 "SELECT COALESCE(SUM(current_balance_cents), 0) FROM accounts WHERE type IN ('credit','loan') AND is_active"
             )
-            liquid = liquid or 0
-            investments = investments or 0
-            debt = debt or 0
+            # Same int() cast as get_net_worth — keeps the snapshot row
+            # writing ints into the BIGINT columns and matches the read path.
+            liquid = int(liquid or 0)
+            investments = int(investments or 0)
+            debt = int(debt or 0)
             net = liquid + investments - debt
             today = date.today()
             row = await conn.fetchrow(
@@ -1145,6 +1158,53 @@ class ReportsRepository:
                 """,
                 month,
             )
+            # Rule 5.5 (orphan TRANSFER_IN on a depository → income) is a
+            # blunt instrument: it correctly tags wire deposits from
+            # untracked banks as income, but it ALSO swallows ACH refunds
+            # that Plaid happened to label TRANSFER_IN. The income bucket
+            # then double-inflates: the original purchase keeps its
+            # ``expense`` row from N days ago, and the matching refund
+            # arrives as ``income`` instead of reducing the expense.
+            #
+            # We surface (not auto-fix) any rule-5.5 income row whose
+            # merchant_entity_id matches a recent expense from the same
+            # entity within the last 60 days. Owner can confirm and pin
+            # the row to ``expense`` via the modal — manual_class_override
+            # is sacred and the carryover fix landed alongside this
+            # diagnostic so the pin survives the next sync.
+            possible_refunds = await conn.fetch(
+                """
+                SELECT t.id, t.date, t.amount_cents, t.merchant_name, t.name,
+                       t.pfc_primary, t.merchant_entity_id,
+                       COALESCE(c.name, 'Uncategorized') AS category_name,
+                       (
+                         SELECT MAX(e.date)
+                         FROM transactions e
+                         WHERE e.merchant_entity_id = t.merchant_entity_id
+                           AND e.transaction_class = 'expense'
+                           AND e.id <> t.id
+                           AND e.date BETWEEN t.date - INTERVAL '60 days' AND t.date
+                       ) AS recent_expense_date
+                FROM transactions t
+                LEFT JOIN categories c ON c.id = t.category_id
+                WHERE COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
+                  AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
+                  AND t.transaction_class = 'income'
+                  AND t.pfc_primary = 'TRANSFER_IN'
+                  AND t.manual_class_override IS NULL
+                  AND t.merchant_entity_id IS NOT NULL
+                  AND EXISTS (
+                    SELECT 1 FROM transactions e
+                    WHERE e.merchant_entity_id = t.merchant_entity_id
+                      AND e.transaction_class = 'expense'
+                      AND e.id <> t.id
+                      AND e.date BETWEEN t.date - INTERVAL '60 days' AND t.date
+                  )
+                ORDER BY ABS(t.amount_cents) DESC
+                LIMIT 50
+                """,
+                month,
+            )
             counts = await conn.fetchrow(
                 """
                 SELECT
@@ -1175,4 +1235,7 @@ class ReportsRepository:
                 dict(r) for r in unmatched_transfers
             ],
             "large_uncategorized": [dict(r) for r in uncategorized],
+            "possible_refunds_misclassified_as_income": [
+                dict(r) for r in possible_refunds
+            ],
         }

@@ -16,7 +16,7 @@ V2 is centered on Plaid API for linked institutions (transactions, accounts, cat
 
 ## Railway environments and deploy branches
 
-The Railway project (`protective-clarity`) runs two environments off the same
+The Railway project (`<your-railway-project>`) runs two environments off the same
 codebase but different branches:
 
 | Environment | Source branch | Purpose |
@@ -58,7 +58,10 @@ web/
 ├── reports/             — /api/reports/* (cash flow, net worth, forecast, health)
 ├── merchant_rules/      — /api/merchant-rules (categorization) + /api/merchant-aliases (display rename)
 ├── app_settings/        — /api/settings/app (autosync schedule); singleton app_settings table
-└── audit/               — /api/audit feed + non-throwing `record()` helper (audit_log table)
+├── audit/               — /api/audit feed + non-throwing `record()` helper (audit_log table)
+├── bot_api/             — /api/bot/* REST mirror of Telegram bot features
+├── notifications/       — queue + dispatcher + producers + builders (push out via bot)
+└── telegram/            — in-process Telegram bot (webhook), runs alongside FastAPI
 ```
 
 ## Data Flow
@@ -227,3 +230,48 @@ The Next.js app is installable on iOS / iPadOS / macOS / Android / Windows.
   over spinners for initial data loads so the page shape is preserved.
 - Empty states: cards with dashed borders + CTA buttons are used in
   `insights` and `reports` when there's nothing to show.
+
+## Telegram bot (in-process, webhook mode)
+
+V2.3 retired the standalone bot worker (`bot.py` + `services/`). The new
+implementation lives inside the FastAPI app:
+
+- `web/telegram/router.py`: `POST /api/telegram/webhook` (verified via
+  `X-Telegram-Bot-Api-Secret-Token`). The path is excluded from
+  `AuthMiddleware` alongside `/api/plaid/webhook`.
+- `web/telegram/runtime.py`: builds + initializes the
+  `telegram.ext.Application` once on startup. Updates flow through
+  `app.process_update(update)` from the webhook route.
+- `web/telegram/handlers.py`: commands (`/start`, `/menu`, `/link`,
+  `/balance`, `/networth`, `/upcoming`, `/anniversary`, `/milestone`),
+  free-text cash entry, photo handler, callback queries for the menu
+  and inline mood/tea/reauth buttons.
+- `web/telegram/ocr.py`: receipt OCR via OpenAI `gpt-4o-mini`. The
+  parsed JSON populates `receipts` + `receipt_lines` and produces a
+  cash transaction.
+- `web/notifications/`:
+  - `queue.py`: `notifications_queue` insert/list/mark-sent helpers,
+    24-hour dedup via `(user_id, type, dedup_key)`.
+  - `producers.py`: budget thresholds, recurring tomorrow, Plaid
+    re-auth, new merchant, subscription creep, milestones, mood check,
+    weekly leaderboard. Run hourly + after every Plaid sync.
+  - `builders.py`: pure formatters from queue rows to HTML messages
+    (single-event for P0; sectioned brief for P1/P2 batches).
+  - `dispatcher.py`: APScheduler (`AsyncIOScheduler`, every 60s) drains
+    the queue per user. P0 sends immediately; P1 batches into the
+    user's morning brief at `couple_settings.morning_brief_local`; P2
+    rides along on Sunday's brief. Quiet hours from
+    `couple_settings.quiet_hours_*`. Out-of-window briefs simply wait —
+    nothing fires piecemeal.
+- `web/bot_api/`: REST mirror under `/api/bot/*` for the frontend Bot
+  page (telegram link, settings, notifications prefs, chores, audit
+  sessions, milestones, streaks, mood, receipts, leaderboard).
+- `web/migrations/bot_v1.py`: idempotent DDL for the bot tables. Runs
+  from `main.py` startup right after the V2 migration.
+
+Frontend mirror: `frontend/src/app/bot/page.tsx` + tabs in
+`frontend/src/components/bot/`. The sidebar groups it below an `<hr>`
+divider after Insights so the bot stays visually separate from the
+core finance flow.
+
+See [`docs/bot.md`](bot.md) for setup + operations details.

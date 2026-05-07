@@ -13,6 +13,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import {
+  Bot,
   Building2,
   ChevronsLeft,
   ChevronsRight,
@@ -29,6 +30,12 @@ import {
 import { useAuth } from "@/contexts/auth-context";
 import { insightsApi, plaidApi } from "@/lib/api";
 
+// `divider: true` inserts a thin separator above the row in the sidebar.
+// Bot row is suppressed when NEXT_PUBLIC_HIDE_BOT_TAB=true so demo/portfolio
+// builds don't expose the Telegram bot surface (it makes no sense without a
+// configured TELEGRAM_BOT_TOKEN and clutters the UI for reviewers).
+const HIDE_BOT_TAB = process.env.NEXT_PUBLIC_HIDE_BOT_TAB === "true";
+
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard, ownerOnly: false },
   { name: "Transactions", href: "/transactions", icon: Receipt, ownerOnly: false },
@@ -36,6 +43,17 @@ const navigation = [
   { name: "Recurring", href: "/recurring", icon: Repeat, ownerOnly: false },
   { name: "Reports", href: "/reports", icon: PieChart, ownerOnly: false },
   { name: "Insights", href: "/insights", icon: Lightbulb, ownerOnly: false },
+  ...(HIDE_BOT_TAB
+    ? []
+    : [
+        {
+          name: "Bot",
+          href: "/bot",
+          icon: Bot,
+          ownerOnly: false,
+          divider: true,
+        },
+      ]),
 ];
 
 interface SidebarProps {
@@ -196,6 +214,13 @@ export function Sidebar({
 
               return (
                 <li key={item.name} className="relative">
+                  {/* Optional divider above this row (e.g. Bot section). */}
+                  {item.divider && (
+                    <span
+                      aria-hidden
+                      className="my-2 block h-px w-full bg-border"
+                    />
+                  )}
                   {/* Active accent: 3px primary bar on the left edge of the
                       active row (or a small dot in collapsed mode). Sits in
                       the gutter so it doesn't push content. */}

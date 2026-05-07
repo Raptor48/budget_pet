@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { formatDistanceToNow } from "date-fns";
 import {
   BellOff,
   CalendarClock,
@@ -12,6 +13,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  RotateCcw,
   Square,
   TrendingDown,
   TrendingUp,
@@ -302,7 +304,7 @@ export default function RecurringPage() {
 
   const handleSingleAction = async (
     stream: RecurringStream,
-    action: "cancel" | "snooze_price_change",
+    action: "cancel" | "snooze_price_change" | "reactivate",
   ) => {
     if (action === "cancel") {
       const ok = await confirm({
@@ -348,6 +350,38 @@ export default function RecurringPage() {
   const allVisibleSelected =
     visibleRows.length > 0 && visibleRows.every((r) => selected.has(r.id));
 
+  // When Plaid's recurring data was last pulled into our DB. The full
+  // Plaid sync (which includes /transactions/recurring/get) stamps
+  // last_synced_at = NOW() on every upserted stream, so the *latest*
+  // value across all streams is effectively "the last time we hit the
+  // Plaid recurring endpoint". Surface it in the header so the user can
+  // see how stale the predicted-next-charge dates are when a stream
+  // misbehaves (e.g. ConEd predicted Tuesday but charged Monday — was it
+  // a Plaid update lag or our sync cadence?).
+  const lastRecurringRefresh = useMemo(() => {
+    let latest: number | null = null;
+    for (const s of streams) {
+      // Skip manual rows — their last_synced_at is just their creation
+      // time and tells us nothing about Plaid freshness.
+      if (s.stream_source === "manual") continue;
+      if (!s.last_synced_at) continue;
+      const t = new Date(s.last_synced_at).getTime();
+      if (Number.isFinite(t) && (latest === null || t > latest)) latest = t;
+    }
+    return latest === null ? null : new Date(latest);
+  }, [streams]);
+
+  // Determines whether the bulk action bar should offer Reactivate vs Cancel.
+  // We swap the destructive button for Reactivate only when the whole
+  // selection is already cancelled — otherwise the user might accidentally
+  // un-cancel rows they only meant to bulk-snooze, etc.
+  const allSelectedCancelled = useMemo(() => {
+    if (selected.size === 0) return false;
+    const selectedRows = visibleRows.filter((r) => selected.has(r.id));
+    if (selectedRows.length === 0) return false;
+    return selectedRows.every((r) => effectiveUserStatus(r) === "cancelled");
+  }, [selected, visibleRows]);
+
   return (
     <AppLayout>
       <TooltipProvider>
@@ -360,6 +394,34 @@ export default function RecurringPage() {
                 Subscriptions and recurring inflows synced from your bank. Add manual
                 bills that behave like Plaid streams.
               </p>
+              {lastRecurringRefresh ? (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <p className="text-muted-foreground/80 mt-1 cursor-help text-xs">
+                      Plaid prediction refreshed{" "}
+                      <span className="font-medium tabular-nums">
+                        {formatDistanceToNow(lastRecurringRefresh, { addSuffix: true })}
+                      </span>
+                    </p>
+                  </TooltipTrigger>
+                  <TooltipContent
+                    side="bottom"
+                    className="max-w-xs text-xs leading-relaxed"
+                  >
+                    <p>
+                      <span className="font-medium">
+                        {lastRecurringRefresh.toLocaleString()}
+                      </span>
+                    </p>
+                    <p className="mt-1 text-muted-foreground">
+                      We pull Plaid&apos;s recurring streams on every sync (default
+                      daily). Plaid itself re-runs its stream detector roughly weekly,
+                      so a predicted next-charge date may lag the real charge by a day
+                      or two.
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              ) : null}
             </div>
             <button
               type="button"
@@ -498,6 +560,7 @@ export default function RecurringPage() {
               .filter((s) => selected.has(s.id))
               .reduce((acc, s) => acc + monthlyCostCents(s), 0)}
             disabled={bulkMutation.isPending}
+            allSelectedCancelled={allSelectedCancelled}
             onClear={() => setSelected(new Set())}
             onCancel={async () => {
               const ok = await confirm({
@@ -515,6 +578,12 @@ export default function RecurringPage() {
                 action: "cancel",
               });
             }}
+            onReactivate={() =>
+              bulkMutation.mutate({
+                ids: Array.from(selected),
+                action: "reactivate",
+              })
+            }
             onSnooze={() =>
               bulkMutation.mutate({
                 ids: Array.from(selected),
@@ -991,7 +1060,7 @@ type ListViewProps = {
   isUpdating: boolean;
   onAction: (
     stream: RecurringStream,
-    action: "cancel" | "snooze_price_change",
+    action: "cancel" | "snooze_price_change" | "reactivate",
   ) => void;
   monthlyTotalCents: number;
   annualTotalCents: number;
@@ -1133,7 +1202,7 @@ function RecurringRow({
   isUpdating: boolean;
   editLockedByOther: boolean;
   onAction: (
-    action: "cancel" | "snooze_price_change",
+    action: "cancel" | "snooze_price_change" | "reactivate",
   ) => void;
 }) {
   const title = streamTitle(row);
@@ -1296,17 +1365,44 @@ function RecurringRow({
         )}
       </div>
 
-      {/* Desktop-only: Next payment column */}
-      <div className="hidden w-[120px] shrink-0 text-xs leading-tight sm:block">
-        <div className="text-foreground tabular-nums">
-          {formatNextRecurringDate(row.last_date, row.frequency)}
-        </div>
-        {row.last_date ? (
-          <div className="text-muted-foreground tabular-nums">
-            last {formatRecurringDate(row.last_date)}
+      {/* Desktop-only: Next payment column.
+          Wrapped in a Tooltip so the user can see when Plaid last
+          refreshed THIS specific stream's prediction — useful when a
+          predicted date doesn't match the real charge (Plaid's stream
+          detector lags by 1-2 days even on a daily sync). */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="hidden w-[120px] shrink-0 cursor-help text-xs leading-tight sm:block">
+            <div className="text-foreground tabular-nums">
+              {formatNextRecurringDate(row.last_date, row.frequency)}
+            </div>
+            {row.last_date ? (
+              <div className="text-muted-foreground tabular-nums">
+                last {formatRecurringDate(row.last_date)}
+              </div>
+            ) : null}
           </div>
-        ) : null}
-      </div>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="text-xs">
+          {row.last_synced_at ? (
+            <>
+              <p>
+                Plaid prediction refreshed{" "}
+                <span className="font-medium tabular-nums">
+                  {formatDistanceToNow(new Date(row.last_synced_at), {
+                    addSuffix: true,
+                  })}
+                </span>
+              </p>
+              <p className="text-muted-foreground tabular-nums">
+                {new Date(row.last_synced_at).toLocaleString()}
+              </p>
+            </>
+          ) : (
+            <p>No refresh stamp on this stream.</p>
+          )}
+        </TooltipContent>
+      </Tooltip>
 
       {/* Amount (always visible, narrower on mobile) */}
       <div className="w-[88px] shrink-0 sm:w-[110px]">
@@ -1382,7 +1478,7 @@ function RowActionsMenu({
 }: {
   stream: RecurringStream;
   onAction: (
-    action: "cancel" | "snooze_price_change",
+    action: "cancel" | "snooze_price_change" | "reactivate",
   ) => void;
   onStartEdit: () => void;
   editLockedByOther: boolean;
@@ -1420,7 +1516,16 @@ function RowActionsMenu({
             onAction("snooze_price_change");
           }}
         />
-        {status !== "cancelled" ? (
+        {status === "cancelled" ? (
+          <RowActionItem
+            icon={<RotateCcw className="size-4" />}
+            label="Reactivate"
+            onClick={() => {
+              setOpen(false);
+              onAction("reactivate");
+            }}
+          />
+        ) : (
           <RowActionItem
             icon={<XCircle className="size-4" />}
             label="Mark cancelled"
@@ -1430,7 +1535,7 @@ function RowActionsMenu({
               onAction("cancel");
             }}
           />
-        ) : null}
+        )}
       </PopoverContent>
     </Popover>
   );
@@ -1476,15 +1581,19 @@ function BulkActionBar({
   count,
   monthlySavingsCents,
   disabled,
+  allSelectedCancelled,
   onClear,
   onCancel,
+  onReactivate,
   onSnooze,
 }: {
   count: number;
   monthlySavingsCents: number;
   disabled: boolean;
+  allSelectedCancelled: boolean;
   onClear: () => void;
   onCancel: () => void;
+  onReactivate: () => void;
   onSnooze: () => void;
 }) {
   return (
@@ -1501,13 +1610,22 @@ function BulkActionBar({
           disabled={disabled}
           onClick={onSnooze}
         />
-        <BulkButton
-          icon={<XCircle className="size-3.5" />}
-          label="Cancel"
-          variant="destructive"
-          disabled={disabled}
-          onClick={onCancel}
-        />
+        {allSelectedCancelled ? (
+          <BulkButton
+            icon={<RotateCcw className="size-3.5" />}
+            label="Reactivate"
+            disabled={disabled}
+            onClick={onReactivate}
+          />
+        ) : (
+          <BulkButton
+            icon={<XCircle className="size-3.5" />}
+            label="Cancel"
+            variant="destructive"
+            disabled={disabled}
+            onClick={onCancel}
+          />
+        )}
         <button
           type="button"
           onClick={onClear}
@@ -1568,7 +1686,7 @@ function ByCategoryView({
   onToggleSelect: (id: number) => void;
   onAction: (
     stream: RecurringStream,
-    action: "cancel" | "snooze_price_change",
+    action: "cancel" | "snooze_price_change" | "reactivate",
   ) => void;
 }) {
   type Group = {
@@ -1629,7 +1747,7 @@ function CategoryGroup({
   onToggleSelect: (id: number) => void;
   onAction: (
     stream: RecurringStream,
-    action: "cancel" | "snooze_price_change",
+    action: "cancel" | "snooze_price_change" | "reactivate",
   ) => void;
 }) {
   const [open, setOpen] = useState(true);
@@ -1692,7 +1810,7 @@ function CategoryGroupRow({
   isSelected: boolean;
   onToggleSelect: () => void;
   onAction: (
-    action: "cancel" | "snooze_price_change",
+    action: "cancel" | "snooze_price_change" | "reactivate",
   ) => void;
 }) {
   const title = streamTitle(row);

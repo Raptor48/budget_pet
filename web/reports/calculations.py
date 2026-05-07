@@ -25,10 +25,8 @@ def _monthly_delta():
     return relativedelta(months=1)
 
 
-def next_occurrence(last_date: date, frequency: str) -> Optional[date]:
-    """Return the expected next date for a recurring stream."""
-    if not last_date or not frequency:
-        return None
+def _step_occurrence(last_date: date, frequency: str) -> Optional[date]:
+    """One cadence step from ``last_date``. None for unknown cadences."""
     freq = frequency.upper()
     if freq == "MONTHLY":
         return last_date + _monthly_delta()
@@ -40,6 +38,48 @@ def next_occurrence(last_date: date, frequency: str) -> Optional[date]:
     if delta:
         return last_date + delta
     return None
+
+
+def next_occurrence(last_date: date, frequency: str) -> Optional[date]:
+    """Return the expected next date for a recurring stream — exactly one
+    cadence step from ``last_date``. Use :func:`next_future_occurrence`
+    when you want the next charge that hasn't already happened."""
+    if not last_date or not frequency:
+        return None
+    return _step_occurrence(last_date, frequency)
+
+
+def next_future_occurrence(
+    last_date: date, frequency: str, *, today: Optional[date] = None
+) -> Optional[date]:
+    """Return the next charge date on or after ``today``.
+
+    Plaid's ``last_date`` can lag the current date by several cadences (the
+    next charge hasn't posted yet, or the stream paused for a while), so a
+    single delta step from ``last_date`` may still be in the past. We
+    advance in cadence-sized steps until we land on or after ``today``.
+
+    Used by:
+      * UI ``Recurring`` page so "Next payment" never displays a past date.
+      * ``recurring_tomorrow`` notification producer so the alert fires
+        even when last_date is many cadences behind.
+    """
+    if not last_date or not frequency:
+        return None
+    horizon = today or date.today()
+    nxt = _step_occurrence(last_date, frequency)
+    if nxt is None:
+        return None
+    # Hard cap: WEEKLY over 20 years = ~1040 steps. 2000 catches pathological
+    # data without ever looping forever.
+    for _ in range(2000):
+        if nxt >= horizon:
+            return nxt
+        candidate = _step_occurrence(nxt, frequency)
+        if candidate is None or candidate <= nxt:
+            return nxt
+        nxt = candidate
+    return nxt
 
 
 def build_forecast(

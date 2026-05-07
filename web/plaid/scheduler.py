@@ -346,6 +346,22 @@ async def _scheduled_sync() -> None:
         len(errors),
     )
 
+    # Producers run right after every sync so the morning brief reflects
+    # whatever just landed. Sunday additionally seeds the weekly leaderboard.
+    try:
+        from datetime import datetime as _dt
+
+        from web.notifications.producers import (
+            run_all_producers,
+            run_sunday_producers,
+        )
+
+        await run_all_producers()
+        if _dt.utcnow().weekday() == 6:
+            await run_sunday_producers()
+    except Exception:
+        logger.exception("Notification producers failed after Plaid sync")
+
 
 async def _load_autosync_config() -> dict:
     """Read autosync schedule from app_settings, falling back to defaults."""

@@ -5,7 +5,13 @@
  */
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, AuthStatus, checkAuthStatus, logout as authLogout } from '@/lib/auth';
+import {
+  User,
+  AuthStatus,
+  checkAuthStatus,
+  logout as authLogout,
+  loginWithTelegramWebApp,
+} from '@/lib/auth';
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -25,6 +31,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const checkAuth = async () => {
     try {
+      // If we're running inside a Telegram Mini App AND aren't already
+      // signed in, exchange the signed initData for a session before the
+      // regular cookie check. The helper returns null silently on any
+      // failure so the manual login flow remains the fallback.
+      if (typeof window !== 'undefined') {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const tg = (window as any).Telegram?.WebApp;
+        if (tg?.initData) {
+          try {
+            tg.ready?.();
+            tg.expand?.();
+          } catch {
+            // older Telegram clients may not expose these — ignore.
+          }
+          const tgLogin = await loginWithTelegramWebApp();
+          if (tgLogin?.success && tgLogin.user) {
+            setIsAuthenticated(true);
+            setUser(tgLogin.user);
+            setLoading(false);
+            return;
+          }
+        }
+      }
+
       const status: AuthStatus = await checkAuthStatus();
       setIsAuthenticated(status.authenticated);
       setUser(status.user || null);

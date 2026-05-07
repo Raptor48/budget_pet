@@ -313,6 +313,11 @@ export const transactionsApi = {
    * maps to override='internal_transfer' when true, back to 'auto' when
    * false). Changing `category_id` re-runs the classifier on just that
    * row.
+   *
+   * `amount_cents` is owner-only — non-owners have it dropped server-side.
+   * Setting it pins `manual_amount_override = TRUE` so subsequent Plaid
+   * syncs leave the value alone. The server rejects edits on transactions
+   * that already have splits (delete the splits first).
    */
   update: (
     id: number,
@@ -323,6 +328,7 @@ export const transactionsApi = {
       is_private?: boolean;
       is_internal_transfer?: boolean;
       transaction_class?: import('@/types/v2').TransactionClass;
+      amount_cents?: number;
     },
   ): Promise<Transaction> =>
     apiRequest(`/api/transactions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
@@ -883,6 +889,427 @@ export const auditApi = {
 };
 
 export type { AuditEntry, AuditListResponse, AutosyncConfig, AutosyncConfigUpdate };
+
+// ---------------------------------------------------------------------------
+// Bot (/api/bot/*) — settings, chores, audit, milestones, receipts
+// ---------------------------------------------------------------------------
+
+export interface TelegramLinkStatus {
+  linked: boolean;
+  chat_id?: number | null;
+  telegram_username?: string | null;
+  pending_code?: string | null;
+  pending_expires_at?: string | null;
+}
+
+export interface TelegramLinkCode {
+  code: string;
+  expires_at: string;
+  bot_username?: string | null;
+}
+
+export interface CoupleSettings {
+  user_id: number;
+  anniversary_date?: string | null;
+  partner_user_id?: number | null;
+  partner_username?: string | null;
+  leaderboard_enabled: boolean;
+  morning_brief_local: string;
+  morning_brief_tz: string;
+  quiet_hours_start: string;
+  quiet_hours_end: string;
+  sunday_brief_enabled: boolean;
+}
+
+export interface CoupleSettingsUpdate {
+  anniversary_date?: string | null;
+  partner_user_id?: number | null;
+  leaderboard_enabled?: boolean;
+  morning_brief_local?: string;
+  morning_brief_tz?: string;
+  quiet_hours_start?: string;
+  quiet_hours_end?: string;
+  sunday_brief_enabled?: boolean;
+}
+
+export interface NotificationPref {
+  alert_type: string;
+  enabled: boolean;
+  label: string;
+  description?: string | null;
+}
+
+export interface ChoreRow {
+  id: number;
+  name: string;
+  icon?: string | null;
+  rotation: 'weekly' | 'biweekly' | 'fixed';
+  fixed_user_id?: number | null;
+  sort_order: number;
+  is_active: boolean;
+}
+
+export interface ChoreCreatePayload {
+  name: string;
+  icon?: string | null;
+  rotation?: 'weekly' | 'biweekly' | 'fixed';
+  fixed_user_id?: number | null;
+  sort_order?: number;
+}
+
+export interface ChoreAssignment {
+  chore_id: number;
+  chore_name: string;
+  chore_icon?: string | null;
+  week_start: string;
+  user_id: number;
+  username: string;
+  completed_at?: string | null;
+}
+
+export interface AuditSession {
+  id: number;
+  week_start: string;
+  host_user_id?: number | null;
+  host_username?: string | null;
+  snack?: string | null;
+  tea_choice?: string | null;
+  notes?: string | null;
+  completed_at?: string | null;
+}
+
+export interface MilestoneRow {
+  id: number;
+  threshold_cents: number;
+  label?: string | null;
+  reached_at?: string | null;
+  /** Creator metadata — milestones are family-wide; this tells the UI
+   * who originally added the goal so we can show a "by @denis" tag. */
+  created_by_user_id?: number | null;
+  created_by_username?: string | null;
+}
+
+export interface StreakRow {
+  streak_type: string;
+  label: string;
+  current_count: number;
+  longest_count: number;
+  last_event_at?: string | null;
+}
+
+export interface ReceiptLine {
+  id: number;
+  line_number: number;
+  description: string;
+  quantity?: number | null;
+  unit_price_cents?: number | null;
+  total_cents: number;
+}
+
+export interface ReceiptRow {
+  id: number;
+  transaction_id?: number | null;
+  merchant_name?: string | null;
+  receipt_date?: string | null;
+  total_cents?: number | null;
+  tax_cents?: number | null;
+  currency: string;
+  parse_status: string;
+  created_at: string;
+  image_mime?: string | null;
+  has_image: boolean;
+  /**
+   * True when the linked transaction is one we created via "Log as cash"
+   * on a manual (non-Plaid) account. Drives the "also delete the cash
+   * transaction" affordance in the receipt-delete / detach flows.
+   */
+  linked_is_manual_cash: boolean;
+  /** Creator metadata — receipts are family-wide; this tells the UI who
+   * uploaded the receipt so each card can carry an "@denis" tag. */
+  created_by_user_id?: number | null;
+  created_by_username?: string | null;
+  lines: ReceiptLine[];
+}
+
+export interface LeaderboardEntry {
+  user_id: number;
+  username: string;
+  category_id: number;
+  category_name: string;
+  amount_cents: number;
+}
+
+export interface LeaderboardOut {
+  week_start: string;
+  entries: LeaderboardEntry[];
+}
+
+export const botApi = {
+  // Telegram link
+  telegramStatus: (): Promise<TelegramLinkStatus> =>
+    apiRequest('/api/bot/telegram/status'),
+  generateLinkCode: (): Promise<TelegramLinkCode> =>
+    apiRequest('/api/bot/telegram/link', { method: 'POST' }),
+  unlinkTelegram: (): Promise<void> =>
+    apiRequest('/api/bot/telegram/link', { method: 'DELETE' }),
+  sendTestAlert: (): Promise<{ sent: boolean; deduped?: boolean; queued_id?: number }> =>
+    apiRequest('/api/bot/telegram/test', { method: 'POST' }),
+
+  // Settings
+  getSettings: (): Promise<CoupleSettings> => apiRequest('/api/bot/settings'),
+  updateSettings: (patch: CoupleSettingsUpdate): Promise<CoupleSettings> =>
+    apiRequest('/api/bot/settings', {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
+
+  // Notifications
+  listNotificationPrefs: (): Promise<NotificationPref[]> =>
+    apiRequest('/api/bot/notifications'),
+  setNotificationPref: (
+    alertType: string,
+    enabled: boolean,
+  ): Promise<NotificationPref> =>
+    apiRequest(`/api/bot/notifications/${encodeURIComponent(alertType)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    }),
+
+  // Chores
+  listChores: (): Promise<ChoreRow[]> => apiRequest('/api/bot/chores'),
+  createChore: (body: ChoreCreatePayload): Promise<ChoreRow> =>
+    apiRequest('/api/bot/chores', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateChore: (
+    id: number,
+    patch: Partial<ChoreRow>,
+  ): Promise<ChoreRow> =>
+    apiRequest(`/api/bot/chores/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  deleteChore: (id: number): Promise<void> =>
+    apiRequest(`/api/bot/chores/${id}`, { method: 'DELETE' }),
+  listChoreAssignments: (
+    weekStart?: string,
+  ): Promise<ChoreAssignment[]> =>
+    apiRequest(
+      `/api/bot/chores/assignments${weekStart ? `?week_start=${weekStart}` : ''}`,
+    ),
+  reassignChore: (
+    choreId: number,
+    weekStart: string,
+    userId: number,
+  ): Promise<ChoreAssignment> =>
+    apiRequest(
+      `/api/bot/chores/${choreId}/assignments/${weekStart}?user_id=${userId}`,
+      { method: 'PUT' },
+    ),
+  setChoreCompleted: (
+    choreId: number,
+    weekStart: string,
+    completed: boolean,
+  ): Promise<ChoreAssignment> =>
+    apiRequest(`/api/bot/chores/${choreId}/assignments/${weekStart}/completed`, {
+      method: 'PUT',
+      body: JSON.stringify({ completed }),
+    }),
+
+  // Audit
+  currentAudit: (): Promise<AuditSession> =>
+    apiRequest('/api/bot/audit/current'),
+  updateAudit: (
+    weekStart: string,
+    patch: Partial<AuditSession> & { completed?: boolean },
+  ): Promise<AuditSession> =>
+    apiRequest(`/api/bot/audit/${weekStart}`, {
+      method: 'PUT',
+      body: JSON.stringify(patch),
+    }),
+  listAudit: (limit = 26): Promise<AuditSession[]> =>
+    apiRequest(`/api/bot/audit?limit=${limit}`),
+
+  // Streaks
+  listStreaks: (): Promise<StreakRow[]> => apiRequest('/api/bot/streaks'),
+
+  // Milestones
+  listMilestones: (): Promise<MilestoneRow[]> =>
+    apiRequest('/api/bot/milestones'),
+  addMilestone: (
+    thresholdCents: number,
+    label?: string | null,
+  ): Promise<MilestoneRow> =>
+    apiRequest('/api/bot/milestones', {
+      method: 'POST',
+      body: JSON.stringify({ threshold_cents: thresholdCents, label }),
+    }),
+  deleteMilestone: (id: number): Promise<void> =>
+    apiRequest(`/api/bot/milestones/${id}`, { method: 'DELETE' }),
+
+  // Receipts
+  listReceipts: (limit = 40): Promise<ReceiptRow[]> =>
+    apiRequest(`/api/bot/receipts?limit=${limit}`),
+  getReceipt: (id: number): Promise<ReceiptRow> =>
+    apiRequest(`/api/bot/receipts/${id}`),
+  receiptImageUrl: (id: number): string =>
+    `${getApiBaseUrl()}/api/bot/receipts/${id}/image`,
+  /**
+   * Fetch the receipt image bytes through the same auth path as every other
+   * /api/bot/* call. A naive ``<img src="…/image">`` works only when the
+   * frontend and backend share an origin (cookies ride along on
+   * cross-origin image requests by default but session cookies on
+   * Railway / *.vercel.app deployments do not). The Bearer-token fallback
+   * in :func:`apiRequest` doesn't help an ``<img>`` tag — it can't carry
+   * custom headers. So we fetch with auth here and the caller turns the
+   * blob into an object URL.
+   */
+  fetchReceiptImageBlob: async (id: number): Promise<Blob> => {
+    const url = `${API_BASE}/api/bot/receipts/${id}/image`;
+    const response = await fetch(url, {
+      credentials: 'include',
+      headers: { ...(getAuthHeaders() as Record<string, string>) },
+    });
+    if (!response.ok) {
+      throw new ApiError(response.status, `HTTP ${response.status}`, `HTTP ${response.status}`);
+    }
+    return response.blob();
+  },
+  deleteReceipt: (
+    id: number,
+    opts?: { deleteLinkedCash?: boolean },
+  ): Promise<void> => {
+    const qs = opts?.deleteLinkedCash ? '?delete_linked_cash=true' : '';
+    return apiRequest(`/api/bot/receipts/${id}${qs}`, { method: 'DELETE' });
+  },
+  linkReceipt: (
+    id: number,
+    transactionId: number | null,
+    opts?: { deleteLinkedCash?: boolean },
+  ): Promise<ReceiptRow> => {
+    const params = new URLSearchParams();
+    if (transactionId != null) {
+      params.set('transaction_id', String(transactionId));
+    }
+    if (opts?.deleteLinkedCash) {
+      params.set('delete_linked_cash', 'true');
+    }
+    const qs = params.toString() ? `?${params.toString()}` : '';
+    return apiRequest(`/api/bot/receipts/${id}/link${qs}`, { method: 'PATCH' });
+  },
+  /**
+   * Edit OCR-derived header fields on a receipt. Pass only the keys you
+   * want to change — Pydantic's ``exclude_unset`` keeps the SQL UPDATE
+   * surgical. To clear ``merchant_name`` send an empty string (the
+   * backend stores it as-is); to clear ``receipt_date`` you currently
+   * have to delete the receipt and reupload — there's no schema-level
+   * "unset date" today.
+   */
+  updateReceipt: (
+    id: number,
+    patch: {
+      merchant_name?: string | null;
+      receipt_date?: string | null;
+      total_cents?: number;
+      tax_cents?: number | null;
+      currency?: string;
+    },
+  ): Promise<ReceiptRow> =>
+    apiRequest(`/api/bot/receipts/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  /**
+   * Replace the entire line-items array. The backend wipes existing rows
+   * and re-inserts in array order (line_number = idx + 1) so reordering
+   * works for free.
+   */
+  replaceReceiptLines: (
+    id: number,
+    lines: {
+      description: string;
+      quantity?: number | null;
+      unit_price_cents?: number | null;
+      total_cents: number;
+    }[],
+  ): Promise<ReceiptRow> =>
+    apiRequest(`/api/bot/receipts/${id}/lines`, {
+      method: 'PUT',
+      body: JSON.stringify({ lines }),
+    }),
+  /**
+   * Look up the receipt attached to a specific transaction. Returns
+   * 404 (caught as ApiError) when no receipt is linked — call sites
+   * should gate this on ``transaction.has_receipt`` to avoid spurious
+   * 404 noise in error toasts.
+   */
+  getReceiptByTransaction: (transactionId: number): Promise<ReceiptRow> =>
+    apiRequest(`/api/bot/receipts/by-transaction/${transactionId}`),
+  logReceiptAsCash: (id: number): Promise<ReceiptRow> =>
+    apiRequest(`/api/bot/receipts/${id}/log-as-cash`, { method: 'POST' }),
+
+  // Leaderboard
+  weeklyLeaderboard: (): Promise<LeaderboardOut> =>
+    apiRequest('/api/bot/leaderboard'),
+
+  // Activity log — recent bot events visible in the Bot → Activity tab.
+  listActivity: (
+    params: {
+      limit?: number;
+      severity?: 'info' | 'warn' | 'error';
+      kind_prefix?: string;
+      scope?: 'self' | 'all';
+    } = {},
+  ): Promise<BotActivityEntry[]> => {
+    const qs = new URLSearchParams();
+    qs.set('limit', String(params.limit ?? 200));
+    if (params.severity) qs.set('severity', params.severity);
+    if (params.kind_prefix) qs.set('kind_prefix', params.kind_prefix);
+    if (params.scope) qs.set('scope', params.scope);
+    return apiRequest(`/api/bot/activity?${qs.toString()}`);
+  },
+  clearActivity: (olderThanDays = 0): Promise<void> =>
+    apiRequest(`/api/bot/activity?older_than_days=${olderThanDays}`, {
+      method: 'DELETE',
+    }),
+
+  // Owner-only: roster of every user with the bot wired up.
+  listLinkedUsers: (): Promise<LinkedUser[]> =>
+    apiRequest('/api/bot/telegram/linked-users'),
+
+  // All authenticated callers — household members the bot considers real
+  // people (excludes the env ADMIN_LOGIN bootstrap account).
+  listHouseholdMembers: (): Promise<HouseholdMember[]> =>
+    apiRequest('/api/bot/household-members'),
+};
+
+export interface LinkedUser {
+  user_id: number;
+  username: string;
+  is_owner: boolean;
+  telegram_chat_id: number;
+  telegram_username?: string | null;
+  last_activity_at?: string | null;
+}
+
+export interface HouseholdMember {
+  id: number;
+  username: string;
+}
+
+export interface BotActivityEntry {
+  id: number;
+  user_id?: number | null;
+  username?: string | null;
+  chat_id?: number | null;
+  kind: string;
+  severity: 'info' | 'warn' | 'error';
+  summary: string;
+  payload: Record<string, unknown>;
+  error?: string | null;
+  created_at: string;
+}
 
 // ---------------------------------------------------------------------------
 // Health

@@ -23,20 +23,40 @@ const FREQUENCY_DELTA_DAYS: Record<string, number> = {
 export function nextRecurringDate(
   lastDate: string | null | undefined,
   frequency: string | null | undefined,
+  horizon: Date = new Date(),
 ): Date | null {
   if (!lastDate || !frequency) return null;
   const base = safeParseDate(lastDate);
   if (!base || Number.isNaN(base.getTime())) return null;
 
   const freq = frequency.toUpperCase();
-  if (freq === "MONTHLY") return addMonths(base, 1);
-  if (freq === "SEMI_MONTHLY") return addDays(base, 15);
-  if (freq === "ANNUALLY") return addYears(base, 1);
+  const advance = (d: Date): Date | null => {
+    if (freq === "MONTHLY") return addMonths(d, 1);
+    if (freq === "SEMI_MONTHLY") return addDays(d, 15);
+    if (freq === "ANNUALLY") return addYears(d, 1);
+    const delta = FREQUENCY_DELTA_DAYS[freq];
+    if (delta) return addDays(d, delta);
+    return null;
+  };
 
-  const days = FREQUENCY_DELTA_DAYS[freq];
-  if (days) return addDays(base, days);
-
-  return null;
+  // Plaid's `last_date` can lag the current date by several cadences. Step
+  // forward until we land on or after `horizon` so the UI never shows a
+  // "next payment" that's already in the past.
+  const horizonTs = new Date(
+    horizon.getFullYear(),
+    horizon.getMonth(),
+    horizon.getDate(),
+  ).getTime();
+  let cursor = advance(base);
+  if (!cursor) return null;
+  // Hard cap: even WEEKLY across 20 years is ~1040 steps. 2000 is plenty.
+  for (let i = 0; i < 2000; i++) {
+    if (cursor.getTime() >= horizonTs) return cursor;
+    const next = advance(cursor);
+    if (!next || next.getTime() <= cursor.getTime()) return cursor;
+    cursor = next;
+  }
+  return cursor;
 }
 
 /**

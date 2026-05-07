@@ -11,9 +11,13 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from .users_repo import get_auth_repo
 
 _SKIP_PREFIXES = ("/api/auth/",)
-_SKIP_EXACT = {"/api/healthz"}
+_SKIP_EXACT = {"/api/healthz", "/api/telegram/health"}
 # Plaid verifies webhooks with JWT (see docs/plaid.md); no session cookie on this path.
-_SKIP_WEBHOOK_PATH = "/api/plaid/webhook"
+# Telegram verifies the secret-token header (see web/telegram/router.py); no session either.
+_SKIP_WEBHOOK_PATHS = {
+    "/api/plaid/webhook",
+    "/api/telegram/webhook",
+}
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -27,7 +31,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # Skip auth endpoints and health check
         if any(path.startswith(p) for p in _SKIP_PREFIXES):
             return await call_next(request)
-        if path in _SKIP_EXACT or path == _SKIP_WEBHOOK_PATH:
+        if path in _SKIP_EXACT or path in _SKIP_WEBHOOK_PATHS:
             return await call_next(request)
 
         # CORS preflight

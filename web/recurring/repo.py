@@ -37,16 +37,18 @@ def _coerce_last_date(value: Any) -> Optional[date]:
 
 
 def _sort_streams_by_next_payment(rows: List[Dict[str, Any]]) -> None:
-    """In-place: soonest next payment first (``next_occurrence`` rules); unknown last."""
+    """In-place: soonest *future* payment first (uses
+    ``next_future_occurrence`` so streams whose last_date is several
+    cadences behind don't sort by a date in the past); unknown last."""
     # Local import avoids import cycle: reports.routes imports this repo.
-    from web.reports.calculations import next_occurrence
+    from web.reports.calculations import next_future_occurrence
 
     def sort_key(row: Dict[str, Any]) -> tuple:
         last_d = _coerce_last_date(row.get("last_date"))
         freq = (row.get("frequency") or "").strip()
         if not last_d or not freq:
             return (1, date.max, row.get("id") or 0)
-        nxt = next_occurrence(last_d, freq)
+        nxt = next_future_occurrence(last_d, freq)
         if nxt is None:
             return (1, date.max, row.get("id") or 0)
         return (0, nxt, row.get("id") or 0)

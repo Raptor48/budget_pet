@@ -646,17 +646,35 @@ class PlaidRepository:
                 # When Plaid posts a previously-pending transaction, the new
                 # row gets a fresh plaid_transaction_id and the old (pending)
                 # row is reported in `removed`. Carry user-set flags from the
-                # pending twin so privacy and notes survive the re-keying.
-                # delete_removed_transactions runs *after* import in the
-                # scheduler, so the pending row is still present here.
+                # pending twin so privacy, notes, AND any manual class
+                # decision survive the re-keying. delete_removed_transactions
+                # runs *after* import in the scheduler, so the pending row
+                # is still present here.
+                #
+                # ``manual_class_override`` is the modern source of truth for
+                # ``transaction_class``; without carrying it through, a user
+                # who pinned a pending refund as ``expense`` (overriding
+                # rule 5.5's default of ``income``) would silently lose
+                # that pin the moment the posted twin lands and the rescan
+                # runs against ``manual_class_override = NULL``. The legacy
+                # ``is_internal_transfer_manual`` flag was already carried
+                # below, so internal-transfer pins survived — but expense
+                # / income pins didn't, an asymmetry that bit us in the
+                # 2026-04 refund-misclassification audit.
                 carry_is_private = False
                 carry_user_note = None
                 carry_category_id = None
+                carry_manual_class = None
+                carry_internal = False
+                carry_internal_manual = False
                 pending_ref = data.get("pending_transaction_id")
                 if pending_ref:
                     pending_row = await conn.fetchrow(
                         """
-                        SELECT is_private, user_note, category_id
+                        SELECT is_private, user_note, category_id,
+                               manual_class_override,
+                               is_internal_transfer,
+                               is_internal_transfer_manual
                         FROM transactions
                         WHERE plaid_transaction_id = $1
                         """,
@@ -666,6 +684,11 @@ class PlaidRepository:
                         carry_is_private = bool(pending_row["is_private"])
                         carry_user_note = pending_row["user_note"]
                         carry_category_id = pending_row["category_id"]
+                        carry_manual_class = pending_row["manual_class_override"]
+                        carry_internal = bool(pending_row["is_internal_transfer"])
+                        carry_internal_manual = bool(
+                            pending_row["is_internal_transfer_manual"]
+                        )
 
                 # A user-assigned category on the pending row always wins over
                 # Plaid's default categorisation for the posted twin; the
@@ -687,22 +710,6 @@ class PlaidRepository:
                     counterparties=data.get("counterparties"),
                     normalized_names=internal_names,
                 )
-                carry_internal = False
-                carry_internal_manual = False
-                if pending_ref:
-                    pending_flags = await conn.fetchrow(
-                        """
-                        SELECT is_internal_transfer, is_internal_transfer_manual
-                        FROM transactions
-                        WHERE plaid_transaction_id = $1
-                        """,
-                        pending_ref,
-                    )
-                    if pending_flags is not None:
-                        carry_internal = bool(pending_flags["is_internal_transfer"])
-                        carry_internal_manual = bool(
-                            pending_flags["is_internal_transfer_manual"]
-                        )
                 is_internal_value = carry_internal if carry_internal_manual else auto_internal
 
                 await conn.execute(
@@ -716,16 +723,28 @@ class PlaidRepository:
                         counterparties, location, payment_meta,
                         is_pending, source, display_title,
                         pending_transaction_id, is_private, user_note,
-                        is_internal_transfer, is_internal_transfer_manual
+                        is_internal_transfer, is_internal_transfer_manual,
+                        manual_class_override
                     ) VALUES (
                         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
                         $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,
-                        $26,$27,$28,$29,$30
+                        $26,$27,$28,$29,$30,$31
                     )
                     ON CONFLICT (plaid_transaction_id) DO UPDATE SET
                         account_id          = EXCLUDED.account_id,
                         category_id         = COALESCE(transactions.category_id, EXCLUDED.category_id),
-                        amount_cents        = EXCLUDED.amount_cents,
+                        -- Honour ``manual_amount_override``: when an admin
+                        -- has hand-corrected ``amount_cents`` on a row, the
+                        -- override flag is set TRUE and we keep the local
+                        -- value across syncs. Same pattern as
+                        -- ``is_internal_transfer_manual`` and
+                        -- ``manual_class_override`` below — see
+                        -- ``web/migrations/v2_init.py::_migrate_transactions_manual_amount_override``.
+                        amount_cents        = CASE
+                            WHEN transactions.manual_amount_override
+                                THEN transactions.amount_cents
+                            ELSE EXCLUDED.amount_cents
+                        END,
                         date                = EXCLUDED.date,
                         authorized_date     = EXCLUDED.authorized_date,
                         datetime            = EXCLUDED.datetime,
@@ -784,6 +803,7 @@ class PlaidRepository:
                     carry_user_note,
                     is_internal_value,
                     carry_internal_manual,
+                    carry_manual_class,
                 )
                 imported += 1
 

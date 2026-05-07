@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 from web.audit import record as audit_record
 
 from .models import LoginRequest, LoginResponse, UserCreate, UserPublic
+from .telegram_webapp import verify_init_data
 from .users_repo import get_auth_repo
 
 logger = logging.getLogger(__name__)
@@ -155,6 +156,73 @@ async def login(login_data: LoginRequest, request: Request, response: Response):
         request=request,
         actor={"id": user["id"], "username": user["username"]},
         metadata={"method": "password"},
+    )
+    return LoginResponse(
+        success=True,
+        message="Login successful",
+        user={"username": user["username"], "is_owner": user["is_owner"]},
+        token=token,
+    )
+
+
+@router.post("/telegram-webapp", response_model=LoginResponse)
+async def telegram_webapp_login(
+    payload: dict, request: Request, response: Response
+):
+    """Sign in via Telegram Mini App initData.
+
+    Body: ``{"init_data": "<raw query string from window.Telegram.WebApp.initData>"}``.
+
+    Resolves the Telegram user id to our local ``users`` row by matching
+    ``telegram_chat_id`` (for private 1-on-1 chats with the bot the chat
+    id and user id coincide, which is how every linked user reaches the
+    Mini App). Returns the same response shape as ``/login`` so the FE
+    can reuse its existing post-login bootstrap.
+    """
+    init_data = (payload or {}).get("init_data") or ""
+    if not init_data:
+        raise HTTPException(status_code=400, detail="init_data is required")
+
+    bot_token = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+    if not bot_token:
+        # Mis-configured server — surface as 503 so FE shows a clear message
+        # rather than silently treating it as bad signature.
+        raise HTTPException(status_code=503, detail="Telegram bot is not configured")
+
+    tg_user = verify_init_data(init_data, bot_token)
+    if tg_user is None:
+        raise HTTPException(status_code=401, detail="Invalid Telegram initData")
+
+    tg_user_id = int(tg_user["id"])
+
+    # Resolve to a local user. Mini App guests must already have linked
+    # their Telegram via the existing /link flow — we deliberately do NOT
+    # auto-create accounts here so anyone who knows our bot can't squat
+    # an arbitrary Telegram id into a brand-new tenant.
+    from web.bot_api.repo import get_bot_repo
+
+    user = await get_bot_repo().find_user_by_chat_id(tg_user_id)
+    if not user:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "This Telegram account is not linked. Open the bot in "
+                "Telegram, send /link, and follow the prompt to pair it with "
+                "your Budget Pet account."
+            ),
+        )
+
+    repo = get_auth_repo()
+    is_prod = _is_production()
+    await repo.cleanup_expired_sessions()
+    token = await repo.create_session(user["id"])
+    _set_session_cookie(response, token, is_prod)
+    await audit_record(
+        "auth.login",
+        source="telegram_webapp",
+        request=request,
+        actor={"id": user["id"], "username": user["username"]},
+        metadata={"telegram_user_id": tg_user_id},
     )
     return LoginResponse(
         success=True,

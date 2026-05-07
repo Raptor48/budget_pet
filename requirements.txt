@@ -1,10 +1,8 @@
 # Budget Pet V2 — production runtime dependencies.
 #
-# Scope: everything needed to run the FastAPI backend (`web/`) and the
-# Telegram bot (`bot.py`, `services/`) in production. Test-only tools
-# live in `requirements-dev.txt`; there are currently no desktop / GUI
-# components in the repo, so `customtkinter` / `matplotlib` & friends
-# have been removed (git history preserves them if ever needed).
+# Scope: everything needed to run the FastAPI backend (`web/`), including
+# the in-process Telegram bot under `web/telegram/` (webhook mode — no
+# separate worker process). Test-only tools live in `requirements-dev.txt`.
 #
 # Versions are pinned for reproducible Docker builds. Transitive deps
 # are listed explicitly so `pip install` resolves deterministically
@@ -39,7 +37,7 @@ apscheduler==3.11.2
 # --- Plaid SDK ---------------------------------------------------------------
 plaid-python==39.0.0
 
-# --- HTTP clients (services/ + bot) -----------------------------------------
+# --- HTTP clients (Plaid SDK retries, Telegram outbound calls, OCR) ---------
 aiohttp==3.12.15
 aiohappyeyeballs==2.6.1
 aiosignal==1.4.0
@@ -56,6 +54,14 @@ urllib3==2.5.0
 
 # --- Telegram bot ------------------------------------------------------------
 python-telegram-bot==22.3
+
+# --- Receipt OCR (vision) ----------------------------------------------------
+openai==1.55.3
+# Pillow shrinks Telegram-uploaded receipts before storage + OCR — a 4 MB
+# iPhone shot becomes ~350 KB at 1600 px max edge with no OCR quality loss
+# (gpt-4o-mini handles 1024 px tiles natively). Saves ~10x on Postgres
+# BYTEA size and trims OpenAI upload latency.
+Pillow==11.0.0
 
 # --- Utilities ---------------------------------------------------------------
 python-dateutil==2.9.0.post0
