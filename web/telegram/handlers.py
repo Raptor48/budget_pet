@@ -454,12 +454,105 @@ async def _on_cash(query, user, parts, context):
         await query.edit_message_text(
             text, reply_markup=_back_kb("menu:cash"), parse_mode=ParseMode.HTML
         )
+    elif len(parts) > 2 and parts[1] == "undo":
+        await _on_cash_undo(query, user, parts)
+    elif len(parts) > 2 and parts[1] == "priv":
+        await _on_cash_privacy_toggle(query, user, parts)
     else:
         await query.edit_message_text(
             "➕ <b>Add transaction</b>",
             reply_markup=_cash_menu_kb(),
             parse_mode=ParseMode.HTML,
         )
+
+
+async def _on_cash_undo(query, user, parts):
+    """Inline ``↩️ Undo`` after a smart cash entry. Deletes the row + the
+    matching wallet adjustment in one transaction (handled by
+    ``TransactionsRepository.delete_transaction``). Cap with an ownership
+    check so a partner can't undo someone else's entry by guessing the
+    callback data."""
+    try:
+        txn_id = int(parts[2])
+    except (ValueError, IndexError):
+        await query.answer("Invalid undo target.", show_alert=True)
+        return
+    from web.transactions.repo import TransactionsRepository
+
+    repo = TransactionsRepository()
+    txn = await repo.get_transaction(txn_id)
+    if not txn:
+        await query.answer("Already gone.", show_alert=True)
+        return
+    # Ownership: cash transactions live on the user's cash wallet, so the
+    # wallet's ``user_id`` should match the linked Telegram user.
+    from web.db import get_pool
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        owner = await conn.fetchval(
+            "SELECT user_id FROM accounts WHERE id = $1",
+            int(txn["account_id"]),
+        )
+    if owner is not None and int(owner) != int(user["id"]):
+        await query.answer("Not your transaction.", show_alert=True)
+        return
+    deleted = await repo.delete_transaction(txn_id)
+    if not deleted:
+        await query.answer("Could not undo.", show_alert=True)
+        return
+    try:
+        await query.edit_message_text("↩️ Undone.")
+    except Exception:
+        await query.message.reply_text("↩️ Undone.")
+
+
+async def _on_cash_privacy_toggle(query, user, parts):
+    """Inline ``🔒 Make private`` / ``🔓 Make public`` toggle."""
+    try:
+        txn_id = int(parts[2])
+        target_value = bool(int(parts[3]))
+    except (ValueError, IndexError):
+        await query.answer("Invalid privacy toggle.", show_alert=True)
+        return
+    from web.transactions.repo import TransactionsRepository
+
+    repo = TransactionsRepository()
+    txn = await repo.get_transaction(txn_id)
+    if not txn:
+        await query.answer("Transaction not found.", show_alert=True)
+        return
+    from web.db import get_pool
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        owner = await conn.fetchval(
+            "SELECT user_id FROM accounts WHERE id = $1",
+            int(txn["account_id"]),
+        )
+    if owner is not None and int(owner) != int(user["id"]):
+        await query.answer("Not your transaction.", show_alert=True)
+        return
+    try:
+        await repo.update_transaction(txn_id, {"is_private": target_value})
+    except Exception as exc:
+        await query.answer(f"Failed: {exc}"[:180], show_alert=True)
+        return
+    # Flip the inline button label so the next tap reverses the action.
+    new_buttons = [
+        InlineKeyboardButton("↩️ Undo", callback_data=f"cash:undo:{txn_id}"),
+        InlineKeyboardButton(
+            "🔓 Make public" if target_value else "🔒 Make private",
+            callback_data=f"cash:priv:{txn_id}:{0 if target_value else 1}",
+        ),
+    ]
+    try:
+        await query.edit_message_reply_markup(
+            reply_markup=InlineKeyboardMarkup([new_buttons])
+        )
+    except Exception:
+        pass
+    await query.answer("Updated.")
 
 
 async def _on_family(query, user, parts):
@@ -827,16 +920,19 @@ async def on_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _open_main_section(update, user, _REPLY_BUTTON_TO_SECTION[txt])
         return
 
-    parsed = _parse_cash_entry(txt)
+    parsed = await _parse_cash_entry_smart(user["id"], txt)
     if parsed is None:
         await update.message.reply_text(
             "Try <code>5 coffee</code> or <code>120 grocery</code>.",
             parse_mode=ParseMode.HTML,
         )
         return
-    amount_cents, name = parsed
+    amount_cents, name, meta = parsed
+    is_private = bool(meta.get("is_private"))
     try:
-        result = await _post_cash_transaction(user, amount_cents, name)
+        result = await _post_cash_transaction(
+            user, amount_cents, name, is_private=is_private
+        )
     except RuntimeError as exc:
         await log_bot_activity(
             kind="incoming.text",
@@ -850,17 +946,96 @@ async def on_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await log_bot_activity(
         kind="incoming.text",
-        summary=f"Cash entry: {name} · {_money(amount_cents)}",
+        summary=f"Cash entry: {name} · {_money(amount_cents)}{' (LLM)' if meta.get('source') == 'llm' else ''}",
         user_id=user["id"],
         chat_id=chat_id,
         payload={
             "transaction_id": int(result["id"]),
             "amount_cents": amount_cents,
+            "parser": meta.get("source", "deterministic"),
+            "is_private": is_private,
         },
     )
+    # Inline confirm — single tap to undo or flip privacy. Edit-category
+    # is intentionally absent here; the FE has a richer category picker
+    # and we don't want a callback_data race against the fast-tap user.
+    txn_id = int(result["id"])
+    buttons = [
+        InlineKeyboardButton("↩️ Undo", callback_data=f"cash:undo:{txn_id}"),
+    ]
+    # Toggle reflects the *new* state we'd apply on tap, so the label is
+    # the intent, not the current value.
+    buttons.append(
+        InlineKeyboardButton(
+            "🔓 Make public" if is_private else "🔒 Make private",
+            callback_data=f"cash:priv:{txn_id}:{0 if is_private else 1}",
+        )
+    )
+    keyboard = InlineKeyboardMarkup([buttons])
+    suffix = " 🔒" if is_private else ""
+    smart_hint = (
+        " <i>(smart parse)</i>"
+        if meta.get("source") == "llm"
+        else ""
+    )
     await update.message.reply_text(
-        f"💸 Logged <b>{result['name']}</b> {_money(amount_cents)}",
+        f"💸 Logged <b>{result['name']}</b> {_money(amount_cents)}{suffix}{smart_hint}",
+        reply_markup=keyboard,
         parse_mode=ParseMode.HTML,
+    )
+
+
+async def _parse_cash_entry_smart(
+    user_id: int, text: str
+) -> Optional[Tuple[int, str, Dict[str, Any]]]:
+    """Two-stage parse: deterministic first, LLM fallback when the
+    deterministic parser couldn't extract an amount AND the per-user
+    daily quota is not exhausted.
+
+    Returns ``(amount_cents, name, meta)`` where ``meta`` carries
+    ``source`` (``"deterministic"`` | ``"llm"``) and any structured hints
+    the caller wants — currently ``is_private``.
+    """
+    from web.telegram import cash_parser
+
+    deterministic = cash_parser.parse_deterministic(text)
+    if deterministic is not None:
+        amount, name = deterministic
+        return amount, name, {"source": "deterministic", "is_private": False}
+
+    if not cash_parser.llm_enabled():
+        return None
+    try:
+        remaining = await cash_parser.llm_quota_remaining(user_id)
+    except Exception:
+        # If we can't read the quota table (early boot, DB blip), skip
+        # the LLM path rather than risk uncapped spend.
+        logger.exception("Could not read LLM quota for user=%s", user_id)
+        return None
+    if remaining <= 0:
+        logger.info("LLM cash-entry quota exhausted for user=%s", user_id)
+        return None
+
+    llm_result = await cash_parser.parse_with_llm(text)
+    if llm_result is None:
+        return None
+    try:
+        await cash_parser.record_llm_call(user_id)
+    except Exception:
+        # Recording is best-effort. A miss means a user could squeeze one
+        # extra call past the cap on a quota-edge race; not worth failing
+        # the actual cash entry over.
+        logger.exception(
+            "Could not record LLM quota usage for user=%s", user_id
+        )
+    return (
+        int(llm_result["amount_cents"]),
+        llm_result["name"],
+        {
+            "source": "llm",
+            "is_private": llm_result.get("is_private", False),
+            "currency": llm_result.get("currency"),
+        },
     )
 
 
@@ -1046,7 +1221,32 @@ async def _on_receipt_action(query, user, parts) -> None:
         except RuntimeError as exc:
             await query.answer(str(exc), show_alert=True)
             return
-        await repo.attach_receipt_to_transaction(receipt_id, int(txn["id"]))
+        # Effective atomicity for the (cash insert) + (receipt link) pair.
+        # The two writes hit different connections so a true BEGIN/COMMIT
+        # isn't possible without restructuring the repos. If the link
+        # fails, roll back the cash row by hand so we don't leave an
+        # orphan in the wallet (cash logged but receipt unlinked is the
+        # exact "money double-counted" pattern documented in
+        # ``link_receipt(delete_linked_cash=True)``).
+        try:
+            await repo.attach_receipt_to_transaction(receipt_id, int(txn["id"]))
+        except Exception as exc:
+            from web.transactions.repo import TransactionsRepository
+
+            logger.exception(
+                "attach_receipt_to_transaction failed; rolling back cash txn=%s",
+                txn["id"],
+            )
+            try:
+                await TransactionsRepository().delete_transaction(int(txn["id"]))
+            except Exception:
+                logger.exception(
+                    "Failed to roll back orphan cash txn=%s", txn["id"]
+                )
+            await query.answer(
+                f"Could not link receipt: {exc}"[:180], show_alert=True
+            )
+            return
         try:
             await query.edit_message_reply_markup(reply_markup=None)
         except Exception:
@@ -1143,19 +1343,13 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def _parse_cash_entry(text: str) -> Optional[Tuple[int, str]]:
-    """Parse free-text "5 coffee" / "5.50 latte" / "12,50 lunch" entries."""
-    parts = text.strip().split(None, 1)
-    if not parts:
-        return None
-    raw = parts[0].replace(",", ".").replace("$", "")
-    try:
-        amount = float(raw)
-    except ValueError:
-        return None
-    if amount <= 0:
-        return None
-    name = parts[1] if len(parts) > 1 else "Cash spend"
-    return int(round(amount * 100)), name.strip()
+    """Compatibility shim — delegates to the new deterministic parser in
+    :mod:`web.telegram.cash_parser`. The hot path now goes through
+    :func:`_parse_cash_entry_smart` which adds an optional LLM fallback;
+    callers that just want the regex pass keep using this name."""
+    from web.telegram.cash_parser import parse_deterministic
+
+    return parse_deterministic(text)
 
 
 def _parse_date(s: str) -> Optional[date]:
@@ -1376,6 +1570,7 @@ async def _post_cash_transaction(
     *,
     receipt_merchant: Optional[str] = None,
     receipt_date: Optional[date] = None,
+    is_private: bool = False,
 ) -> Dict[str, Any]:
     """Insert a manual cash transaction. Picks the user's primary cash wallet
     (by account.user_id if set, else the first non-Plaid account).
@@ -1384,6 +1579,12 @@ async def _post_cash_transaction(
     :meth:`BotRepository.create_receipt`; the photo handler links them to a
     transaction explicitly via ``attach_receipt_to_transaction`` so the user
     can choose between cash flow and waiting for a Plaid match.
+
+    ``is_private=True`` flags the row hidden in family-wide aggregates
+    (Income/Expenses tab, Cash Flow). The flag still respects the privacy
+    rule that the row remains visible to its owner. Used by the smart
+    cash-entry path when the LLM detects a "приват" / "private" hint
+    in the user's text — and by the inline ``cash:priv`` toggle.
     """
     from web.db import get_pool
     from web.transactions.repo import TransactionsRepository
@@ -1406,17 +1607,32 @@ async def _post_cash_transaction(
             "No cash wallet found. Create one in the web app first."
         )
     repo = TransactionsRepository()
-    return await repo.create_cash_transaction(
-        {
-            "account_id": wallet["id"],
-            "amount_cents": amount_cents,
-            "currency": "USD",
-            "date": receipt_date or date.today(),
-            "name": name,
-            "merchant_name": receipt_merchant,
-            "source": "manual",
-        }
-    )
+    payload: Dict[str, Any] = {
+        "account_id": wallet["id"],
+        "amount_cents": amount_cents,
+        "currency": "USD",
+        "date": receipt_date or date.today(),
+        "name": name,
+        "merchant_name": receipt_merchant,
+        "source": "manual",
+    }
+    row = await repo.create_cash_transaction(payload)
+    # ``create_cash_transaction`` doesn't accept ``is_private`` directly —
+    # the column lives on the row but the INSERT clause is fixed. Patch it
+    # post-create with a single UPDATE so the smart-parser path can
+    # honour an "I want this private" hint without reshaping the repo.
+    if is_private:
+        try:
+            updated = await repo.update_transaction(
+                int(row["id"]), {"is_private": True}
+            )
+            if updated:
+                row = updated
+        except Exception:
+            logger.exception(
+                "Failed to flip is_private on new cash txn=%s", row["id"]
+            )
+    return row
 
 
 # ---------------------------------------------------------------------------

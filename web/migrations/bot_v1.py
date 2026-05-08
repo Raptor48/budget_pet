@@ -461,6 +461,95 @@ async def _migrate_merchant_seen_by_key(conn) -> None:
     )
 
 
+async def _migrate_telegram_seen_updates(conn) -> None:
+    """V2.3 hot-fix: idempotency table for Telegram webhook deliveries.
+
+    Telegram guarantees *at-least-once* delivery — if our 200 response is
+    delayed (Railway cold start, DB lock, etc.) the same ``update_id``
+    arrives a second time. Without dedup the side effects (cash entry,
+    OCR billing, /chores ack) fired twice. The table is keyed by the
+    Telegram-supplied ``update_id`` and pruned on a rolling 1-hour window
+    so it stays small. Insertions are ``ON CONFLICT DO NOTHING`` and the
+    webhook returns 200 immediately when the update was already seen.
+    """
+    await _ddl(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS telegram_seen_updates (
+            update_id BIGINT PRIMARY KEY,
+            seen_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+    )
+    await _ddl(
+        conn,
+        """
+        CREATE INDEX IF NOT EXISTS telegram_seen_updates_seen_at_idx
+            ON telegram_seen_updates(seen_at)
+        """,
+    )
+
+
+async def _migrate_users_telegram_blocked(conn) -> None:
+    """V2.3 hot-fix: ``users.telegram_blocked`` so the dispatcher stops
+    re-sending to chats where the bot has been blocked or kicked.
+
+    Before this column the loop kept retrying every minute and producing
+    a steady stream of ``Forbidden: bot was blocked by the user`` errors
+    in ``bot_activity_log``. The dispatcher now flips this flag the
+    first time it sees a permanent Telegram error and short-circuits all
+    subsequent sends for that user.
+    """
+    await _ddl(
+        conn,
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_blocked BOOLEAN NOT NULL DEFAULT FALSE",
+    )
+
+
+async def _migrate_bot_llm_usage(conn) -> None:
+    """V2.3: ``bot_llm_usage`` — per-user daily counter for LLM calls.
+
+    Used by :mod:`web.telegram.cash_parser` to cap how many times the
+    smart cash-entry fallback hits OpenAI per user per day. Without a
+    cap a user with broken keyboard mashing could rack up real cost
+    (gpt-4o-mini is cheap but not free). Default cap is 30/day; the
+    quota resets at UTC midnight.
+
+    Composite primary key on (user_id, day) lets us upsert atomically
+    via ``ON CONFLICT``. Days older than ~30 are pruned by the daily
+    log-prune job alongside ``bot_activity_log`` for storage hygiene.
+    """
+    await _ddl(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS bot_llm_usage (
+            user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            day        DATE    NOT NULL,
+            calls      INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (user_id, day)
+        )
+        """,
+    )
+
+
+async def _migrate_notifications_queue_not_before(conn) -> None:
+    """V2.3 hot-fix: ``notifications_queue.not_before`` so the dispatcher
+    can honour Telegram ``RetryAfter`` (HTTP 429) without losing the
+    enqueued row.
+
+    Pre-fix: a 429 was caught by the dispatcher's broad ``except`` and the
+    row was marked ``failed``. The next tick re-enqueued nothing (failed
+    row), so the brief silently went missing. Post-fix: ``RetryAfter``
+    leaves the row pending, stamps ``not_before = now + retry_seconds``,
+    and the queue selector's pending filter excludes rows whose embargo
+    hasn't lifted.
+    """
+    await _ddl(
+        conn,
+        "ALTER TABLE notifications_queue ADD COLUMN IF NOT EXISTS not_before TIMESTAMPTZ",
+    )
+
+
 async def _migrate_couple_settings_last_brief_sent(conn) -> None:
     """V2.3: add ``couple_settings.last_brief_sent_date`` so the dispatcher can
     de-dup the morning/Sunday brief within a single local day.
@@ -497,4 +586,8 @@ async def run_bot_migrations(pool) -> None:
                 raise
         await _migrate_merchant_seen_by_key(conn)
         await _migrate_couple_settings_last_brief_sent(conn)
+        await _migrate_telegram_seen_updates(conn)
+        await _migrate_users_telegram_blocked(conn)
+        await _migrate_notifications_queue_not_before(conn)
+        await _migrate_bot_llm_usage(conn)
     logger.info("Bot v1 migrations complete.")

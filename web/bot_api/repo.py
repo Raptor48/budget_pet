@@ -196,7 +196,8 @@ class BotRepository:
                    SET telegram_chat_id = $2,
                        telegram_username = $3,
                        telegram_link_code = NULL,
-                       telegram_link_code_expires_at = NULL
+                       telegram_link_code_expires_at = NULL,
+                       telegram_blocked = FALSE
                  WHERE id = $1
                 """,
                 user_id,
@@ -232,13 +233,23 @@ class BotRepository:
         return _row_to_dict(row)
 
     async def list_users_with_chat(self) -> List[Dict[str, Any]]:
+        """Users with a Telegram chat the dispatcher should drain.
+
+        Now also surfaces ``telegram_blocked`` so the dispatcher can skip
+        rows where the bot has been blocked (the flag is flipped on a
+        permanent ``Forbidden`` error and cleared the next time the user
+        re-runs ``/start``). Selecting it here means a single SELECT per
+        tick instead of one per user.
+        """
         pool = await self._pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT id, username, telegram_chat_id, telegram_username
+                SELECT id, username, telegram_chat_id, telegram_username,
+                       COALESCE(telegram_blocked, FALSE) AS telegram_blocked
                 FROM users
                 WHERE telegram_chat_id IS NOT NULL
+                  AND COALESCE(telegram_blocked, FALSE) = FALSE
                 ORDER BY id
                 """,
             )
@@ -1449,17 +1460,50 @@ class BotRepository:
         }
 
     async def _leaderboard_query(self, conn, start: date, end: date):
+        # Mirrors the canonical reports aggregation: split-aware,
+        # sandbox-respecting, date is COALESCE(authorized_date, date).
+        # Without these the leaderboard disagreed with the main /reports
+        # views in two scenarios: (a) splits attributed the whole parent
+        # to one category, (b) sandbox-flagged rows leaked into demo
+        # leaderboards even when the env was set to exclude them.
+        from web.env_flags import reports_include_plaid_sandbox
+
+        sandbox_ex = (
+            ""
+            if reports_include_plaid_sandbox()
+            else " AND (t.source IS NULL OR t.source <> 'plaid_sandbox')"
+        )
         return await conn.fetch(
-            """
+            f"""
             WITH owned AS (
-                SELECT t.id, t.amount_cents, t.category_id,
+                SELECT actual.amount_cents, actual.category_id,
                        COALESCE(pi.user_id, a.user_id) AS user_id
-                FROM transactions t
-                JOIN accounts a ON a.id = t.account_id
+                FROM (
+                    SELECT t.id, t.account_id, t.category_id, t.amount_cents
+                    FROM transactions t
+                    WHERE COALESCE(t.authorized_date, t.date) >= $1
+                      AND COALESCE(t.authorized_date, t.date) < $2
+                      AND t.transaction_class = 'expense'
+                      AND NOT t.is_private
+                      AND NOT EXISTS (
+                          SELECT 1 FROM transaction_splits ts
+                          WHERE ts.parent_transaction_id = t.id
+                      )
+                      {sandbox_ex}
+
+                    UNION ALL
+
+                    SELECT t.id, t.account_id, ts.category_id, ts.amount_cents
+                    FROM transaction_splits ts
+                    JOIN transactions t ON t.id = ts.parent_transaction_id
+                    WHERE COALESCE(t.authorized_date, t.date) >= $1
+                      AND COALESCE(t.authorized_date, t.date) < $2
+                      AND t.transaction_class = 'expense'
+                      AND NOT t.is_private
+                      {sandbox_ex}
+                ) actual
+                JOIN accounts a ON a.id = actual.account_id
                 LEFT JOIN plaid_items pi ON pi.item_id = a.plaid_item_id
-                WHERE t.date >= $1 AND t.date < $2
-                  AND COALESCE(t.transaction_class, 'expense') = 'expense'
-                  AND NOT t.is_private
             ),
             ranked AS (
                 SELECT o.user_id, c.id AS category_id, c.name AS category_name,
@@ -1486,21 +1530,53 @@ class BotRepository:
 
     async def _leaderboard_household_query(self, conn, start: date, end: date):
         """Per-category totals across everyone, presented as 'Household' so
-        the screen shows data even when account-ownership rows are NULL."""
+        the screen shows data even when account-ownership rows are NULL.
+
+        Same parity rules as :meth:`_leaderboard_query` — split-aware,
+        sandbox-respecting, ``COALESCE(authorized_date, date)``.
+        """
+        from web.env_flags import reports_include_plaid_sandbox
+
+        sandbox_ex = (
+            ""
+            if reports_include_plaid_sandbox()
+            else " AND (t.source IS NULL OR t.source <> 'plaid_sandbox')"
+        )
         return await conn.fetch(
-            """
+            f"""
+            WITH actual AS (
+                SELECT t.category_id, t.amount_cents
+                FROM transactions t
+                WHERE COALESCE(t.authorized_date, t.date) >= $1
+                  AND COALESCE(t.authorized_date, t.date) < $2
+                  AND t.transaction_class = 'expense'
+                  AND NOT t.is_private
+                  AND NOT EXISTS (
+                      SELECT 1 FROM transaction_splits ts
+                      WHERE ts.parent_transaction_id = t.id
+                  )
+                  {sandbox_ex}
+
+                UNION ALL
+
+                SELECT ts.category_id, ts.amount_cents
+                FROM transaction_splits ts
+                JOIN transactions t ON t.id = ts.parent_transaction_id
+                WHERE COALESCE(t.authorized_date, t.date) >= $1
+                  AND COALESCE(t.authorized_date, t.date) < $2
+                  AND t.transaction_class = 'expense'
+                  AND NOT t.is_private
+                  {sandbox_ex}
+            )
             SELECT 0 AS user_id,
                    'Household' AS username,
                    c.id AS category_id,
                    c.name AS category_name,
-                   SUM(t.amount_cents) AS amount_cents
-            FROM transactions t
-            JOIN categories c ON c.id = t.category_id
-            WHERE t.date >= $1 AND t.date < $2
-              AND COALESCE(t.transaction_class, 'expense') = 'expense'
-              AND NOT t.is_private
+                   SUM(actual.amount_cents) AS amount_cents
+            FROM actual
+            JOIN categories c ON c.id = actual.category_id
             GROUP BY c.id, c.name
-            ORDER BY SUM(t.amount_cents) DESC
+            ORDER BY SUM(actual.amount_cents) DESC
             LIMIT 8
             """,
             start,
