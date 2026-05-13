@@ -379,6 +379,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _on_chore(query, user, parts)
     elif head == "receipt":
         await _on_receipt_action(query, user, parts)
+    elif head == "unsub":
+        await _on_unsub(query, user, parts)
     else:
         await query.edit_message_text(
             f"Unknown action: {head}", reply_markup=_back_kb()
@@ -686,6 +688,74 @@ async def _on_tea(query, user, parts):
     except Exception:
         pass
     await query.message.reply_text(f"☕ {label} it is.")
+
+
+async def _on_unsub(query, user, parts):
+    """Handle the two inline buttons on the "unsubscribe charge detected" P0:
+
+      * ``unsub:reactivate:<stream_id>`` — user changed their mind; move
+        the stream back to ``active``.
+      * ``unsub:cancel:<stream_id>`` — user wants to force-confirm; move
+        the stream to ``cancelled``.
+
+    Ownership is enforced by joining ``accounts.user_id`` against the
+    Telegram-linked user: a partner can't accept an alert addressed to
+    the other partner's account from their own chat. Shared accounts
+    (``accounts.user_id IS NULL``) are accepted from any household
+    member — that mirrors how the recurring page itself is family-wide.
+    """
+    if len(parts) < 3:
+        await query.edit_message_text("Malformed action.")
+        return
+    action = parts[1]
+    try:
+        stream_id = int(parts[2])
+    except (TypeError, ValueError):
+        await query.edit_message_text("Malformed stream id.")
+        return
+    if action not in ("reactivate", "cancel"):
+        await query.edit_message_text("Unknown action.")
+        return
+
+    from web.db import get_pool
+    from web.recurring.repo import RecurringRepository
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        owner_row = await conn.fetchrow(
+            """
+            SELECT a.user_id AS owner_user_id, rs.merchant_name, rs.description
+            FROM recurring_streams rs
+            LEFT JOIN accounts a ON a.id = rs.account_id
+            WHERE rs.id = $1
+            """,
+            stream_id,
+        )
+    if owner_row is None:
+        await query.edit_message_text("This stream no longer exists.")
+        return
+    owner_uid = owner_row["owner_user_id"]
+    if owner_uid is not None and int(owner_uid) != int(user["id"]):
+        await query.edit_message_text("This alert was sent to another household member.")
+        return
+
+    new_status = "active" if action == "reactivate" else "cancelled"
+    repo = RecurringRepository()
+    updated = await repo.update_stream(stream_id, {"user_status": new_status})
+    if updated is None:
+        await query.edit_message_text("Couldn't update the stream — try again from the app.")
+        return
+
+    label = (
+        owner_row.get("merchant_name")
+        or owner_row.get("description")
+        or "Subscription"
+    )
+    if new_status == "active":
+        body = f"✅ <b>{label}</b> reactivated — back to your forecast."
+    else:
+        body = f"🚫 <b>{label}</b> marked as cancelled."
+    await query.edit_message_text(body, parse_mode=ParseMode.HTML)
 
 
 async def _on_reauth(query, user, parts):

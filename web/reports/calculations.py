@@ -100,6 +100,13 @@ def build_forecast(
             # Plaid keeps returning streams for a while after they stop; do not
             # extrapolate future bills for streams explicitly marked stopped.
             continue
+        # User-managed lifecycle: only ``active`` streams contribute to the
+        # forecast. ``paused`` / ``unsubscribed`` / ``cancelled`` rows are
+        # explicitly excluded — the whole point of those states is "do not
+        # expect this charge any more". Default to ``active`` when the
+        # column is missing (legacy callers / hand-built dicts in tests).
+        if (stream.get("user_status") or "active") != "active":
+            continue
         if stream.get("direction") != "outflow":
             continue
         last_date = stream.get("last_date")

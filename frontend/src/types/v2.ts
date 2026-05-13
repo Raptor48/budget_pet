@@ -387,12 +387,30 @@ export interface RecurringStream {
    * User-managed lifecycle. Plaid cannot pause/cancel third-party
    * subscriptions, so we just mark intent locally. KPI sums and Insights
    * skip non-`active` rows.
+   *
+   * - `active` — counted in forecasts and Insights.
+   * - `paused` — temporary mute; ignore for forecast, keep visible.
+   * - `unsubscribed` — pending verification. User declared they cancelled
+   *   at the merchant; the nightly verifier checks the next expected
+   *   cycle, then either moves the row to `cancelled` (no charge → done)
+   *   or fires a P0 alert (charge posted → cancellation didn't go
+   *   through).
+   * - `cancelled` — terminal. Hidden from the default recurring view.
    */
-  user_status?: "active" | "paused" | "cancelled";
+  user_status?: "active" | "paused" | "unsubscribed" | "cancelled";
   /** Optional auto-resume date for paused streams. */
   paused_until?: string | null;
   /** Stamped when user_status flips to `cancelled`. */
   cancelled_at?: string | null;
+  /** Stamped when user_status flips to `unsubscribed`. */
+  unsubscribed_at?: string | null;
+  /**
+   * Earliest moment the verifier is allowed to resolve an unsubscribe.
+   * NULL for ANNUALLY / UNKNOWN cadences (no auto-verification).
+   */
+  unsubscribe_verify_after?: string | null;
+  /** Last time we fired the "charge after unsubscribe" P0 alert. */
+  unsubscribed_charge_alerted_at?: string | null;
   /** Hide the price-change badge / Insight until this date. */
   price_change_snoozed_until?: string | null;
   // --- Enrichment (joined, optional for backwards compatibility) ---

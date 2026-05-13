@@ -65,6 +65,15 @@ DEFAULT_NOTIFICATION_PREFS: List[Dict[str, Any]] = [
         "description": "New subscription detected or existing one charged more.",
     },
     {
+        "alert_type": "unsubscribe_charge_detected",
+        "label": "Cancellation didn't go through",
+        "enabled": True,
+        "description": (
+            "Push when a stream you marked as unsubscribed got charged "
+            "anyway — cancellation may not have taken effect."
+        ),
+    },
+    {
         "alert_type": "milestone",
         "label": "Net-worth milestones",
         "enabled": True,

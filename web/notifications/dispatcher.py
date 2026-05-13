@@ -488,6 +488,21 @@ async def _hourly_producers() -> None:
         logger.exception("Hourly producers tick failed")
 
 
+async def _daily_unsubscribe_verifier() -> None:
+    """Resolve ``user_status = 'unsubscribed'`` recurring streams.
+
+    Runs once per day. Either flips the stream to ``cancelled`` (no
+    charge after grace window) or fires a P0 "charge detected" alert.
+    See ``web/recurring/verifier.py`` for the full state machine.
+    """
+    try:
+        from web.recurring.verifier import verify_unsubscribed_streams
+
+        await verify_unsubscribed_streams()
+    except Exception:
+        logger.exception("Unsubscribe verifier tick failed")
+
+
 async def _daily_warmup_frontend() -> None:
     """Daily HTTP ping of the Next.js frontend to keep its container warm.
 
@@ -576,6 +591,19 @@ def start_dispatcher():
         _daily_warmup_frontend,
         trigger=IntervalTrigger(hours=24),
         id="frontend_daily_warmup",
+        coalesce=True,
+        max_instances=1,
+        replace_existing=True,
+    )
+    # Daily verifier for ``user_status = 'unsubscribed'`` recurring
+    # streams. Cheap (partial index, scan limited to a handful of rows)
+    # so a 24h cadence is more than enough. The grace window built into
+    # each row's ``unsubscribe_verify_after`` absorbs the worst-case
+    # 24h "did we miss the daily run?" lag.
+    _scheduler.add_job(
+        _daily_unsubscribe_verifier,
+        trigger=IntervalTrigger(hours=24),
+        id="recurring_unsubscribe_verifier",
         coalesce=True,
         max_instances=1,
         replace_existing=True,
