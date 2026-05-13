@@ -378,7 +378,7 @@ export const recurringApi = {
   list: (
     direction?: 'inflow' | 'outflow',
     activeOnly = true,
-    userStatuses?: Array<'active' | 'paused' | 'cancelled'>,
+    userStatuses?: Array<'active' | 'paused' | 'unsubscribed' | 'cancelled'>,
   ): Promise<RecurringStream[]> => {
     const params = new URLSearchParams();
     if (direction) params.set('direction', direction);
@@ -412,7 +412,7 @@ export const recurringApi = {
     data: {
       user_label?: string | null;
       category_id?: number | null;
-      user_status?: 'active' | 'paused' | 'cancelled';
+      user_status?: 'active' | 'paused' | 'unsubscribed' | 'cancelled';
       paused_until?: string | null;
       price_change_snoozed_until?: string | null;
     },
@@ -421,7 +421,12 @@ export const recurringApi = {
 
   bulk: (data: {
     ids: number[];
-    action: 'cancel' | 'pause' | 'reactivate' | 'snooze_price_change';
+    action:
+      | 'cancel'
+      | 'pause'
+      | 'reactivate'
+      | 'unsubscribe'
+      | 'snooze_price_change';
     paused_until?: string | null;
     snooze_days?: number;
   }): Promise<{ updated: number }> =>

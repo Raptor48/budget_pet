@@ -176,7 +176,7 @@ export function StreamAvatar({
 
 export function effectiveUserStatus(
   stream: RecurringStream,
-): "active" | "paused" | "cancelled" {
+): "active" | "paused" | "unsubscribed" | "cancelled" {
   return stream.user_status ?? "active";
 }
 
@@ -184,15 +184,26 @@ export function UserStatusPill({
   status,
   className,
 }: {
-  status: "active" | "paused" | "cancelled";
+  status: "active" | "paused" | "unsubscribed" | "cancelled";
   className?: string;
 }) {
   if (status === "active") return null;
   const map = {
-    paused: "border-amber-500/50 bg-amber-500/10 text-amber-800 dark:text-amber-200",
-    cancelled: "border-muted-foreground/40 bg-muted text-muted-foreground",
+    paused:
+      "border-amber-500/50 bg-amber-500/10 text-amber-800 dark:text-amber-200",
+    // `unsubscribed` is a pending-verification state — sky/blue reads as
+    // "in flight" rather than the terminal grey of `cancelled`.
+    unsubscribed:
+      "border-sky-500/50 bg-sky-500/10 text-sky-700 dark:text-sky-200",
+    cancelled:
+      "border-muted-foreground/40 bg-muted text-muted-foreground",
   } as const;
-  const label = status === "paused" ? "Paused" : "Cancelled";
+  const label =
+    status === "paused"
+      ? "Paused"
+      : status === "unsubscribed"
+        ? "Unsubscribing"
+        : "Cancelled";
   return (
     <span
       className={cn(

@@ -9,7 +9,11 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from web.db import get_pool
-from web.env_flags import reports_include_plaid_sandbox
+from web.finance.predicates import (
+    expense_predicate,
+    private_visibility_filter,
+    sandbox_exclusion_filter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -177,15 +181,12 @@ class BudgetsRepository:
         Categories that never had a budget in the window are excluded.
         """
         pool = await self._pool()
-        sandbox_ex = "" if reports_include_plaid_sandbox() else "AND t.source != 'plaid_sandbox'"
+        sandbox_ex = sandbox_exclusion_filter("t")
         params: List[Any] = [months]
         private_ex = ""
         if viewer_user_id is not None:
             params.append(viewer_user_id)
-            private_ex = (
-                "AND (NOT t.is_private OR EXISTS ("
-                "SELECT 1 FROM accounts _pa WHERE _pa.id = t.account_id AND _pa.user_id = $2))"
-            )
+            private_ex = private_visibility_filter("t", 2)
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
@@ -211,7 +212,7 @@ class BudgetsRepository:
                            SUM(t.amount_cents) AS spent
                     FROM transactions t
                     LEFT JOIN categories c ON c.id = t.category_id
-                    WHERE t.transaction_class = 'expense'
+                    WHERE {expense_predicate("t")}
                           {sandbox_ex}
                           {private_ex}
                           AND COALESCE(t.authorized_date, t.date) >=
@@ -232,7 +233,7 @@ class BudgetsRepository:
                     FROM transaction_splits ts
                     JOIN transactions t ON t.id = ts.parent_transaction_id
                     LEFT JOIN categories sc ON sc.id = ts.category_id
-                    WHERE t.transaction_class = 'expense'
+                    WHERE {expense_predicate("t")}
                           {sandbox_ex}
                           {private_ex}
                           AND COALESCE(t.authorized_date, t.date) >=
@@ -341,7 +342,7 @@ class BudgetsRepository:
         transactions from other users when ``viewer_user_id`` is provided.
         """
         pool = await self._pool()
-        sandbox_ex = "" if reports_include_plaid_sandbox() else "AND t.source != 'plaid_sandbox'"
+        sandbox_ex = sandbox_exclusion_filter("t")
         # Previous month (YYYY-MM) for the dopamine "saved last month" badge.
         # Computed in Python so the SQL stays readable; both windows go in as
         # parameters and the query builds a per-month aggregation table.
@@ -352,10 +353,7 @@ class BudgetsRepository:
         private_ex = ""
         if viewer_user_id is not None:
             params.append(viewer_user_id)
-            private_ex = (
-                "AND (NOT t.is_private OR EXISTS ("
-                "SELECT 1 FROM accounts _pa WHERE _pa.id = t.account_id AND _pa.user_id = $3))"
-            )
+            private_ex = private_visibility_filter("t", 3)
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
@@ -372,7 +370,7 @@ class BudgetsRepository:
                     FROM transactions t
                     LEFT JOIN categories c ON c.id = t.category_id
                     WHERE
-                        t.transaction_class = 'expense'
+                        {expense_predicate("t")}
                         {sandbox_ex}
                         {private_ex}
                         AND to_char(COALESCE(t.authorized_date, t.date), 'YYYY-MM')
@@ -394,7 +392,7 @@ class BudgetsRepository:
                     JOIN transactions t ON t.id = ts.parent_transaction_id
                     LEFT JOIN categories sc ON sc.id = ts.category_id
                     WHERE
-                        t.transaction_class = 'expense'
+                        {expense_predicate("t")}
                         {sandbox_ex}
                         {private_ex}
                         AND to_char(COALESCE(t.authorized_date, t.date), 'YYYY-MM')
