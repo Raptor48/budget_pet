@@ -449,43 +449,59 @@ class RecurringRepository:
                     ids,
                 )
             elif action == "unsubscribe":
-                # Bulk path computes verify_after per-row because cadence
-                # differs across streams. We could pre-compute in Python
-                # by fetching last_date + frequency, but for a bulk action
-                # bounded to 200 rows the extra fetch is cheap and keeps
-                # the cadence policy entirely in
-                # ``_compute_unsubscribe_verify_after``.
+                # Bulk path: ONE atomic UPDATE, not N per-row UPDATEs.
+                #
+                # Originally we did `for m in meta: await conn.fetchrow(...)`
+                # which works for tiny inputs but is a latency landmine
+                # under contention: Plaid sync's ``upsert_streams`` holds
+                # row-level locks on the same rows for the duration of
+                # its ON CONFLICT DO UPDATE. Each per-row UPDATE waits in
+                # its own queue, multiplying the worst case by N. We hit
+                # the 30s ``command_timeout`` on the pool and the user
+                # got a 500.
+                #
+                # Now: pre-compute verify_after in Python (cadence policy
+                # already lives there), then a single UPDATE that joins
+                # against UNNEST($ids, $verify_afters). One round-trip,
+                # one lock acquisition, no path-dependency on per-row
+                # contention.
                 meta = await conn.fetch(
                     "SELECT id, last_date, frequency FROM recurring_streams "
                     "WHERE id = ANY($1::int[])",
                     ids,
                 )
                 now_utc = datetime.now(timezone.utc)
-                rows = []
+                ids_arr: List[int] = []
+                verify_after_arr: List[Optional[datetime]] = []
                 for m in meta:
-                    verify_after = _compute_unsubscribe_verify_after(
-                        _coerce_last_date(m["last_date"]),
-                        m["frequency"],
-                        now=now_utc,
+                    ids_arr.append(int(m["id"]))
+                    verify_after_arr.append(
+                        _compute_unsubscribe_verify_after(
+                            _coerce_last_date(m["last_date"]),
+                            m["frequency"],
+                            now=now_utc,
+                        )
                     )
-                    updated = await conn.fetchrow(
-                        """
-                        UPDATE recurring_streams
-                           SET user_status                    = 'unsubscribed',
-                               unsubscribed_at                = $2,
-                               unsubscribe_verify_after       = $3,
-                               unsubscribed_charge_alerted_at = NULL,
-                               cancelled_at                   = NULL,
-                               paused_until                   = NULL
-                         WHERE id = $1
-                        RETURNING id
-                        """,
-                        int(m["id"]),
-                        now_utc,
-                        verify_after,
-                    )
-                    if updated is not None:
-                        rows.append(updated)
+                if not ids_arr:
+                    return 0
+                rows = await conn.fetch(
+                    """
+                    UPDATE recurring_streams AS rs
+                       SET user_status                    = 'unsubscribed',
+                           unsubscribed_at                = $2,
+                           unsubscribe_verify_after       = v.verify_after,
+                           unsubscribed_charge_alerted_at = NULL,
+                           cancelled_at                   = NULL,
+                           paused_until                   = NULL
+                      FROM UNNEST($1::int[], $3::timestamptz[])
+                           AS v(id, verify_after)
+                     WHERE rs.id = v.id
+                    RETURNING rs.id
+                    """,
+                    ids_arr,
+                    now_utc,
+                    verify_after_arr,
+                )
             else:  # action == "snooze_price_change" — validated above.
                 snooze_until = date.today() + timedelta(days=snooze_days or 30)
                 rows = await conn.fetch(
