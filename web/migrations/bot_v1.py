@@ -550,6 +550,42 @@ async def _migrate_notifications_queue_not_before(conn) -> None:
     )
 
 
+async def _migrate_recurring_price_snapshots_alerted(conn) -> None:
+    """V2.3 hot-fix: ``recurring_price_snapshots.alerted_at`` — per-snapshot
+    "we already told the user about this price change" stamp.
+
+    The bug it fixes: ``detect_subscription_changes`` decided a stream had
+    a price change purely by comparing the two latest snapshots
+    (``history[0] != history[1]``). ``record_recurring_amount`` is a no-op
+    when the amount is unchanged, so once Plaid reports a new price the
+    history freezes at ``[new, old]`` forever. The producer re-detected
+    "price changed!" on every run, and the 24h ``notifications_queue``
+    dedup expired every night — so the *same* "Con Edison $133.66 →
+    $134.57" line shipped in the morning brief every single day.
+
+    The first-detection path was already protected by
+    ``recurring_streams.subscription_alerted_at``; this is the matching
+    stamp for the price-change path, but at *snapshot* granularity so a
+    genuinely new price change (new snapshot row) still alerts exactly
+    once.
+
+    Backfill: every existing snapshot is stamped ``alerted_at = NOW()``.
+    Anything already in the table predates this migration, so the user
+    has either already seen the alert or it's stale — either way, do not
+    re-alert. The next genuine price change inserts a fresh, un-stamped
+    snapshot and alerts normally.
+    """
+    await _ddl(
+        conn,
+        "ALTER TABLE recurring_price_snapshots "
+        "ADD COLUMN IF NOT EXISTS alerted_at TIMESTAMPTZ",
+    )
+    await conn.execute(
+        "UPDATE recurring_price_snapshots SET alerted_at = NOW() "
+        "WHERE alerted_at IS NULL"
+    )
+
+
 async def _migrate_couple_settings_last_brief_sent(conn) -> None:
     """V2.3: add ``couple_settings.last_brief_sent_date`` so the dispatcher can
     de-dup the morning/Sunday brief within a single local day.
@@ -590,4 +626,5 @@ async def run_bot_migrations(pool) -> None:
         await _migrate_users_telegram_blocked(conn)
         await _migrate_notifications_queue_not_before(conn)
         await _migrate_bot_llm_usage(conn)
+        await _migrate_recurring_price_snapshots_alerted(conn)
     logger.info("Bot v1 migrations complete.")
