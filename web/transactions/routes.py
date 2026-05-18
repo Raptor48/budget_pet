@@ -441,6 +441,40 @@ async def _splits_include_receivable(rows) -> bool:
     return False
 
 
+@router.post("/shared/match")
+async def trigger_shared_matcher(
+    request: Request,
+    inflow_id: Optional[int] = Query(
+        default=None,
+        description="When set, scan only this single inflow row instead "
+                    "of every recent unrouted inflow.",
+    ),
+):
+    """Manual trigger for the Shared auto-matcher.
+
+    The matcher normally runs after a Plaid sync and after the user
+    saves a Shared split. This endpoint lets the user (or an admin)
+    fire it on demand — useful when a Zelle that was *expected* to
+    match silently didn't, so the user can see the per-row decisions
+    in the response and diagnose without trawling Railway logs.
+
+    Returns counters + ``decisions`` list, each item is
+    ``{id, amount_cents, effective_date, transaction_class,
+       outstanding, decision}``.
+
+    Decisions:
+      * ``matched``    — re-categorised into Shared
+      * ``ambiguous``  — outstanding ≥ 2; needs manual disambiguation
+      * ``no_match``   — no outstanding receivable at this amount + window
+    """
+    # Auth is enforced by AuthMiddleware; no per-row ownership check
+    # because the matcher reads/writes across all transactions
+    # (deliberately — split rows aren't per-user, they're per-family).
+    from web.transactions.shared_matcher import try_match_recent_inflows
+    counters = await try_match_recent_inflows(only_inflow_id=inflow_id)
+    return counters
+
+
 @router.delete("/{transaction_id}/splits", status_code=204)
 async def delete_splits(transaction_id: int, request: Request):
     current_user = getattr(request.state, "user", None) or {}
