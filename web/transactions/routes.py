@@ -415,8 +415,17 @@ async def set_splits(transaction_id: int, body: SplitListCreate, request: Reques
             await try_match_recent_inflows()
         except Exception:  # noqa: BLE001
             # Polish layer — never propagate matcher errors to the user's
-            # split-save flow. They get logged inside the matcher itself.
-            pass
+            # split-save flow. But DO log the stack trace at ERROR level
+            # so silent matcher failures don't go invisible (e.g. the
+            # asyncpg DataError from the original ``$1 || ' days'``
+            # SQL that ate every auto-match invocation for the first
+            # week of the feature's life).
+            import logging
+            logging.getLogger(__name__).exception(
+                "Shared auto-matcher raised after set_splits — "
+                "the receivable split saved successfully but the inflow "
+                "auto-match scan was skipped."
+            )
     return rows
 
 

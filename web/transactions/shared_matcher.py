@@ -104,7 +104,7 @@ async def _list_unrouted_inflows(
         WHERE t.transaction_class IN ('income', 'uncategorized', 'internal_transfer')
           AND t.amount_cents < 0
           AND COALESCE(t.authorized_date, t.date)
-              >= (CURRENT_DATE - ($1 || ' days')::interval)
+              >= (CURRENT_DATE - make_interval(days => $1))
           AND COALESCE(t.category_id, 0) <> $2
           AND NOT EXISTS (
               SELECT 1 FROM transaction_splits ts
@@ -148,8 +148,8 @@ async def _outstanding_count_at(
             WHERE c.is_receivable = TRUE
               AND ts.amount_cents = $1
               AND COALESCE(t.authorized_date, t.date)
-                  BETWEEN ($2::date - ($3 || ' days')::interval)
-                      AND ($2::date + ($3 || ' days')::interval)
+                  BETWEEN ($2::date - make_interval(days => $3))
+                      AND ($2::date + make_interval(days => $3))
         ),
         already_matched_inflows AS (
             SELECT COUNT(*) AS n
@@ -159,8 +159,8 @@ async def _outstanding_count_at(
               AND t.amount_cents = -$1
               AND t.id <> $4
               AND COALESCE(t.authorized_date, t.date)
-                  BETWEEN ($2::date - ($3 || ' days')::interval)
-                      AND ($2::date + ($3 || ' days')::interval)
+                  BETWEEN ($2::date - make_interval(days => $3))
+                      AND ($2::date + make_interval(days => $3))
         )
         SELECT
             (SELECT n FROM outflow_splits)
@@ -199,8 +199,8 @@ async def _matched_counterparty(
           AND ts.amount_cents = $1
           AND ts.counterparty IS NOT NULL
           AND COALESCE(t.authorized_date, t.date)
-              BETWEEN ($2::date - ($3 || ' days')::interval)
-                  AND ($2::date + ($3 || ' days')::interval)
+              BETWEEN ($2::date - make_interval(days => $3))
+                  AND ($2::date + make_interval(days => $3))
         """,
         int(amount_cents_abs),
         effective_date,

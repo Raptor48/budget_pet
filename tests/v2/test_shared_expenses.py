@@ -381,9 +381,13 @@ class TestSharedMatcher:
 
         outstanding_sql = conn.fetchrow.call_args.args[0]
         # Both ends of the BETWEEN reference the lookback interval —
-        # before AND after the inflow date.
-        assert outstanding_sql.count("($3 || ' days')::interval") >= 2
-        assert "+ ($3 || ' days')::interval" in outstanding_sql
+        # before AND after the inflow date. ``make_interval(days => $3)``
+        # is used instead of the older ``($3 || ' days')::interval``
+        # because the string-concat form forces $3 to text and asyncpg
+        # rejects ints into text-inferred parameters (DataError that
+        # silently killed the matcher in production for a week).
+        assert outstanding_sql.count("make_interval(days => $3)") >= 2
+        assert "+ make_interval(days => $3)" in outstanding_sql
 
     @pytest.mark.asyncio
     async def test_no_inflows_clean_noop(self):
