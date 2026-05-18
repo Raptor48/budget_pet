@@ -90,25 +90,30 @@ class TestNonReceivableCategoryFilter:
 
 class TestSplitsRepoCounterparty:
     @pytest.mark.asyncio
-    async def test_counterparty_is_passed_to_insert(self):
-        """When set_splits receives a counterparty, the INSERT must carry
-        it as the 6th positional arg. Drop this and the per-person Shared
-        tag silently disappears even though the UI sent it."""
+    async def test_counterparty_round_trips_in_single_bulk_insert(self):
+        """The repo must:
+          (a) propagate ``counterparty`` end-to-end, and
+          (b) do it via ONE bulk INSERT (UNNEST), not a per-row loop —
+              the loop form held a row lock per iteration and tripped
+              the 30s ``command_timeout`` whenever Plaid sync or the
+              shared-expense matcher concurrently touched the same
+              parent. Same lesson as the bulk-unsubscribe fix."""
         from web.transactions.splits_repo import SplitsRepository
 
         conn = AsyncMock()
         _attach_txn_ctx(conn)
         pool = make_mock_pool(conn)
-        # set_splits flow: fetchrow(parent amount) then per-split fetchrow(INSERT)
-        conn.fetchrow.side_effect = [
-            {"amount_cents": 20000},  # parent
-            {  # inserted split 1
+        # set_splits flow: fetchrow(parent amount), then DELETE, then
+        # ONE fetch(INSERT … RETURNING *) returning the inserted rows.
+        conn.fetchrow.return_value = {"amount_cents": 20000}
+        conn.fetch.return_value = [
+            {
                 "id": 1, "parent_transaction_id": 1, "category_id": 10,
                 "tag_id": None, "amount_cents": 5000, "note": None,
                 "counterparty": None, "auto_matched_at": None,
                 "created_at": None,
             },
-            {  # inserted split 2
+            {
                 "id": 2, "parent_transaction_id": 1, "category_id": 99,
                 "tag_id": None, "amount_cents": 15000, "note": None,
                 "counterparty": "Alex", "auto_matched_at": None,
@@ -128,17 +133,19 @@ class TestSplitsRepoCounterparty:
                 ],
             )
 
-        # The INSERT for the Shared split must include 'Alex' as the
-        # 6th positional arg (parent_id, category, tag, amount, note,
-        # counterparty).
+        # Exactly ONE INSERT — pin the bulk shape so we don't silently
+        # regress to a per-row loop.
         insert_calls = [
-            c for c in conn.fetchrow.call_args_list
+            c for c in conn.fetch.call_args_list
             if "INSERT INTO transaction_splits" in (c.args[0] if c.args else "")
         ]
-        assert len(insert_calls) == 2
-        shared_args = insert_calls[1].args
-        assert shared_args[5] is None  # note
-        assert shared_args[6] == "Alex"  # counterparty
+        assert len(insert_calls) == 1
+        sql, *args = insert_calls[0].args
+        assert "UNNEST" in sql
+        # Counterparty array is the 6th positional ($6); Alex must be in it.
+        counterparties_arg = args[5]
+        assert list(counterparties_arg) == [None, "Alex"]
+        # And the returned rows are dicts with the new fields populated.
         assert result[1]["counterparty"] == "Alex"
 
 

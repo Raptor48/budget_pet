@@ -89,7 +89,19 @@ async def get_pool() -> asyncpg.Pool:
             max_size=10,
             command_timeout=30,
             init=_init_connection,
-            server_settings={"application_name": "budget_pet_v2"},
+            server_settings={
+                "application_name": "budget_pet_v2",
+                # Fail-fast on row-level lock contention: 5s is plenty
+                # for any healthy write, and surfaces a clear
+                # ``LockNotAvailableError`` (with the conflicting query
+                # in PG logs) instead of the silent 30s
+                # ``command_timeout`` we used to see when Plaid sync or
+                # the shared-expense matcher held the same row. The
+                # client-side ``command_timeout=30`` above stays as a
+                # ceiling for slow-but-non-blocking work (big aggregates,
+                # LATERAL sub-queries, etc.).
+                "lock_timeout": "5s",
+            },
         )
         logger.info("asyncpg pool created successfully.")
     return _pool
