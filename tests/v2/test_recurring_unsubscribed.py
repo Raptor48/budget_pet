@@ -210,18 +210,22 @@ class TestUpdateStreamUnsubscribe:
 
 class TestBulkUnsubscribe:
     @pytest.mark.asyncio
-    async def test_bulk_unsubscribe_runs_per_row(self):
-        """The unsubscribe bulk path needs cadence-aware verify_after per
-        row, so it issues one UPDATE per id (not a single bulk UPDATE)."""
+    async def test_bulk_unsubscribe_runs_as_single_update(self):
+        """The unsubscribe bulk path must issue ONE atomic UPDATE that
+        joins against UNNEST(ids, verify_afters). Previous incarnation
+        looped per-row and timed out under Plaid-sync lock contention
+        in production — see the docstring in repo.py for the postmortem."""
         conn = AsyncMock()
         pool = make_mock_pool(conn)
-        # Two rows, both MONTHLY but different last_date.
+        # Two rows, both MONTHLY but different last_date — covers the
+        # per-row verify_after computation that gets passed as an array
+        # to the single UPDATE.
         meta_rows = [
             {"id": 11, "last_date": date(2026, 3, 6), "frequency": "MONTHLY"},
             {"id": 22, "last_date": date(2026, 3, 20), "frequency": "MONTHLY"},
         ]
-        conn.fetch.return_value = meta_rows
-        conn.fetchrow.side_effect = [{"id": 11}, {"id": 22}]
+        # First fetch: meta select. Second fetch: the bulk UPDATE.
+        conn.fetch.side_effect = [meta_rows, [{"id": 11}, {"id": 22}]]
 
         with patch("web.recurring.repo.get_pool", AsyncMock(return_value=pool)):
             updated = await RecurringRepository().bulk_apply(
@@ -229,10 +233,14 @@ class TestBulkUnsubscribe:
             )
 
         assert updated == 2
-        # Each per-row UPDATE carries verify_after as a positional arg.
-        for call in conn.fetchrow.call_args_list:
-            assert "user_status" in call.args[0]
-            assert "unsubscribe_verify_after" in call.args[0]
+        # Exactly two `fetch` calls — meta + single bulk UPDATE — and
+        # zero `fetchrow` (no per-row loop).
+        assert conn.fetch.call_count == 2
+        assert conn.fetchrow.call_count == 0
+        update_sql = conn.fetch.call_args_list[1].args[0]
+        assert "UNNEST" in update_sql
+        assert "user_status" in update_sql
+        assert "unsubscribe_verify_after" in update_sql
 
     @pytest.mark.asyncio
     async def test_bulk_unknown_action_raises(self):

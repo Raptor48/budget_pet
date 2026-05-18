@@ -350,7 +350,19 @@ export const transactionsApi = {
 
   setSplits: (
     transactionId: number,
-    splits: Array<{ category_id?: number | null; tag_id?: number | null; amount_cents: number; note?: string }>,
+    splits: Array<{
+      category_id?: number | null;
+      tag_id?: number | null;
+      amount_cents: number;
+      note?: string;
+      /**
+       * Optional free-form name of the person this split is associated
+       * with (e.g. "Alex"). Drives per-counterparty receivable balances
+       * for the Shared category in Phase 1 and groups under Events in
+       * Phase 2.
+       */
+      counterparty?: string | null;
+    }>,
   ): Promise<TransactionSplit[]> =>
     apiRequest(`/api/transactions/${transactionId}/splits`, {
       method: 'POST',

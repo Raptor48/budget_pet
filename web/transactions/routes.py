@@ -396,11 +396,49 @@ async def set_splits(transaction_id: int, body: SplitListCreate, request: Reques
         raise HTTPException(status_code=404, detail="Transaction not found")
     _check_txn_ownership(txn, current_user)
     try:
-        return await _splits().set_splits(
+        rows = await _splits().set_splits(
             transaction_id, [s.model_dump() for s in body.splits]
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    # Newly created Shared (receivable) split → re-run the auto-matcher
+    # so any incoming Zelle / Venmo already in the system (within the
+    # symmetric window) is re-categorised into Shared and gets the
+    # 🔗 matched chip. Without this, the matcher would only run after
+    # the next Plaid sync (weekly) — so a friend who pre-paid before
+    # the user clicked Split would sit visibly mis-classified as income
+    # until then. Best-effort: matcher failure must not break Save.
+    if await _splits_include_receivable(rows):
+        try:
+            from web.transactions.shared_matcher import try_match_recent_inflows
+
+            await try_match_recent_inflows()
+        except Exception:  # noqa: BLE001
+            # Polish layer — never propagate matcher errors to the user's
+            # split-save flow. They get logged inside the matcher itself.
+            pass
+    return rows
+
+
+async def _splits_include_receivable(rows) -> bool:
+    """True if any of the just-persisted split rows points at a
+    receivable category. Routed through ``CategoriesRepository`` so the
+    check stays correct if the user ever adds a second receivable
+    category. ``rows`` are dicts (from SplitsRepository.set_splits)."""
+    from web.categories.repo import CategoriesRepository
+
+    cat_ids = {
+        r.get("category_id") for r in rows
+        if isinstance(r, dict) and r.get("category_id") is not None
+    }
+    if not cat_ids:
+        return False
+    repo = CategoriesRepository()
+    for cid in cat_ids:
+        cat = await repo.get_category(int(cid))
+        if cat and cat.get("is_receivable"):
+            return True
+    return False
 
 
 @router.delete("/{transaction_id}/splits", status_code=204)

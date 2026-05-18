@@ -9,6 +9,7 @@ Wired into the scheduler in :mod:`web.notifications.scheduler`.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List
@@ -90,6 +91,43 @@ _BRAND_OVERRIDES: tuple = (
 _DUP_WORD_RE = re.compile(r"\b(\w+)\s+\1\b", re.I)
 
 
+# ---------------------------------------------------------------------------
+# Price-change significance gate. A recurring stream's amount wobbles for
+# all sorts of boring reasons — a $0.91 swing on a $133 ConEd bill (0.68%)
+# is not something the user wants pushed every morning. We only surface a
+# price change when it clears EITHER a relative OR an absolute floor, so
+# "big % on a small sub" and "big $ on a large bill" both still alert.
+# Both floors are tunable via Railway env without a redeploy.
+# ---------------------------------------------------------------------------
+
+
+def _price_change_is_significant(delta_cents: int, prev_cents: int) -> bool:
+    """True when a price delta is worth a ``subscription_creep`` push.
+
+    ``delta_cents`` is signed (positive = got more expensive); only the
+    magnitude matters here. ``prev_cents`` is the previous price, used as
+    the ratio denominator.
+
+    Env knobs:
+      * ``BOT_PRICE_CHANGE_MIN_PCT``        — relative floor, default 3.0
+      * ``BOT_PRICE_CHANGE_MIN_ABS_CENTS``  — absolute floor, default 100 ($1)
+    """
+    if prev_cents <= 0:
+        # Can't compute a ratio against a zero/negative base — don't
+        # suppress; let the alert through and let the user judge.
+        return True
+    try:
+        min_pct = float(os.getenv("BOT_PRICE_CHANGE_MIN_PCT", "3.0"))
+    except ValueError:
+        min_pct = 3.0
+    try:
+        min_abs = int(os.getenv("BOT_PRICE_CHANGE_MIN_ABS_CENTS", "100"))
+    except ValueError:
+        min_abs = 100
+    pct = abs(delta_cents) / prev_cents * 100.0
+    return pct >= min_pct or abs(delta_cents) >= min_abs
+
+
 def _pretty_subscription_name(raw: str) -> str:
     """Bot-friendly merchant name for subscription alerts.
 
@@ -137,8 +175,13 @@ async def detect_budget_thresholds() -> int:
                 SELECT t.category_id,
                        SUM(t.amount_cents) AS spent_cents
                 FROM transactions t
+                LEFT JOIN categories _c ON _c.id = t.category_id
                 WHERE TO_CHAR(t.date, 'YYYY-MM') = $1
                   AND COALESCE(t.transaction_class, 'expense') = 'expense'
+                  -- Shared (receivable) splits are a ledger and must not
+                  -- contribute to budget-threshold alerts — a $200 Travel
+                  -- of which $150 is receivable counts as $50 here.
+                  AND COALESCE(_c.is_receivable, FALSE) = FALSE
                 GROUP BY t.category_id
             )
             SELECT cb.category_id,
@@ -149,6 +192,7 @@ async def detect_budget_thresholds() -> int:
             JOIN categories c ON c.id = cb.category_id
             LEFT JOIN txn_totals tt ON tt.category_id = cb.category_id
             WHERE cb.month = $1
+              AND COALESCE(c.is_receivable, FALSE) = FALSE
             """,
             today_month,
         )
@@ -503,16 +547,28 @@ async def detect_subscription_changes() -> int:
             or _pretty_subscription_name(raw_description)
         )
 
-        history = await repo.get_recurring_price_history(int(s["id"]), limit=2)
-        prev_amount = None
-        if history and len(history) >= 2:
-            # Most recent snapshot (history[0]) is the current; history[1]
-            # is the previous price to compare against.
-            prev_amount = int(history[1]["amount_cents"])
-        # Always record the current price; helper is no-op when unchanged.
+        # Record the current price FIRST, then read the history back. The
+        # helper is a no-op when the amount is unchanged, so after this
+        # call ``history[0]`` is *always* the snapshot for the current
+        # price — which lets us check ``history[0]["alerted_at"]`` to know
+        # whether we've already pushed an alert for *this* price.
+        #
+        # (Pre-fix the order was reversed and the producer compared the
+        # two latest snapshots: once a price changed, the history froze at
+        # ``[new, old]`` forever, ``is_price_change`` stayed True, and the
+        # 24h queue dedup expired nightly — so the same line shipped in the
+        # morning brief every single day.)
         await repo.record_recurring_amount(
             int(s["id"]), int(s["last_amount_cents"])
         )
+        history = await repo.get_recurring_price_history(int(s["id"]), limit=2)
+
+        prev_amount = None
+        if history and len(history) >= 2:
+            # history[0] = current price's snapshot; history[1] = the
+            # genuinely previous price to compare against.
+            prev_amount = int(history[1]["amount_cents"])
+        current_snapshot_alerted = bool(history and history[0].get("alerted_at"))
 
         is_first_detection = prev_amount is None
         is_price_change = (
@@ -526,6 +582,18 @@ async def detect_subscription_changes() -> int:
         if not is_first_detection and not is_price_change:
             # Stable stream, nothing to say.
             continue
+        if is_price_change:
+            if current_snapshot_alerted:
+                # We already pushed an alert for this exact price. Without
+                # this gate the alert repeats every morning once the 24h
+                # queue dedup expires.
+                continue
+            delta_cents = int(s["last_amount_cents"]) - prev_amount
+            if not _price_change_is_significant(delta_cents, prev_amount):
+                # Sub-threshold wobble (e.g. a $0.91 swing on a utility
+                # bill). Leave the snapshot un-stamped so a later, larger
+                # move from the same baseline still alerts.
+                continue
 
         for u in users:
             uid = int(u["id"])
@@ -554,6 +622,11 @@ async def detect_subscription_changes() -> int:
             # otherwise a user who later enables the alert would still get
             # the historical flood. The stamp is "we *would have* alerted".
             await repo.mark_subscription_alerted(int(s["id"]))
+        elif is_price_change:
+            # Stamp the current snapshot so the next pass sees it as
+            # already-alerted and skips — the price-change analogue of
+            # subscription_alerted_at.
+            await repo.mark_recurring_price_alerted(int(s["id"]))
     return fired
 
 

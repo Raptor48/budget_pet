@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
@@ -22,9 +22,11 @@ import { TrendsTab } from "@/components/reports/trends-tab";
 import { BudgetHistoryTab } from "@/components/reports/budget-history-tab";
 import { NetWorthTab } from "@/components/reports/net-worth-tab";
 import { AnimatedMoney } from "@/components/ui/animated-money";
-import { budgetsApi, reportsApi, transactionsApi } from "@/lib/api";
+import { budgetsApi, categoriesApi, reportsApi, transactionsApi } from "@/lib/api";
+import { effectiveAmountForBucket, hasShareCarveOut } from "@/lib/splits";
 import { cn } from "@/lib/utils";
 import type {
+  Category,
   CategorySpend,
   MerchantSpend,
   Transaction,
@@ -196,6 +198,21 @@ export default function Reports() {
         parent_category_id: focusedParent?.category_id ?? undefined,
       }),
   });
+
+  // Categories list is needed by the drill-down to map a split's
+  // category to its primary bucket — so a $135 Travel transaction with
+  // a $90 Shared split shows ``$45`` (the user's actual share) under
+  // Travel rather than the parent's full amount.
+  const categoriesQuery = useQuery({
+    queryKey: ["categories"],
+    queryFn: () => categoriesApi.list(),
+    staleTime: 5 * 60_000,
+  });
+  const categoryById = useMemo(() => {
+    const m = new Map<number, Category>();
+    for (const c of categoriesQuery.data ?? []) m.set(c.id, c);
+    return m;
+  }, [categoriesQuery.data]);
 
   // Deep-link support: `/reports?tab=category&category=<id>` opens the
   // By Category tab already focused on a specific primary bucket. This
@@ -659,6 +676,7 @@ export default function Reports() {
                                   setCatLockedIdx((prev) => (prev === i ? null : i))
                                 }
                                 mode={focusedParent ? "detailed" : "primary"}
+                                categoryById={categoryById}
                               />
                             );
                           })}
@@ -777,6 +795,7 @@ function CategorySpendRow({
   onDrillToSubcategories,
   onLock,
   mode,
+  categoryById,
 }: {
   row: CategorySpend;
   index?: number;
@@ -789,6 +808,7 @@ function CategorySpendRow({
   onDrillToSubcategories: () => void;
   onLock: () => void;
   mode: "primary" | "detailed";
+  categoryById: Map<number, Category>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const hasCategoryId = row.category_id != null;
@@ -902,6 +922,9 @@ function CategorySpendRow({
               isError={txQuery.isError}
               error={txQuery.error as Error | null}
               rows={txQuery.data ?? []}
+              categoryId={row.category_id ?? null}
+              mode={mode}
+              categoryById={categoryById}
             />
           </td>
         </tr>
@@ -915,11 +938,17 @@ function CategoryTransactionsList({
   isError,
   error,
   rows,
+  categoryId,
+  mode,
+  categoryById,
 }: {
   isLoading: boolean;
   isError: boolean;
   error: Error | null;
   rows: Transaction[];
+  categoryId: number | null;
+  mode: "primary" | "detailed";
+  categoryById: Map<number, Category>;
 }) {
   if (isLoading) {
     return (
@@ -946,7 +975,11 @@ function CategoryTransactionsList({
   return (
     <ul className="space-y-1">
       {rows.map((tx) => {
-        const isRefund = tx.amount_cents < 0;
+        const effectiveAmount = effectiveAmountForBucket(
+          tx, categoryId, mode, categoryById,
+        );
+        const isRefund = effectiveAmount < 0;
+        const carveOut = hasShareCarveOut(tx, categoryId, mode, categoryById);
         return (
           <li
             key={tx.id}
@@ -972,6 +1005,18 @@ function CategoryTransactionsList({
                   refund
                 </span>
               ) : null}
+              {/* "split" marker — clicking through to the transaction
+                  details modal still shows the full breakdown; here we
+                  just hint that the displayed amount is the user's
+                  share, not the parent's full charge. */}
+              {carveOut ? (
+                <span
+                  className="shrink-0 rounded bg-teal-500/15 px-1.5 py-0.5 text-[10px] font-medium text-teal-700 dark:text-teal-300"
+                  title={`Your share of ${formatMoney(Math.abs(tx.amount_cents))} — the rest is in another category (e.g. Shared).`}
+                >
+                  split · {formatMoney(Math.abs(tx.amount_cents))}
+                </span>
+              ) : null}
             </span>
             <span
               className={cn(
@@ -982,7 +1027,7 @@ function CategoryTransactionsList({
               )}
             >
               {isRefund ? "−" : ""}
-              {formatMoney(Math.abs(tx.amount_cents))}
+              {formatMoney(Math.abs(effectiveAmount))}
             </span>
           </li>
         );

@@ -34,13 +34,15 @@ class TestSplitsRepository:
         conn = AsyncMock()
         pool = make_mock_pool(conn)
 
-        # parent fetch + 2 insert fetchrows
-        conn.fetchrow.side_effect = [
-            {"amount_cents": 5000},
+        # parent fetch (fetchrow) + one bulk INSERT (fetch returning rows)
+        conn.fetchrow.return_value = {"amount_cents": 5000}
+        conn.fetch.return_value = [
             {"id": 1, "parent_transaction_id": 1, "category_id": 1, "tag_id": None,
-             "amount_cents": 3000, "note": None, "created_at": "2026-01-01"},
+             "amount_cents": 3000, "note": None, "counterparty": None,
+             "auto_matched_at": None, "created_at": "2026-01-01"},
             {"id": 2, "parent_transaction_id": 1, "category_id": 2, "tag_id": None,
-             "amount_cents": 2000, "note": None, "created_at": "2026-01-01"},
+             "amount_cents": 2000, "note": None, "counterparty": None,
+             "auto_matched_at": None, "created_at": "2026-01-01"},
         ]
 
         # transaction context manager

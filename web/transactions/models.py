@@ -31,6 +31,14 @@ class SplitOut(BaseModel):
     amount_cents: int
     note: Optional[str] = None
     created_at: Optional[DateTime] = None
+    # Free-form per-split tag for shared-expense bookkeeping (e.g. "Alex"
+    # so a split routed to the Shared category can be net'd per person).
+    counterparty: Optional[str] = None
+    # Stamped by web/transactions/shared_matcher.py when an incoming
+    # transaction was auto-assigned to the Shared category as the return
+    # for an outstanding receivable. Surfaces the "🔗 matched" badge in
+    # the UI so the user can see the auto-link and undo it.
+    auto_matched_at: Optional[DateTime] = None
 
     class Config:
         from_attributes = True
@@ -162,6 +170,7 @@ class SplitCreate(BaseModel):
     tag_id: Optional[int] = None
     amount_cents: int = Field(..., ne=0)
     note: Optional[str] = None
+    counterparty: Optional[str] = Field(None, max_length=120)
 
 
 class SplitListCreate(BaseModel):

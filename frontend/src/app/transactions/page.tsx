@@ -29,6 +29,7 @@ import {
   Eye,
   EyeOff,
   FileText,
+  HandCoins,
   Info,
   Loader2,
   MapPin,
@@ -713,6 +714,15 @@ function TransactionDetailsDialog({
     ? categories.find((c) => c.id === transaction.category_id)?.color
     : null;
 
+  // Local id → Category lookup so SplitBreakdown / SharedActivityChip
+  // (both rendered from the modal) can resolve names + receivable flag
+  // without us threading a Map down from the page-level memo.
+  const categoryById = useMemo(() => {
+    const m = new Map<number, Category>();
+    for (const c of categories) m.set(c.id, c);
+    return m;
+  }, [categories]);
+
   const authorizedDateText =
     transaction?.authorized_date && transaction.authorized_date !== transaction.date
       ? formatAuthorizedDateOnly(String(transaction.authorized_date))
@@ -797,6 +807,15 @@ function TransactionDetailsDialog({
                       <Receipt className="size-3" />
                       Receipt
                     </Badge>
+                  ) : null}
+                  {/* Shared-expense activity chip (🤝 +$X · Bob / ✓ settled
+                      / 🔗 matched). Mirrors what the list row shows so the
+                      modal feels visually continuous with the table. */}
+                  {transaction.has_splits && transaction.splits?.length ? (
+                    <SharedActivityChip
+                      splits={transaction.splits}
+                      categoryById={categoryById}
+                    />
                   ) : null}
                 </div>
                 <div className="-ml-1 pt-1">
@@ -971,6 +990,25 @@ function TransactionDetailsDialog({
             ) : null}
 
             <div className="space-y-3 px-5 py-4">
+              {/* Read-only split breakdown when the row carries splits.
+                  The parent's Category field below still controls the
+                  PFC fallback for unsplit aggregations, but the splits
+                  are the source of truth for category totals — surface
+                  them first so the user sees what's actually counted. */}
+              {transaction.has_splits && transaction.splits?.length ? (
+                <div className="space-y-1.5">
+                  <Label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Columns2 className="size-3.5" />
+                    Split into {transaction.splits.length} part
+                    {transaction.splits.length === 1 ? "" : "s"}
+                  </Label>
+                  <SplitBreakdown
+                    splits={transaction.splits}
+                    categoryById={categoryById}
+                  />
+                </div>
+              ) : null}
+
               <div className="flex items-center gap-2">
                 <TagIcon
                   className="size-4 shrink-0 text-muted-foreground"
@@ -1245,6 +1283,12 @@ type SplitDraftRow = {
   /** Raw string from the input — converted to cents only on save */
   amount_str: string;
   note: string;
+  /**
+   * Optional per-split person tag (free-form), surfaced as the Shared
+   * chip under the row. Only stored when non-empty. Phase 1 displays it;
+   * Phase 2 will group by it on the Events page.
+   */
+  counterparty?: string;
 };
 
 function strToCents(s: string): number {
@@ -1289,6 +1333,7 @@ function SplitTransactionDialog({
           tag_id: s.tag_id,
           amount_str: centsToStr(s.amount_cents),
           note: s.note ?? "",
+          counterparty: s.counterparty ?? "",
         })),
       );
     } else {
@@ -1298,10 +1343,53 @@ function SplitTransactionDialog({
           tag_id: null,
           amount_str: centsToStr(transaction.amount_cents),
           note: "",
+          counterparty: "",
         },
       ]);
     }
   }, [open, transaction, splits, isLoading]);
+
+  // Locate the built-in Shared (receivable) category. There's only ever
+  // one — seeded by the migration with is_receivable=TRUE. We use this
+  // to power the "Paid for friends" quick action and to gate the
+  // counterparty input (only meaningful for shared splits).
+  const sharedCategory = useMemo(
+    () => categories.find((c) => c.is_receivable) ?? null,
+    [categories],
+  );
+
+  /**
+   * Quick action: convert the current draft into a 2-row shared-expense
+   * split. Row 1 = your share (in the original category), pre-filled
+   * with $0 so the user types their portion and Row 2 (Shared)
+   * auto-balances to the rest. Idempotent — clicking again with an
+   * already-shared draft is a no-op so the user doesn't blow away
+   * their entered amounts.
+   */
+  const prefillSharedSplit = () => {
+    if (!transaction || !sharedCategory) return;
+    // If the user is already in a 2-row state with one Shared row,
+    // don't reset — just leave their work alone.
+    const alreadyShared = draft.some((r) => r.category_id === sharedCategory.id);
+    if (alreadyShared && draft.length >= 2) return;
+    setDraft([
+      {
+        category_id: transaction.category_id,
+        tag_id: null,
+        amount_str: "0.00",
+        note: "",
+        counterparty: "",
+      },
+      {
+        category_id: sharedCategory.id,
+        tag_id: null,
+        amount_str: centsToStr(transaction.amount_cents),
+        note: "",
+        counterparty: "",
+      },
+    ]);
+    setError(null);
+  };
 
   const setSplitsMutation = useMutation({
     mutationFn: (body: SplitDraftRow[]) =>
@@ -1310,6 +1398,16 @@ function SplitTransactionDialog({
         tag_id: r.tag_id,
         amount_cents: strToCents(r.amount_str),
         note: r.note || undefined,
+        // Counterparty is only meaningful for splits routed to Shared
+        // (or any future receivable category) — skip otherwise so we
+        // don't pollute non-Shared rows with stray names.
+        counterparty:
+          r.counterparty &&
+          r.counterparty.trim() &&
+          sharedCategory != null &&
+          r.category_id === sharedCategory.id
+            ? r.counterparty.trim()
+            : null,
       }))),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["transactions"] });
@@ -1367,6 +1465,7 @@ function SplitTransactionDialog({
           tag_id: null,
           amount_str: remaining !== 0 ? (remaining / 100).toFixed(2) : "",
           note: "",
+          counterparty: "",
         },
       ];
     });
@@ -1450,6 +1549,29 @@ function SplitTransactionDialog({
                 ) : null;
               })()}
 
+              {/* Shared-expense quick wizard. One click turns the draft
+                  into "your share + receivable" — the user enters their
+                  portion, the Shared row auto-balances. Only surfaces
+                  when the Shared category exists AND the user hasn't
+                  already started a shared split on this transaction
+                  (handled inside prefillSharedSplit). */}
+              {sharedCategory ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-full gap-1.5"
+                  style={{ borderColor: sharedCategory.color || undefined }}
+                  onClick={prefillSharedSplit}
+                >
+                  <HandCoins
+                    className="size-4"
+                    style={{ color: sharedCategory.color || undefined }}
+                  />
+                  I paid for friends
+                </Button>
+              ) : null}
+
               {/* Split rows as cards */}
               <div className="space-y-2">
                 {draft.map((row, i) => (
@@ -1519,6 +1641,20 @@ function SplitTransactionDialog({
                       value={row.note}
                       onChange={(e) => updateRow(i, { note: e.target.value })}
                     />
+                    {/* Per-person tag — only meaningful for Shared rows
+                        (we drop it on save for non-Shared rows anyway).
+                        Phase 1 surfaces it as the chip under the row;
+                        Phase 2 groups by it on the Events page. */}
+                    {sharedCategory && row.category_id === sharedCategory.id ? (
+                      <Input
+                        className="mt-2"
+                        placeholder="Person (e.g. Alex) — optional"
+                        value={row.counterparty ?? ""}
+                        onChange={(e) =>
+                          updateRow(i, { counterparty: e.target.value })
+                        }
+                      />
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -1615,6 +1751,17 @@ export default function TransactionsPage() {
    * can flip it on to audit the pairs or override a mis-classification.
    */
   const [showInternalTransfers, setShowInternalTransfers] = useState(false);
+  /**
+   * Shared-expense filter — segmented 3-state control.
+   *  - "all"          — default; show everything (Shared rows are mixed in).
+   *  - "shared"       — only rows that carry at least one Shared (receivable) split.
+   *  - "outstanding"  — only Shared rows whose per-counterparty net is non-zero.
+   * Client-side filtering for v1 (the loaded month list is bounded);
+   * server-side filter can replace this when pagination shows up.
+   */
+  const [sharedFilter, setSharedFilter] = useState<
+    "all" | "shared" | "outstanding"
+  >("all");
   const deferredSearch = useDeferredValue(searchInput);
 
   const filtersAreDefault =
@@ -1624,7 +1771,8 @@ export default function TransactionsPage() {
     channel === ALL &&
     personId === ALL &&
     searchInput.trim() === "" &&
-    showInternalTransfers === false;
+    showInternalTransfers === false &&
+    sharedFilter === "all";
 
   const resetFilters = useCallback(() => {
     setAccountId(ALL);
@@ -1634,6 +1782,7 @@ export default function TransactionsPage() {
     setPersonId(ALL);
     setSearchInput("");
     setShowInternalTransfers(false);
+    setSharedFilter("all");
   }, []);
 
   const [detailOpen, setDetailOpen] = useState(false);
@@ -1738,6 +1887,34 @@ export default function TransactionsPage() {
       }, 400);
     }
   }, [highlightId, isLoading, transactions, pathname]);
+
+  // Apply the segmented Shared filter on the already-loaded list. Server-
+  // side filtering would be needed if pagination shows up, but a single
+  // month rarely exceeds a few hundred rows — client-side is fast enough
+  // and lets the toggle update with no network round-trip.
+  const filteredTransactions = useMemo(() => {
+    if (sharedFilter === "all") return transactions;
+    const receivableCategoryIds = new Set(
+      categories.filter((c) => c.is_receivable).map((c) => c.id),
+    );
+    return transactions.filter((tx) => {
+      const sharedSplits = (tx.splits ?? []).filter(
+        (s) => s.category_id != null && receivableCategoryIds.has(s.category_id),
+      );
+      if (sharedSplits.length === 0) return false;
+      if (sharedFilter === "shared") return true;
+      // outstanding: bucket by counterparty, keep if any bucket is non-zero
+      const byCp = new Map<string, number>();
+      for (const s of sharedSplits) {
+        const key = s.counterparty?.trim() || "__none__";
+        byCp.set(key, (byCp.get(key) ?? 0) + s.amount_cents);
+      }
+      for (const cents of byCp.values()) {
+        if (cents !== 0) return true;
+      }
+      return false;
+    });
+  }, [transactions, sharedFilter, categories]);
 
   const categoryById = useMemo(() => {
     const m = new Map<number, Category>();
@@ -1962,7 +2139,7 @@ export default function TransactionsPage() {
         <Card className="border-border/80 shadow-sm">
           <CardHeader className="pb-4">
             <CardTitle className="text-base">Filters</CardTitle>
-            <CardDescription>Narrow down by period, account, category, channel, or text.</CardDescription>
+            <CardDescription>Narrow down by period, account, category, person, or text.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:flex lg:flex-row lg:flex-wrap lg:items-end">
@@ -2005,22 +2182,14 @@ export default function TransactionsPage() {
                 </Select>
               </div>
 
-              <div className="grid min-w-0 gap-2 lg:min-w-[160px]">
-                <Label>Tag</Label>
-                <Select value={tagFilterId} onValueChange={setTagFilterId}>
-                  <SelectTrigger className="w-full [&_[data-slot=select-value]]:truncate">
-                    <SelectValue placeholder="Tag" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL}>All tags</SelectItem>
-                    {allTags.map((t) => (
-                      <SelectItem key={t.id} value={String(t.id)}>
-                        {t.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {/* Tag dropdown hidden from the default filter strip: in
+                  practice nobody used it (no place produces tag-driven
+                  insights yet) so the column was dead weight. Phase 2
+                  Events will resurrect tags as the per-event grouping
+                  primitive — at which point we'll surface a dedicated
+                  Events filter rather than reviving this dropdown.
+                  ``tagFilterId`` state stays so reset / URL params
+                  keep working. */}
 
               {members.length > 1 && (
                 <div className="grid min-w-0 gap-2 lg:min-w-[150px]">
@@ -2041,20 +2210,11 @@ export default function TransactionsPage() {
                 </div>
               )}
 
-              <div className="grid min-w-0 gap-2 lg:min-w-[160px]">
-                <Label>Channel</Label>
-                <Select value={channel} onValueChange={setChannel}>
-                  <SelectTrigger className="w-full [&_[data-slot=select-value]]:truncate">
-                    <SelectValue placeholder="Channel" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL}>All channels</SelectItem>
-                    <SelectItem value="online">Online</SelectItem>
-                    <SelectItem value="in store">In store</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              {/* Channel dropdown removed from the visible strip — the
+                  online/in-store/other distinction is already shown as
+                  an inline icon on every row and rarely used as a
+                  filter. ``channel`` state preserved so URL params
+                  / reset semantics don't regress. */}
 
               <div className="col-span-1 grid gap-2 sm:col-span-2 md:col-span-3 lg:col-span-1 lg:min-w-[220px] lg:flex-[2]">
                 <Label htmlFor="search">Search</Label>
@@ -2073,20 +2233,49 @@ export default function TransactionsPage() {
             </div>
 
             <div className="flex flex-col gap-3 border-t border-border/70 pt-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-start gap-2.5">
-                <Switch
-                  id="show-internal-transfers"
-                  checked={showInternalTransfers}
-                  onCheckedChange={setShowInternalTransfers}
-                  className="mt-0.5"
-                />
-                <div className="flex flex-col gap-0.5">
-                  <Label htmlFor="show-internal-transfers" className="cursor-pointer text-sm">
-                    Show internal transactions
-                  </Label>
-                  <p className="text-xs text-muted-foreground">
-                    Hidden by default. Toggle on to audit intra-family transfers excluded from income / expense totals.
-                  </p>
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+                <div className="flex items-start gap-2.5">
+                  <Switch
+                    id="show-internal-transfers"
+                    checked={showInternalTransfers}
+                    onCheckedChange={setShowInternalTransfers}
+                    className="mt-0.5"
+                  />
+                  <div className="flex flex-col gap-0.5">
+                    <Label htmlFor="show-internal-transfers" className="cursor-pointer text-sm">
+                      Show internal transactions
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Hidden by default. Toggle on to audit intra-family transfers excluded from income / expense totals.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Segmented Shared filter — matches the existing
+                    Internal toggle's purpose (filter rows by a structural
+                    property) but with 3 states because "all / shared
+                    only / outstanding only" maps to 3 distinct intents.
+                    Receivable categories collected at render time so a
+                    rare second receivable category (future) just works. */}
+                <div className="flex flex-col gap-1.5">
+                  <Label className="text-sm">Shared expenses</Label>
+                  <div className="bg-muted text-muted-foreground inline-flex h-9 items-center rounded-md p-1">
+                    {(["all", "shared", "outstanding"] as const).map((opt) => (
+                      <button
+                        key={opt}
+                        type="button"
+                        onClick={() => setSharedFilter(opt)}
+                        className={cn(
+                          "h-7 rounded-sm px-2.5 text-xs capitalize transition-colors",
+                          sharedFilter === opt
+                            ? "bg-background text-foreground shadow-sm"
+                            : "hover:text-foreground",
+                        )}
+                      >
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
               <Button
@@ -2096,7 +2285,7 @@ export default function TransactionsPage() {
                 className="gap-1.5 self-end text-muted-foreground hover:text-foreground sm:self-auto"
                 onClick={resetFilters}
                 disabled={filtersAreDefault}
-                title="Clear account, category, tag, channel, person, search, and internal-transfer filters"
+                title="Clear account, category, person, search, internal-transfer, and shared-expense filters"
               >
                 Reset filters
               </Button>
@@ -2112,21 +2301,31 @@ export default function TransactionsPage() {
 
         {isLoading ? <TransactionsSkeleton /> : null}
 
-        {!isLoading && transactions.length === 0 ? (
+        {!isLoading && filteredTransactions.length === 0 ? (
           <Card className="border-dashed">
             <CardContent className="flex flex-col items-center justify-center gap-2 py-16 text-center">
-              <p className="text-lg font-medium">No transactions</p>
+              <p className="text-lg font-medium">
+                {transactions.length === 0
+                  ? "No transactions"
+                  : sharedFilter === "outstanding"
+                    ? "Nothing outstanding"
+                    : sharedFilter === "shared"
+                      ? "No shared-expense rows"
+                      : "No transactions"}
+              </p>
               <p className="max-w-sm text-sm text-muted-foreground">
-                Try changing the month or clearing filters to see more results.
+                {sharedFilter !== "all" && transactions.length > 0
+                  ? "Switch the Shared filter to All, or mark a transaction as shared from its row menu."
+                  : "Try changing the month or clearing filters to see more results."}
               </p>
             </CardContent>
           </Card>
         ) : null}
 
-        {!isLoading && transactions.length > 0 ? (
+        {!isLoading && filteredTransactions.length > 0 ? (
           <>
             <div className="space-y-2 md:hidden">
-              {transactions.map((tx, idx) => (
+              {filteredTransactions.map((tx, idx) => (
                 <TransactionMobileCard
                   key={tx.id}
                   index={idx}
@@ -2164,7 +2363,7 @@ export default function TransactionsPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {transactions.map((tx, idx) => {
+                      {filteredTransactions.map((tx, idx) => {
                         const cat =
                           tx.category_id != null ? categoryById.get(tx.category_id) : undefined;
                         const catLabel =
@@ -2394,6 +2593,16 @@ function FragmentRow({
                   </Tooltip>
                 </TooltipProvider>
               ) : null}
+              {/* Shared-expense chips: 🤝 receivable balance / ✓ settled
+                  / 🔗 matched (auto-matched inflow). Same row as the
+                  Internal/Private/Receipt pill so it reads as a single
+                  status strip under the merchant name. */}
+              {hasSplits ? (
+                <SharedActivityChip
+                  splits={tx.splits ?? []}
+                  categoryById={categoryById}
+                />
+              ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {channelIcon(tx.payment_channel)}
@@ -2570,17 +2779,133 @@ function SplitBreakdown({
       {splits.map((s) => {
         const cat = s.category_id != null ? categoryById.get(s.category_id) : undefined;
         const catName = cat?.name ?? "Uncategorized";
+        // Receivable (Shared) splits get a teal HandCoins glyph and the
+        // category's own colour on the icon — this is the only "I'm
+        // not really an expense, I'm a ledger entry" affordance in the
+        // row, so it has to be visually distinct from the generic
+        // Columns2 split glyph.
+        const isReceivable = cat?.is_receivable === true;
+        const iconColor = isReceivable ? cat?.color || "#14b8a6" : undefined;
         return (
           <div
             key={s.id}
             className="flex min-w-0 items-center gap-1.5 rounded-md bg-muted/60 px-2 py-0.5 text-xs"
           >
-            <Columns2 className="size-3 shrink-0 text-muted-foreground/70" />
-            <span className="min-w-0 flex-1 truncate text-muted-foreground">{catName}</span>
+            {isReceivable ? (
+              <HandCoins
+                className="size-3 shrink-0"
+                style={{ color: iconColor }}
+              />
+            ) : (
+              <Columns2 className="size-3 shrink-0 text-muted-foreground/70" />
+            )}
+            <span className="min-w-0 flex-1 truncate text-muted-foreground">
+              {catName}
+              {s.counterparty ? (
+                <span className="ml-1 text-muted-foreground/70">
+                  · {s.counterparty}
+                </span>
+              ) : null}
+            </span>
             <PlaidTxnAmount cents={s.amount_cents} size="inherit" tone="flow" className="shrink-0 text-xs" />
           </div>
         );
       })}
     </div>
+  );
+}
+
+/**
+ * Compact chip rendered under the Description row when a transaction has
+ * receivable activity. Three flavours:
+ *
+ *   🤝 +$150 · Bob       — outstanding receivable; "you're owed"
+ *   🤝 −$30              — outstanding payable; "you owe"
+ *   ✓ settled            — net per-counterparty is zero (everything came back)
+ *   🔗 matched ⟶ name    — inflow auto-matched to a receivable
+ *
+ * Net is computed at the splits level (not by JOINing across the family),
+ * so a row contributes its OWN receivable splits' sum. The transactions
+ * list view will sum across the period to produce the dashboard totals.
+ */
+function SharedActivityChip({
+  splits,
+  categoryById,
+}: {
+  splits: TransactionSplit[];
+  categoryById: Map<number, Category>;
+}) {
+  const receivableSplits = useMemo(
+    () =>
+      splits.filter((s) => {
+        if (s.category_id == null) return false;
+        const cat = categoryById.get(s.category_id);
+        return cat?.is_receivable === true;
+      }),
+    [splits, categoryById],
+  );
+  if (receivableSplits.length === 0) return null;
+
+  // Auto-matched inflows: a single Shared split with auto_matched_at
+  // gets the "🔗 matched" chip. Strong signal that the system put this
+  // in Shared rather than the user — exposes the auto-link with an
+  // explicit affordance so it's not surprising.
+  const autoMatched = receivableSplits.find((s) => s.auto_matched_at);
+  if (autoMatched) {
+    const label = autoMatched.counterparty
+      ? `matched · ${autoMatched.counterparty}`
+      : "matched";
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-medium text-sky-800 dark:text-sky-200"
+        title="Auto-matched as the return for an outstanding shared expense. Edit the split to undo."
+      >
+        🔗 {label}
+      </span>
+    );
+  }
+
+  // Aggregate by counterparty so a row split across two friends shows
+  // two chips, not one mixed-up total. Uses "__none__" for unfilled
+  // counterparty so all-unfilled rows still render a single chip.
+  const byCounterparty = new Map<string, number>();
+  for (const s of receivableSplits) {
+    const key = s.counterparty?.trim() || "__none__";
+    byCounterparty.set(key, (byCounterparty.get(key) ?? 0) + s.amount_cents);
+  }
+
+  return (
+    <>
+      {Array.from(byCounterparty.entries()).map(([cp, cents]) => {
+        const settled = cents === 0;
+        const label = cp === "__none__" ? "" : ` · ${cp}`;
+        if (settled) {
+          return (
+            <span
+              key={cp}
+              className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/70 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+              title="Shared expense fully settled."
+            >
+              ✓ settled{label}
+            </span>
+          );
+        }
+        const sign = cents > 0 ? "+" : "−";
+        const abs = Math.abs(cents);
+        return (
+          <span
+            key={cp}
+            className="inline-flex items-center gap-1 rounded-full border border-teal-500/40 bg-teal-500/10 px-1.5 py-0.5 text-[10px] font-medium text-teal-800 dark:text-teal-200"
+            title={
+              cents > 0
+                ? "Friends owe you this amount."
+                : "You owe this amount."
+            }
+          >
+            🤝 {sign}{formatMoney(abs)}{label}
+          </span>
+        );
+      })}
+    </>
   );
 }

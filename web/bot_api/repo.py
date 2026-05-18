@@ -995,7 +995,7 @@ class BotRepository:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT amount_cents, currency, observed_at
+                SELECT amount_cents, currency, observed_at, alerted_at
                 FROM recurring_price_snapshots
                 WHERE recurring_id = $1
                 ORDER BY observed_at DESC
@@ -1005,6 +1005,37 @@ class BotRepository:
                 limit,
             )
         return [dict(r) for r in rows]
+
+    async def mark_recurring_price_alerted(self, recurring_id: int) -> None:
+        """Stamp ``alerted_at`` on the *latest* price snapshot for a stream.
+
+        Called right after a ``subscription_creep`` price-change alert is
+        enqueued. The producer checks ``history[0]["alerted_at"]`` on the
+        next pass and skips re-alerting — without this, the 24h
+        ``notifications_queue`` dedup expires nightly and the same line
+        ships in the morning brief every day (see the migration
+        ``_migrate_recurring_price_snapshots_alerted`` for the postmortem).
+
+        Stamps only the most recent snapshot, and only when it's still
+        NULL, so a genuinely new price change (a fresh snapshot row) is
+        left un-stamped and alerts exactly once.
+        """
+        pool = await self._pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE recurring_price_snapshots
+                   SET alerted_at = NOW()
+                 WHERE id = (
+                     SELECT id FROM recurring_price_snapshots
+                      WHERE recurring_id = $1
+                      ORDER BY observed_at DESC
+                      LIMIT 1
+                 )
+                   AND alerted_at IS NULL
+                """,
+                recurring_id,
+            )
 
     # ------------------------------------------------------------------
     # Receipts
@@ -1523,6 +1554,9 @@ class BotRepository:
                 FROM owned o
                 JOIN categories c ON c.id = o.category_id
                 WHERE o.user_id IS NOT NULL
+                  -- Shared (receivable) splits are a ledger, never count
+                  -- toward category totals.
+                  AND COALESCE(c.is_receivable, FALSE) = FALSE
                 GROUP BY o.user_id, c.id, c.name
             )
             SELECT r.user_id, u.username, r.category_id, r.category_name,
@@ -1584,6 +1618,10 @@ class BotRepository:
                    SUM(actual.amount_cents) AS amount_cents
             FROM actual
             JOIN categories c ON c.id = actual.category_id
+            -- Shared (receivable) splits are a ledger, never count toward
+            -- category totals — household leaderboard treats them the same
+            -- way the per-user one does.
+            WHERE COALESCE(c.is_receivable, FALSE) = FALSE
             GROUP BY c.id, c.name
             ORDER BY SUM(actual.amount_cents) DESC
             LIMIT 8
