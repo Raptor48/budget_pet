@@ -369,6 +369,17 @@ export const transactionsApi = {
       body: JSON.stringify({ splits }),
     }),
 
+  /**
+   * Wipe all splits from a transaction, returning it to its un-split
+   * state (the parent's own category becomes the source of truth again).
+   * Backend route is idempotent — calling on a row with no splits is a
+   * 204 no-op.
+   */
+  deleteSplits: (transactionId: number): Promise<void> =>
+    apiRequest(`/api/transactions/${transactionId}/splits`, {
+      method: 'DELETE',
+    }),
+
   exportUrl: (filters: TransactionFilters = {}): string => {
     const params = new URLSearchParams();
     if (filters.month) params.set('month', filters.month);
