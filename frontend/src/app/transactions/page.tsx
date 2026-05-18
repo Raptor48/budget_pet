@@ -714,6 +714,15 @@ function TransactionDetailsDialog({
     ? categories.find((c) => c.id === transaction.category_id)?.color
     : null;
 
+  // Local id → Category lookup so SplitBreakdown / SharedActivityChip
+  // (both rendered from the modal) can resolve names + receivable flag
+  // without us threading a Map down from the page-level memo.
+  const categoryById = useMemo(() => {
+    const m = new Map<number, Category>();
+    for (const c of categories) m.set(c.id, c);
+    return m;
+  }, [categories]);
+
   const authorizedDateText =
     transaction?.authorized_date && transaction.authorized_date !== transaction.date
       ? formatAuthorizedDateOnly(String(transaction.authorized_date))
@@ -798,6 +807,15 @@ function TransactionDetailsDialog({
                       <Receipt className="size-3" />
                       Receipt
                     </Badge>
+                  ) : null}
+                  {/* Shared-expense activity chip (🤝 +$X · Bob / ✓ settled
+                      / 🔗 matched). Mirrors what the list row shows so the
+                      modal feels visually continuous with the table. */}
+                  {transaction.has_splits && transaction.splits?.length ? (
+                    <SharedActivityChip
+                      splits={transaction.splits}
+                      categoryById={categoryById}
+                    />
                   ) : null}
                 </div>
                 <div className="-ml-1 pt-1">
@@ -972,6 +990,25 @@ function TransactionDetailsDialog({
             ) : null}
 
             <div className="space-y-3 px-5 py-4">
+              {/* Read-only split breakdown when the row carries splits.
+                  The parent's Category field below still controls the
+                  PFC fallback for unsplit aggregations, but the splits
+                  are the source of truth for category totals — surface
+                  them first so the user sees what's actually counted. */}
+              {transaction.has_splits && transaction.splits?.length ? (
+                <div className="space-y-1.5">
+                  <Label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <Columns2 className="size-3.5" />
+                    Split into {transaction.splits.length} part
+                    {transaction.splits.length === 1 ? "" : "s"}
+                  </Label>
+                  <SplitBreakdown
+                    splits={transaction.splits}
+                    categoryById={categoryById}
+                  />
+                </div>
+              ) : null}
+
               <div className="flex items-center gap-2">
                 <TagIcon
                   className="size-4 shrink-0 text-muted-foreground"

@@ -353,6 +353,39 @@ class TestSharedMatcher:
         assert counters["matched"] == 0
 
     @pytest.mark.asyncio
+    async def test_window_is_symmetric_around_inflow_date(self):
+        """Pin the symmetric-window SQL shape so we never silently regress
+        to a one-sided lookback. Original bug: a friend pre-paid Zelle
+        on May 14 for the user's MTA charge that posted May 15 (still in
+        pending). One-sided ``[inflow - N, inflow]`` window missed the
+        outflow entirely — friend's payment sat as income forever."""
+        from web.transactions.shared_matcher import try_match_recent_inflows
+
+        conn = AsyncMock()
+        pool = make_mock_pool(conn)
+        conn.fetchval.return_value = 42
+        conn.fetch.return_value = [{
+            "id": 5,
+            "account_id": 7,
+            "amount_cents": -9000,
+            "effective_date": date(2026, 5, 14),
+            "merchant_name": "Zelle Alisa",
+        }]
+        conn.fetchrow.return_value = {"outstanding": 0}
+
+        with patch(
+            "web.transactions.shared_matcher.get_pool",
+            AsyncMock(return_value=pool),
+        ):
+            await try_match_recent_inflows()
+
+        outstanding_sql = conn.fetchrow.call_args.args[0]
+        # Both ends of the BETWEEN reference the lookback interval —
+        # before AND after the inflow date.
+        assert outstanding_sql.count("($3 || ' days')::interval") >= 2
+        assert "+ ($3 || ' days')::interval" in outstanding_sql
+
+    @pytest.mark.asyncio
     async def test_no_inflows_clean_noop(self):
         from web.transactions.shared_matcher import try_match_recent_inflows
 

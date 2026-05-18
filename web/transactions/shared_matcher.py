@@ -114,8 +114,11 @@ async def _outstanding_count_at(
     receivable inflows at -amount. We exclude the inflow we're
     evaluating so we don't count it against itself.
 
-    The window straddles ``effective_date - lookback`` to ``effective_date``
-    on both legs so the symmetric balance is computed over the same span.
+    The window straddles ``[effective_date - lookback, effective_date + lookback]``
+    SYMMETRICALLY. Pre-payment is a real case — a friend Venmos you a
+    day before the trip's transit charge actually posts, and a one-sided
+    lookback would silently miss it. Same span used for both legs of
+    the balance.
     """
     row = await conn.fetchrow(
         """
@@ -128,7 +131,7 @@ async def _outstanding_count_at(
               AND ts.amount_cents = $1
               AND COALESCE(t.authorized_date, t.date)
                   BETWEEN ($2::date - ($3 || ' days')::interval)
-                      AND $2::date
+                      AND ($2::date + ($3 || ' days')::interval)
         ),
         already_matched_inflows AS (
             SELECT COUNT(*) AS n
@@ -139,7 +142,7 @@ async def _outstanding_count_at(
               AND t.id <> $4
               AND COALESCE(t.authorized_date, t.date)
                   BETWEEN ($2::date - ($3 || ' days')::interval)
-                      AND $2::date
+                      AND ($2::date + ($3 || ' days')::interval)
         )
         SELECT
             (SELECT n FROM outflow_splits)
@@ -179,7 +182,7 @@ async def _matched_counterparty(
           AND ts.counterparty IS NOT NULL
           AND COALESCE(t.authorized_date, t.date)
               BETWEEN ($2::date - ($3 || ' days')::interval)
-                  AND $2::date
+                  AND ($2::date + ($3 || ' days')::interval)
         """,
         int(amount_cents_abs),
         effective_date,
