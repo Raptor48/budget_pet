@@ -166,6 +166,20 @@ async def _sync_item_payload(
         reports_repo = ReportsRepository()
         await reports_repo.snapshot_net_worth()
 
+        # Auto-match recent inflows to outstanding shared-expense
+        # receivables: a Zelle/Venmo from a friend within a few days of
+        # an existing receivable split of the same amount is moved into
+        # the Shared category so it doesn't pollute income totals. The
+        # scan is idempotent (skips already-Shared rows) and conservative
+        # (exact-amount + unique-outstanding only). Failure here must not
+        # break the rest of the sync — it's a polish layer, not critical.
+        try:
+            from web.transactions.shared_matcher import try_match_recent_inflows
+
+            await try_match_recent_inflows()
+        except Exception as exc:
+            logger.warning("Shared auto-matcher failed for item %s: %s", item_id, exc)
+
         await repo.clear_connection_flags(item_id)
 
         logger.info(

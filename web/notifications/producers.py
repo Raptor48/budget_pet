@@ -175,8 +175,13 @@ async def detect_budget_thresholds() -> int:
                 SELECT t.category_id,
                        SUM(t.amount_cents) AS spent_cents
                 FROM transactions t
+                LEFT JOIN categories _c ON _c.id = t.category_id
                 WHERE TO_CHAR(t.date, 'YYYY-MM') = $1
                   AND COALESCE(t.transaction_class, 'expense') = 'expense'
+                  -- Shared (receivable) splits are a ledger and must not
+                  -- contribute to budget-threshold alerts — a $200 Travel
+                  -- of which $150 is receivable counts as $50 here.
+                  AND COALESCE(_c.is_receivable, FALSE) = FALSE
                 GROUP BY t.category_id
             )
             SELECT cb.category_id,
@@ -187,6 +192,7 @@ async def detect_budget_thresholds() -> int:
             JOIN categories c ON c.id = cb.category_id
             LEFT JOIN txn_totals tt ON tt.category_id = cb.category_id
             WHERE cb.month = $1
+              AND COALESCE(c.is_receivable, FALSE) = FALSE
             """,
             today_month,
         )

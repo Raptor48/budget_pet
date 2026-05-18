@@ -81,6 +81,28 @@ def private_visibility_filter(alias: str, idx: int) -> str:
     )
 
 
+def non_receivable_category_filter(alias: str = "c") -> str:
+    """
+    SQL fragment that excludes receivable-ledger categories from income /
+    expense aggregations. The Shared category (and any future receivable
+    category) is a *ledger*: its splits track who-owes-whom, not actual
+    income or expense, and must never inflate category totals.
+
+    Returns ``" AND COALESCE({alias}.is_receivable, FALSE) = FALSE"``.
+    Caller MUST already join the ``categories`` table under the given
+    alias (default ``c``). Use ``alias=""`` only when the query selects
+    directly from ``categories`` without an alias.
+
+    The ``COALESCE`` handles two edge cases safely:
+      * a left-joined row with NULL category (uncategorized transaction)
+        — treated as non-receivable, so it still contributes;
+      * pre-migration rows where the column doesn't exist yet — defensive
+        against a half-migrated DB during deploy.
+    """
+    prefix = _qualify(alias)
+    return f" AND COALESCE({prefix}is_receivable, FALSE) = FALSE"
+
+
 def sandbox_exclusion_filter(alias: str = "t") -> str:
     """
     SQL fragment that drops Plaid-sandbox-flagged rows when the runtime

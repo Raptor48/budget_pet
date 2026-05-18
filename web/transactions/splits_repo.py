@@ -57,8 +57,9 @@ class SplitsRepository:
                     row = await conn.fetchrow(
                         """
                         INSERT INTO transaction_splits
-                            (parent_transaction_id, category_id, tag_id, amount_cents, note)
-                        VALUES ($1,$2,$3,$4,$5)
+                            (parent_transaction_id, category_id, tag_id,
+                             amount_cents, note, counterparty)
+                        VALUES ($1,$2,$3,$4,$5,$6)
                         RETURNING *
                         """,
                         transaction_id,
@@ -66,6 +67,7 @@ class SplitsRepository:
                         s.get("tag_id"),
                         s["amount_cents"],
                         s.get("note"),
+                        s.get("counterparty"),
                     )
                     rows.append(dict(row))
         return rows

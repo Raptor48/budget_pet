@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 from web.db import get_pool
 from web.finance.predicates import (
     expense_predicate,
+    non_receivable_category_filter,
     private_visibility_filter,
     sandbox_exclusion_filter,
 )
@@ -215,6 +216,7 @@ class BudgetsRepository:
                     WHERE {expense_predicate("t")}
                           {sandbox_ex}
                           {private_ex}
+                          {non_receivable_category_filter("c")}
                           AND COALESCE(t.authorized_date, t.date) >=
                               date_trunc('month',
                                   CURRENT_DATE - (($1::int - 1) || ' months')::interval)
@@ -236,6 +238,7 @@ class BudgetsRepository:
                     WHERE {expense_predicate("t")}
                           {sandbox_ex}
                           {private_ex}
+                          {non_receivable_category_filter("sc")}
                           AND COALESCE(t.authorized_date, t.date) >=
                               date_trunc('month',
                                   CURRENT_DATE - (($1::int - 1) || ' months')::interval)
@@ -373,6 +376,7 @@ class BudgetsRepository:
                         {expense_predicate("t")}
                         {sandbox_ex}
                         {private_ex}
+                        {non_receivable_category_filter("c")}
                         AND to_char(COALESCE(t.authorized_date, t.date), 'YYYY-MM')
                             IN (SELECT month FROM window_months)
                         AND NOT EXISTS (
@@ -395,6 +399,7 @@ class BudgetsRepository:
                         {expense_predicate("t")}
                         {sandbox_ex}
                         {private_ex}
+                        {non_receivable_category_filter("sc")}
                         AND to_char(COALESCE(t.authorized_date, t.date), 'YYYY-MM')
                             IN (SELECT month FROM window_months)
                     GROUP BY ts.category_id, sc.parent_id, month
