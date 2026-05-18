@@ -25,6 +25,8 @@ from typing import Any, Dict, List, Optional
 from web.bot_api.repo import get_bot_repo
 from web.notifications import builders
 from web.notifications.queue import (
+    defer_many_until,
+    defer_until,
     list_pending_for_user,
     mark_failed,
     mark_sent,
@@ -34,7 +36,96 @@ logger = logging.getLogger(__name__)
 
 _JOB_ID = "notifications_dispatch"
 _BRIEF_WINDOW_MINUTES = 15  # window within which a brief is considered "due"
+# Per-user drain cap. Without it, a user with thousands of queued rows or
+# a hung handler could block the whole loop. 30s is generous: a normal
+# brief takes well under 1s and the per-tick cadence is 60s.
+_DRAIN_USER_TIMEOUT_S = 30
 _scheduler = None
+
+# Heartbeat — surfaces via /api/telegram/health. The dispatcher silently
+# stalling has been our worst flake; an external monitor pinging
+# /health and watching ``last_drain_finished_at`` catches it without
+# waiting for the user to notice missing briefs.
+_LAST_DRAIN_STARTED_AT: Optional[float] = None
+_LAST_DRAIN_FINISHED_AT: Optional[float] = None
+_LAST_DRAIN_DURATION_S: Optional[float] = None
+_LAST_DRAIN_USERS: int = 0
+
+
+def get_dispatcher_heartbeat() -> Dict[str, Any]:
+    """Snapshot of the most recent dispatcher tick. Lossy & in-process —
+    if the bot moves to a multi-worker setup this needs to migrate to
+    Redis or DB. Until then it's enough for a single-uvicorn deploy."""
+    return {
+        "last_drain_started_at": _LAST_DRAIN_STARTED_AT,
+        "last_drain_finished_at": _LAST_DRAIN_FINISHED_AT,
+        "last_drain_duration_s": _LAST_DRAIN_DURATION_S,
+        "last_drain_users": _LAST_DRAIN_USERS,
+    }
+
+
+def _classify_telegram_error(exc: BaseException) -> str:
+    """Map a Telegram-side exception to one of three buckets:
+
+    * ``"permanent"`` — user blocked the bot, chat deactivated, etc.
+      Never going to succeed; drop the row, mark the user blocked.
+    * ``"retry_after"`` — Telegram 429. The exception carries a
+      ``retry_after`` attribute we should honour.
+    * ``"transient"`` — anything else (network blip, internal error).
+      Mark failed for this attempt; producers will re-enqueue on the
+      next tick if they still apply.
+
+    Imported lazily so this module stays usable without python-telegram-bot.
+    """
+    try:
+        from telegram.error import Forbidden, ChatMigrated, RetryAfter
+
+        if isinstance(exc, Forbidden):
+            return "permanent"
+        if isinstance(exc, ChatMigrated):
+            # The chat moved (group→supergroup migration). Treat like
+            # "permanent" for this user_id; their record will be re-linked
+            # on the next /start.
+            return "permanent"
+        if isinstance(exc, RetryAfter):
+            return "retry_after"
+    except ImportError:
+        pass
+    msg = str(exc).lower()
+    if "blocked" in msg or "user is deactivated" in msg or "chat not found" in msg:
+        return "permanent"
+    return "transient"
+
+
+def _retry_after_seconds(exc: BaseException) -> int:
+    """Pull the ``retry_after`` from a Telegram ``RetryAfter`` exception,
+    clamped to a sensible range. Telegram occasionally suggests very long
+    backoffs (15+ min); honour them up to the dispatcher's tick cadence
+    so we don't churn the row repeatedly."""
+    val = getattr(exc, "retry_after", None)
+    try:
+        seconds = int(val) if val is not None else 60
+    except (TypeError, ValueError):
+        seconds = 60
+    return max(15, min(seconds, 3600))
+
+
+async def _mark_user_blocked(user_id: int) -> None:
+    """Flip ``users.telegram_blocked = TRUE`` so the next tick skips this
+    user. Idempotent (no-op if already TRUE). The user can re-link by
+    sending ``/start`` again — :func:`web.bot_api.repo.attach_telegram_chat`
+    flips the flag back to FALSE on attach."""
+    try:
+        from web.db import get_pool
+
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE users SET telegram_blocked = TRUE WHERE id = $1",
+                user_id,
+            )
+    except Exception:
+        logger.exception("Failed to mark user=%s as telegram_blocked", user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +205,12 @@ async def _drain_user(user_row: Dict[str, Any]) -> None:
     repo = get_bot_repo()
     user_id = user_row["id"]
     chat_id = user_row["telegram_chat_id"]
+    # Skip users we've previously confirmed have blocked the bot. They get
+    # un-blocked the next time they hit /start (attach_telegram_chat
+    # clears the flag). Pulled defensively in case the DB column doesn't
+    # exist yet (early-deploy race before migration).
+    if user_row.get("telegram_blocked"):
+        return
     settings = await repo.get_couple_settings(user_id)
     tz_name = settings["morning_brief_tz"]
     now_local = _user_now(tz_name)
@@ -135,6 +232,52 @@ async def _drain_user(user_row: Dict[str, Any]) -> None:
                 payload={"queue_id": int(n["id"]), "type": n["type"]},
             )
         except Exception as exc:
+            kind = _classify_telegram_error(exc)
+            if kind == "permanent":
+                # User blocked the bot or the chat is gone. Mark the user
+                # blocked once and drop the row so we don't keep retrying
+                # every minute (1440 errors/day per blocked user).
+                logger.info(
+                    "Permanent Telegram error for user=%s; marking blocked: %s",
+                    user_id,
+                    exc,
+                )
+                await _mark_user_blocked(user_id)
+                await mark_failed(n["id"], f"permanent:{exc}"[:300])
+                await log_bot_activity(
+                    kind="outgoing.push",
+                    severity="warning",
+                    summary=f"User blocked bot — stopping retries (P0 {n['type']})"[:280],
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    payload={"queue_id": int(n["id"]), "type": n["type"]},
+                )
+                # No further sends to this user this tick.
+                return
+            if kind == "retry_after":
+                seconds = _retry_after_seconds(exc)
+                logger.info(
+                    "Telegram RetryAfter %ss for user=%s queue=%s",
+                    seconds,
+                    user_id,
+                    n["id"],
+                )
+                await defer_until(n["id"], seconds)
+                await log_bot_activity(
+                    kind="outgoing.push",
+                    severity="warning",
+                    summary=f"Rate-limited; deferring P0 {n['type']} {seconds}s"[:280],
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    payload={
+                        "queue_id": int(n["id"]),
+                        "type": n["type"],
+                        "retry_after_seconds": seconds,
+                    },
+                )
+                # Stop draining this user — Telegram will say no to follow-ups.
+                return
+            # Transient — log error, mark this row failed, keep going.
             logger.exception("Failed to send P0 notification %s", n["id"])
             await mark_failed(n["id"], str(exc)[:300])
             await log_bot_activity(
@@ -224,9 +367,55 @@ async def _drain_user(user_row: Dict[str, Any]) -> None:
             },
         )
     except Exception as exc:
+        kind = _classify_telegram_error(exc)
+        ids = [int(n["id"]) for n in pending]
+        if kind == "permanent":
+            logger.info(
+                "Permanent Telegram error for user=%s during %s; marking blocked: %s",
+                user_id,
+                title,
+                exc,
+            )
+            await _mark_user_blocked(user_id)
+            for n in pending:
+                await mark_failed(n["id"], f"permanent:{exc}"[:300])
+            await log_bot_activity(
+                kind="outgoing.push",
+                severity="warning",
+                summary=f"User blocked bot — stopping retries ({title})"[:280],
+                user_id=user_id,
+                chat_id=chat_id,
+                payload={"queued_ids": ids},
+            )
+            return
+        if kind == "retry_after":
+            seconds = _retry_after_seconds(exc)
+            logger.info(
+                "Telegram RetryAfter %ss on %s for user=%s",
+                seconds,
+                title,
+                user_id,
+            )
+            # Defer the whole bundle so the next tick won't re-attempt
+            # before Telegram is ready. We don't stamp last_brief_sent_date
+            # — the brief actually didn't go out — so when the embargo lifts
+            # the next dispatcher tick within the brief window will retry.
+            await defer_many_until(ids, seconds)
+            await log_bot_activity(
+                kind="outgoing.push",
+                severity="warning",
+                summary=f"Rate-limited; deferring {title} {seconds}s"[:280],
+                user_id=user_id,
+                chat_id=chat_id,
+                payload={
+                    "queued_ids": ids,
+                    "retry_after_seconds": seconds,
+                },
+            )
+            return
         logger.exception("Failed to send brief for user=%s", user_id)
-        # Don't fail the bundle — leave the rows untouched so we retry next
-        # tick. Future improvement: exponential backoff.
+        # Transient: leave the rows untouched so we retry next tick. The
+        # error string still surfaces in the activity log for debugging.
         for n in pending:
             await mark_failed(n["id"], str(exc)[:300])
         await log_bot_activity(
@@ -235,23 +424,53 @@ async def _drain_user(user_row: Dict[str, Any]) -> None:
             summary=f"Failed to send {title}: {exc}"[:280],
             user_id=user_id,
             chat_id=chat_id,
-            payload={"queued_ids": [int(n["id"]) for n in pending]},
+            payload={"queued_ids": ids},
             error=exc,
         )
 
 
 async def _drain_once() -> None:
+    """One dispatcher tick: drain every user with a Telegram chat.
+
+    Each user's drain is bounded by ``_DRAIN_USER_TIMEOUT_S`` so a single
+    hung handler can't stall the whole loop (the prior failure mode: a
+    50-row brief send hanging for 90s while ``max_instances=1`` blocks
+    the next tick from starting).
+    """
+    global _LAST_DRAIN_STARTED_AT, _LAST_DRAIN_FINISHED_AT
+    global _LAST_DRAIN_DURATION_S, _LAST_DRAIN_USERS
+    import time as _time
+
+    started = _time.time()
+    _LAST_DRAIN_STARTED_AT = started
     repo = get_bot_repo()
     try:
         users = await repo.list_users_with_chat()
     except Exception:
         logger.exception("Failed to list users with chat ids")
+        # Still mark the tick as "finished" — a DB blip shouldn't make the
+        # heartbeat look stale. Health check will surface the underlying
+        # error via logs.
+        _LAST_DRAIN_FINISHED_AT = _time.time()
+        _LAST_DRAIN_DURATION_S = _LAST_DRAIN_FINISHED_AT - started
+        _LAST_DRAIN_USERS = 0
         return
+    drained = 0
     for user in users:
         try:
-            await _drain_user(user)
+            await asyncio.wait_for(_drain_user(user), timeout=_DRAIN_USER_TIMEOUT_S)
+        except asyncio.TimeoutError:
+            logger.error(
+                "Drain timed out (>%ss) for user=%s — moving on",
+                _DRAIN_USER_TIMEOUT_S,
+                user.get("id"),
+            )
         except Exception:
             logger.exception("Drain failed for user=%s", user.get("id"))
+        drained += 1
+    _LAST_DRAIN_FINISHED_AT = _time.time()
+    _LAST_DRAIN_DURATION_S = _LAST_DRAIN_FINISHED_AT - started
+    _LAST_DRAIN_USERS = drained
 
 
 # ---------------------------------------------------------------------------
@@ -267,6 +486,21 @@ async def _hourly_producers() -> None:
         await run_all_producers()
     except Exception:
         logger.exception("Hourly producers tick failed")
+
+
+async def _daily_unsubscribe_verifier() -> None:
+    """Resolve ``user_status = 'unsubscribed'`` recurring streams.
+
+    Runs once per day. Either flips the stream to ``cancelled`` (no
+    charge after grace window) or fires a P0 "charge detected" alert.
+    See ``web/recurring/verifier.py`` for the full state machine.
+    """
+    try:
+        from web.recurring.verifier import verify_unsubscribed_streams
+
+        await verify_unsubscribed_streams()
+    except Exception:
+        logger.exception("Unsubscribe verifier tick failed")
 
 
 async def _daily_warmup_frontend() -> None:
@@ -357,6 +591,19 @@ def start_dispatcher():
         _daily_warmup_frontend,
         trigger=IntervalTrigger(hours=24),
         id="frontend_daily_warmup",
+        coalesce=True,
+        max_instances=1,
+        replace_existing=True,
+    )
+    # Daily verifier for ``user_status = 'unsubscribed'`` recurring
+    # streams. Cheap (partial index, scan limited to a handful of rows)
+    # so a 24h cadence is more than enough. The grace window built into
+    # each row's ``unsubscribe_verify_after`` absorbs the worst-case
+    # 24h "did we miss the daily run?" lag.
+    _scheduler.add_job(
+        _daily_unsubscribe_verifier,
+        trigger=IntervalTrigger(hours=24),
+        id="recurring_unsubscribe_verifier",
         coalesce=True,
         max_instances=1,
         replace_existing=True,

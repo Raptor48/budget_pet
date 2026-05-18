@@ -30,9 +30,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { MonthYearPicker } from "@/components/ui/month-year-picker";
-import { reportsApi, transactionsApi } from "@/lib/api";
+import { categoriesApi, reportsApi, transactionsApi } from "@/lib/api";
+import { effectiveAmountForBucket, hasShareCarveOut } from "@/lib/splits";
 import { cn } from "@/lib/utils";
-import type { IncomeByUser, IncomeSource, Transaction } from "@/types/v2";
+import type { Category, IncomeByUser, IncomeSource, Transaction } from "@/types/v2";
 
 import { IncomeCategoriesDialog } from "./income-categories-dialog";
 import { IncomeMathHelp } from "./reports-math-help";
@@ -304,6 +305,18 @@ function IncomeSourceRow({
     staleTime: 30_000,
   });
 
+  // Same split-aware row display as the Expenses tab. Rare on income
+  // (a paycheck split into Salary + Bonus is the only realistic case),
+  // but symmetry keeps the math consistent across both tabs and works
+  // for free now that the helper exists.
+  const { data: categories = [] } = useQuery({
+    queryKey: ["categories"],
+    queryFn: () => categoriesApi.list(),
+    staleTime: 5 * 60_000,
+    enabled: expanded,
+  });
+  const categoryById = new Map<number, Category>(categories.map((c) => [c.id, c]));
+
   return (
     <li className="text-sm">
       <button
@@ -362,32 +375,48 @@ function IncomeSourceRow({
           )}
           {txQuery.data && txQuery.data.length > 0 && (
             <ul className="space-y-1">
-              {txQuery.data.map((tx) => (
-                <li
-                  key={tx.id}
-                  className="flex items-center justify-between gap-2 text-xs"
-                >
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="shrink-0 tabular-nums text-muted-foreground">
-                      {formatShortDate(tx.authorized_date || tx.date)}
+              {txQuery.data.map((tx) => {
+                const effective = effectiveAmountForBucket(
+                  tx, source.category_id ?? null, "detailed", categoryById,
+                );
+                const carveOut = hasShareCarveOut(
+                  tx, source.category_id ?? null, "detailed", categoryById,
+                );
+                return (
+                  <li
+                    key={tx.id}
+                    className="flex items-center justify-between gap-2 text-xs"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="shrink-0 tabular-nums text-muted-foreground">
+                        {formatShortDate(tx.authorized_date || tx.date)}
+                      </span>
+                      <span className="truncate">{transactionLabel(tx)}</span>
+                      {tx.is_pending && (
+                        <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                          pending
+                        </span>
+                      )}
+                      {tx.is_private && (
+                        <span className="shrink-0 rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-medium text-violet-700 dark:text-violet-400">
+                          private
+                        </span>
+                      )}
+                      {carveOut && (
+                        <span
+                          className="shrink-0 rounded bg-teal-500/15 px-1.5 py-0.5 text-[10px] font-medium text-teal-700 dark:text-teal-300"
+                          title={`Your share of ${formatMoney(Math.abs(tx.amount_cents))} — the rest is in another category (e.g. Shared).`}
+                        >
+                          split · {formatMoney(Math.abs(tx.amount_cents))}
+                        </span>
+                      )}
                     </span>
-                    <span className="truncate">{transactionLabel(tx)}</span>
-                    {tx.is_pending && (
-                      <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
-                        pending
-                      </span>
-                    )}
-                    {tx.is_private && (
-                      <span className="shrink-0 rounded bg-violet-500/15 px-1.5 py-0.5 text-[10px] font-medium text-violet-700 dark:text-violet-400">
-                        private
-                      </span>
-                    )}
-                  </span>
-                  <span className="shrink-0 tabular-nums text-emerald-700 dark:text-emerald-400">
-                    {formatMoney(Math.abs(tx.amount_cents))}
-                  </span>
-                </li>
-              ))}
+                    <span className="shrink-0 tabular-nums text-emerald-700 dark:text-emerald-400">
+                      {formatMoney(Math.abs(effective))}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

@@ -144,8 +144,14 @@ class TestPlaidRepository:
                 return None
             # Single unified pending-twin lookup since 2026-04-27: one
             # SELECT pulls every field that needs carrying so we don't
-            # round-trip twice for the same row.
+            # round-trip twice for the same row. ``id`` and
+            # ``amount_cents`` were added on 2026-05-19 so the splits
+            # re-parenting path (see web/plaid/repo.py) can carry user
+            # splits from pending → posted instead of letting them
+            # cascade-delete with the removed pending row.
             return {
+                "id": 9001,
+                "amount_cents": 12345,
                 "is_private": True,
                 "user_note": "honeymoon surprise",
                 "category_id": 77,
@@ -208,6 +214,8 @@ class TestPlaidRepository:
             if "FROM transactions" not in sql:
                 return None
             return {
+                "id": 9002,
+                "amount_cents": 5500,
                 "is_private": False,
                 "user_note": None,
                 "category_id": None,

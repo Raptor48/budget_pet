@@ -49,6 +49,14 @@ class RecurringStreamOut(BaseModel):
     paused_until: Optional[date] = None
     cancelled_at: Optional[datetime] = None
     price_change_snoozed_until: Optional[date] = None
+    # ``unsubscribed`` lifecycle state — see migration
+    # ``_migrate_recurring_unsubscribed_state`` for the full design note.
+    # In short: the user declared they cancelled at the merchant; the
+    # nightly verifier resolves the state once the next charge has had
+    # a chance to post (or not).
+    unsubscribed_at: Optional[datetime] = None
+    unsubscribe_verify_after: Optional[datetime] = None
+    unsubscribed_charge_alerted_at: Optional[datetime] = None
 
     # ------------------------------------------------------------------
     # Enrichment fields (populated by list_streams via JOINs).
@@ -73,7 +81,9 @@ class RecurringStreamOut(BaseModel):
 class RecurringStreamUpdate(BaseModel):
     user_label: Optional[str] = Field(None, max_length=200)
     category_id: Optional[int] = None
-    user_status: Optional[str] = Field(None, pattern=r"^(active|paused|cancelled)$")
+    user_status: Optional[str] = Field(
+        None, pattern=r"^(active|paused|cancelled|unsubscribed)$"
+    )
     paused_until: Optional[date] = None
     price_change_snoozed_until: Optional[date] = None
 
@@ -85,12 +95,19 @@ class RecurringBulkAction(BaseModel):
         ``cancel``   — flip user_status='cancelled', stamp cancelled_at=NOW().
         ``pause``    — flip user_status='paused' (optional ``paused_until``).
         ``reactivate`` — flip user_status='active' (clears pause/cancel meta).
+        ``unsubscribe`` — flip user_status='unsubscribed', stamp
+                          unsubscribed_at=NOW() and compute the verify_after
+                          deadline based on cadence. The nightly verifier
+                          resolves the state.
         ``snooze_price_change`` — set ``price_change_snoozed_until`` to today
                                   + ``snooze_days`` (default 30).
     """
 
     ids: List[int] = Field(..., min_length=1, max_length=200)
-    action: str = Field(..., pattern=r"^(cancel|pause|reactivate|snooze_price_change)$")
+    action: str = Field(
+        ...,
+        pattern=r"^(cancel|pause|reactivate|unsubscribe|snooze_price_change)$",
+    )
     paused_until: Optional[date] = None
     snooze_days: Optional[int] = Field(None, ge=1, le=365)
 

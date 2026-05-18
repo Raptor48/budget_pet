@@ -74,8 +74,19 @@ export interface Category {
   color: string;
   icon: string | null;
   pfc_icon_url: string | null;
-  /** plaid_pfc = from Plaid sync; custom = user-created */
-  source: "plaid_pfc" | "custom";
+  /**
+   * - `plaid_pfc` — seeded from Plaid PFC during sync
+   * - `custom`    — user-created
+   * - `system`    — non-deletable, seeded by a migration (e.g. Shared)
+   */
+  source: "plaid_pfc" | "custom" | "system";
+  /**
+   * When TRUE the category behaves as a ledger, not a real income/expense
+   * bucket: its splits are excluded from every income/expense aggregate
+   * and the running balance tracks who-owes-whom. Used by the built-in
+   * Shared category for shared-expense bookkeeping.
+   */
+  is_receivable?: boolean;
   created_at: string;
   /** FK to categories.id; null = top-level primary (depth ≤ 2 enforced). */
   parent_id: number | null;
@@ -181,6 +192,19 @@ export interface TransactionSplit {
   amount_cents: number;
   note: string | null;
   created_at: string;
+  /**
+   * Free-form per-split tag for shared-expense bookkeeping (e.g. "Alex").
+   * Drives the per-person chip under the Description row and powers the
+   * future Events page in Phase 2.
+   */
+  counterparty?: string | null;
+  /**
+   * Stamped when the shared-expense auto-matcher classified an incoming
+   * transaction as the settlement of an outstanding receivable. Drives
+   * the "🔗 matched" badge in the transactions list so the user can see
+   * (and one-click undo) the auto-assignment.
+   */
+  auto_matched_at?: string | null;
 }
 
 /**
@@ -387,12 +411,30 @@ export interface RecurringStream {
    * User-managed lifecycle. Plaid cannot pause/cancel third-party
    * subscriptions, so we just mark intent locally. KPI sums and Insights
    * skip non-`active` rows.
+   *
+   * - `active` — counted in forecasts and Insights.
+   * - `paused` — temporary mute; ignore for forecast, keep visible.
+   * - `unsubscribed` — pending verification. User declared they cancelled
+   *   at the merchant; the nightly verifier checks the next expected
+   *   cycle, then either moves the row to `cancelled` (no charge → done)
+   *   or fires a P0 alert (charge posted → cancellation didn't go
+   *   through).
+   * - `cancelled` — terminal. Hidden from the default recurring view.
    */
-  user_status?: "active" | "paused" | "cancelled";
+  user_status?: "active" | "paused" | "unsubscribed" | "cancelled";
   /** Optional auto-resume date for paused streams. */
   paused_until?: string | null;
   /** Stamped when user_status flips to `cancelled`. */
   cancelled_at?: string | null;
+  /** Stamped when user_status flips to `unsubscribed`. */
+  unsubscribed_at?: string | null;
+  /**
+   * Earliest moment the verifier is allowed to resolve an unsubscribe.
+   * NULL for ANNUALLY / UNKNOWN cadences (no auto-verification).
+   */
+  unsubscribe_verify_after?: string | null;
+  /** Last time we fired the "charge after unsubscribe" P0 alert. */
+  unsubscribed_charge_alerted_at?: string | null;
   /** Hide the price-change badge / Insight until this date. */
   price_change_snoozed_until?: string | null;
   // --- Enrichment (joined, optional for backwards compatibility) ---

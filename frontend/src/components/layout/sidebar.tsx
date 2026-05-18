@@ -100,7 +100,12 @@ export function Sidebar({
           collapsed ? "w-16" : "w-64",
         )}
       >
-        {/* Header */}
+        {/* Header.
+            One collapse/expand control lives here in BOTH states so it
+            never appears to "jump" to the footer when the sidebar
+            collapses. In collapsed mode the Wallet brand mark drops out
+            and the chevron occupies the slot — the user always reaches
+            for the same spot to toggle. */}
         <div
           className={cn(
             "flex h-14 shrink-0 items-center border-b border-border",
@@ -121,18 +126,11 @@ export function Sidebar({
               </span>
             </Link>
           )}
-          {collapsed && (
-            <span
-              className="flex size-8 items-center justify-center rounded-md bg-primary/15 text-primary"
-              aria-hidden
-            >
-              <Wallet className="size-4" />
-            </span>
-          )}
 
-          {/* Desktop collapse toggle. Cmd/Ctrl+B is wired up at the layout
-              level — surface the shortcut in the tooltip so it's discoverable. */}
-          {onToggleCollapsed && !collapsed && (
+          {/* Desktop collapse / expand toggle. Cmd/Ctrl+B is wired up at
+              the layout level — surface the shortcut in the tooltip so
+              it's discoverable. */}
+          {onToggleCollapsed && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -140,13 +138,20 @@ export function Sidebar({
                   size="icon"
                   className="hidden size-8 shrink-0 text-muted-foreground hover:text-foreground md:flex"
                   onClick={onToggleCollapsed}
-                  aria-label="Collapse sidebar"
+                  aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
                 >
-                  <ChevronsLeft className="size-4" />
+                  {collapsed ? (
+                    <ChevronsRight className="size-4" />
+                  ) : (
+                    <ChevronsLeft className="size-4" />
+                  )}
                 </Button>
               </TooltipTrigger>
-              <TooltipContent side="bottom" className="text-xs">
-                Collapse{" "}
+              <TooltipContent
+                side={collapsed ? "right" : "bottom"}
+                className="text-xs"
+              >
+                {collapsed ? "Expand" : "Collapse"}{" "}
                 <kbd className="ml-1 rounded border border-border bg-muted px-1 py-0.5 font-mono text-[10px]">
                   ⌘B
                 </kbd>
@@ -386,30 +391,6 @@ export function Sidebar({
             )}
           </div>
 
-          {/* Bottom expand-toggle for collapsed-mode discoverability — most
-              users miss the small chevron in the header, so we surface a
-              dedicated control here that flips orientation. */}
-          {onToggleCollapsed && collapsed && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="hidden size-8 w-full shrink-0 text-muted-foreground hover:text-foreground md:flex"
-                  onClick={onToggleCollapsed}
-                  aria-label="Expand sidebar"
-                >
-                  <ChevronsRight className="size-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="right" className="text-xs">
-                Expand{" "}
-                <kbd className="ml-1 rounded border border-border bg-muted px-1 py-0.5 font-mono text-[10px]">
-                  ⌘B
-                </kbd>
-              </TooltipContent>
-            </Tooltip>
-          )}
         </div>
       </div>
     </TooltipProvider>

@@ -667,12 +667,14 @@ class PlaidRepository:
                 carry_manual_class = None
                 carry_internal = False
                 carry_internal_manual = False
+                pending_row_id = None
+                pending_row_amount = None
                 pending_ref = data.get("pending_transaction_id")
                 if pending_ref:
                     pending_row = await conn.fetchrow(
                         """
-                        SELECT is_private, user_note, category_id,
-                               manual_class_override,
+                        SELECT id, amount_cents, is_private, user_note,
+                               category_id, manual_class_override,
                                is_internal_transfer,
                                is_internal_transfer_manual
                         FROM transactions
@@ -681,6 +683,8 @@ class PlaidRepository:
                         pending_ref,
                     )
                     if pending_row is not None:
+                        pending_row_id = int(pending_row["id"])
+                        pending_row_amount = int(pending_row["amount_cents"])
                         carry_is_private = bool(pending_row["is_private"])
                         carry_user_note = pending_row["user_note"]
                         carry_category_id = pending_row["category_id"]
@@ -806,6 +810,69 @@ class PlaidRepository:
                     carry_manual_class,
                 )
                 imported += 1
+
+                # Pending → posted re-keying: when a previously-pending
+                # row gets a fresh plaid_transaction_id on settlement,
+                # ``transaction_splits.parent_transaction_id`` (with
+                # ON DELETE CASCADE) would silently lose every user-
+                # created split the moment delete_removed_transactions
+                # drops the old pending row. Re-parent the splits to the
+                # newly-inserted posted twin so the user's "I paid for
+                # friends" work survives. Strict amount-match guard:
+                # the splits-sum invariant breaks if pending and posted
+                # amounts differ, so in that case we log and let cascade
+                # take them (a user-visible loss, but better than silently
+                # mangling the totals).
+                if (
+                    pending_row_id is not None
+                    and pending_row_amount is not None
+                    and pending_row_amount == data["amount_cents"]
+                ):
+                    posted_id = await conn.fetchval(
+                        "SELECT id FROM transactions WHERE plaid_transaction_id = $1",
+                        data["plaid_transaction_id"],
+                    )
+                    if posted_id is not None and int(posted_id) != pending_row_id:
+                        # Refuse to merge if the posted twin somehow
+                        # already has its own splits (an edge case from
+                        # a manual UI race). Cascading into both would
+                        # break the SUM invariant.
+                        posted_has_splits = await conn.fetchval(
+                            "SELECT 1 FROM transaction_splits WHERE "
+                            "parent_transaction_id = $1 LIMIT 1",
+                            int(posted_id),
+                        )
+                        if posted_has_splits is None:
+                            moved = await conn.execute(
+                                "UPDATE transaction_splits "
+                                "SET parent_transaction_id = $1 "
+                                "WHERE parent_transaction_id = $2",
+                                int(posted_id),
+                                pending_row_id,
+                            )
+                            # asyncpg returns the command tag, e.g.
+                            # "UPDATE 2" — log only when something moved.
+                            if isinstance(moved, str) and not moved.endswith(" 0"):
+                                logger.info(
+                                    "Carried splits from pending=%s to posted=%s (%s)",
+                                    pending_row_id, posted_id, moved,
+                                )
+                elif pending_row_id is not None and pending_row_amount is not None:
+                    # Amount changed in posting (rare but possible) and
+                    # the pending row had splits. They'll cascade-delete
+                    # with the pending row on the next removed-sweep.
+                    pending_had_splits = await conn.fetchval(
+                        "SELECT 1 FROM transaction_splits "
+                        "WHERE parent_transaction_id = $1 LIMIT 1",
+                        pending_row_id,
+                    )
+                    if pending_had_splits is not None:
+                        logger.warning(
+                            "Splits on pending tx %s will be lost: posted "
+                            "amount %s differs from pending %s, splits-sum "
+                            "invariant prevents carry.",
+                            pending_row_id, data["amount_cents"], pending_row_amount,
+                        )
 
             # Run the unified classifier over the **full** history so every
             # freshly imported row gets a correct ``transaction_class``,

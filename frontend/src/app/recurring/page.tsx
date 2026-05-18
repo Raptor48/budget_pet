@@ -87,7 +87,7 @@ import {
 // ---------------------------------------------------------------------------
 
 type Direction = "outflow" | "inflow";
-type StatusFilter = "active" | "cancelled" | "all";
+type StatusFilter = "active" | "unsubscribed" | "cancelled" | "all";
 type ViewMode = "list" | "by-category" | "calendar";
 
 // ---------------------------------------------------------------------------
@@ -116,12 +116,19 @@ export default function RecurringPage() {
 
   const [showAllPriceChanges, setShowAllPriceChanges] = useState(false);
 
-  const userStatuses = useMemo<Array<"active" | "paused" | "cancelled">>(() => {
+  const userStatuses = useMemo<
+    Array<"active" | "paused" | "unsubscribed" | "cancelled">
+  >(() => {
     // The Pause action is gone but the backend still supports a `paused`
     // value, so we keep it visible alongside `active` and in `all` so any
     // legacy paused row stays reachable rather than silently disappearing.
-    if (statusFilter === "all") return ["active", "paused", "cancelled"];
-    if (statusFilter === "active") return ["active", "paused"];
+    // `unsubscribed` is a pending-verification state — visible alongside
+    // active so the user can see the "we'll confirm in N days" pill and
+    // revert if they change their mind.
+    if (statusFilter === "all")
+      return ["active", "paused", "unsubscribed", "cancelled"];
+    if (statusFilter === "active")
+      return ["active", "paused", "unsubscribed"];
     return [statusFilter];
   }, [statusFilter]);
 
@@ -304,7 +311,11 @@ export default function RecurringPage() {
 
   const handleSingleAction = async (
     stream: RecurringStream,
-    action: "cancel" | "snooze_price_change" | "reactivate",
+    action:
+      | "cancel"
+      | "snooze_price_change"
+      | "reactivate"
+      | "unsubscribe",
   ) => {
     if (action === "cancel") {
       const ok = await confirm({
@@ -313,6 +324,14 @@ export default function RecurringPage() {
           "Plaid can't actually cancel the subscription with the merchant — you still need to do that yourself. This just hides the stream from KPIs and Insights, keeping the history.",
         confirmLabel: "Mark cancelled",
         destructive: true,
+      });
+      if (!ok) return;
+    } else if (action === "unsubscribe") {
+      const ok = await confirm({
+        title: `Mark “${streamTitle(stream)}” as unsubscribed?`,
+        description:
+          "Use this when you cancelled at the merchant. We'll watch the next billing cycle — if a charge still comes through, you'll get a heads-up. Otherwise the stream auto-confirms as cancelled.",
+        confirmLabel: "I unsubscribed",
       });
       if (!ok) return;
     }
@@ -965,6 +984,7 @@ function StatusFilterBar({
 }) {
   const options: Array<{ key: StatusFilter; label: string }> = [
     { key: "active", label: "Active" },
+    { key: "unsubscribed", label: "Unsubscribing" },
     { key: "cancelled", label: "Cancelled" },
     { key: "all", label: "All" },
   ];
@@ -1029,7 +1049,9 @@ function EmptyState({ statusFilter }: { statusFilter: StatusFilter }) {
   const message =
     statusFilter === "cancelled"
       ? "No cancelled streams yet. Streams you mark cancelled show up here."
-      : "No recurring streams for this tab. Add a manual one or wait for Plaid sync.";
+      : statusFilter === "unsubscribed"
+        ? "Nothing is pending verification. Mark a stream as “I unsubscribed” from its row menu and we'll watch the next cycle."
+        : "No recurring streams for this tab. Add a manual one or wait for Plaid sync.";
   return (
     <div className="rounded-lg border border-dashed py-12 text-center text-sm text-muted-foreground">
       {message}
@@ -1060,7 +1082,11 @@ type ListViewProps = {
   isUpdating: boolean;
   onAction: (
     stream: RecurringStream,
-    action: "cancel" | "snooze_price_change" | "reactivate",
+    action:
+      | "cancel"
+      | "snooze_price_change"
+      | "reactivate"
+      | "unsubscribe",
   ) => void;
   monthlyTotalCents: number;
   annualTotalCents: number;
@@ -1202,7 +1228,11 @@ function RecurringRow({
   isUpdating: boolean;
   editLockedByOther: boolean;
   onAction: (
-    action: "cancel" | "snooze_price_change" | "reactivate",
+    action:
+      | "cancel"
+      | "snooze_price_change"
+      | "reactivate"
+      | "unsubscribe",
   ) => void;
 }) {
   const title = streamTitle(row);
@@ -1478,7 +1508,11 @@ function RowActionsMenu({
 }: {
   stream: RecurringStream;
   onAction: (
-    action: "cancel" | "snooze_price_change" | "reactivate",
+    action:
+      | "cancel"
+      | "snooze_price_change"
+      | "reactivate"
+      | "unsubscribe",
   ) => void;
   onStartEdit: () => void;
   editLockedByOther: boolean;
@@ -1498,7 +1532,7 @@ function RowActionsMenu({
           <MoreHorizontal className="size-4" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-52 p-1">
+      <PopoverContent align="end" className="w-56 p-1">
         <RowActionItem
           icon={<Pencil className="size-4" />}
           label="Edit label & category"
@@ -1516,7 +1550,20 @@ function RowActionsMenu({
             onAction("snooze_price_change");
           }}
         />
-        {status === "cancelled" ? (
+        {/* "I unsubscribed" — soft cancel with verification. Hidden once
+            the stream is already unsubscribed or terminally cancelled,
+            because the next click should be reactivate / mark-cancelled. */}
+        {status === "active" || status === "paused" ? (
+          <RowActionItem
+            icon={<XCircle className="size-4" />}
+            label="I unsubscribed"
+            onClick={() => {
+              setOpen(false);
+              onAction("unsubscribe");
+            }}
+          />
+        ) : null}
+        {status === "cancelled" || status === "unsubscribed" ? (
           <RowActionItem
             icon={<RotateCcw className="size-4" />}
             label="Reactivate"
@@ -1525,7 +1572,8 @@ function RowActionsMenu({
               onAction("reactivate");
             }}
           />
-        ) : (
+        ) : null}
+        {status !== "cancelled" ? (
           <RowActionItem
             icon={<XCircle className="size-4" />}
             label="Mark cancelled"
@@ -1535,7 +1583,7 @@ function RowActionsMenu({
               onAction("cancel");
             }}
           />
-        )}
+        ) : null}
       </PopoverContent>
     </Popover>
   );
@@ -1686,7 +1734,11 @@ function ByCategoryView({
   onToggleSelect: (id: number) => void;
   onAction: (
     stream: RecurringStream,
-    action: "cancel" | "snooze_price_change" | "reactivate",
+    action:
+      | "cancel"
+      | "snooze_price_change"
+      | "reactivate"
+      | "unsubscribe",
   ) => void;
 }) {
   type Group = {
@@ -1747,7 +1799,11 @@ function CategoryGroup({
   onToggleSelect: (id: number) => void;
   onAction: (
     stream: RecurringStream,
-    action: "cancel" | "snooze_price_change" | "reactivate",
+    action:
+      | "cancel"
+      | "snooze_price_change"
+      | "reactivate"
+      | "unsubscribe",
   ) => void;
 }) {
   const [open, setOpen] = useState(true);
@@ -1810,7 +1866,11 @@ function CategoryGroupRow({
   isSelected: boolean;
   onToggleSelect: () => void;
   onAction: (
-    action: "cancel" | "snooze_price_change" | "reactivate",
+    action:
+      | "cancel"
+      | "snooze_price_change"
+      | "reactivate"
+      | "unsubscribe",
   ) => void;
 }) {
   const title = streamTitle(row);

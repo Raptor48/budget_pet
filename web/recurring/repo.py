@@ -5,7 +5,7 @@ price change detection (threshold 10%), and user label updates.
 """
 import logging
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from web.accounts.repo import AccountsRepository
@@ -16,6 +16,57 @@ from web.transactions.display import normalize_transaction_title
 logger = logging.getLogger(__name__)
 
 PRICE_CHANGE_THRESHOLD = 0.10  # 10%
+
+# Grace window stacked onto the next expected charge date before the
+# verifier is allowed to confirm an unsubscribe. Covers Plaid lag
+# (typically 1-2 days), bank settlement (T+1…T+3), and weekend posting.
+UNSUBSCRIBE_VERIFY_GRACE_DAYS = 7
+
+# Cadences for which the verifier auto-flips to ``cancelled`` when no
+# charge is detected after the grace period. ``ANNUALLY`` is deliberately
+# out — waiting 13 months to confirm is silly UX. ``UNKNOWN`` is out
+# because Plaid uses it for irregular bills (utilities by meter read)
+# where "no charge this cycle" is normal, not a signal of cancellation.
+_AUTO_VERIFIABLE_CADENCES = frozenset(
+    {"WEEKLY", "BIWEEKLY", "SEMI_MONTHLY", "MONTHLY"}
+)
+
+
+def _compute_unsubscribe_verify_after(
+    last_date: Optional[date],
+    frequency: Optional[str],
+    *,
+    now: Optional[datetime] = None,
+) -> Optional[datetime]:
+    """Earliest UTC moment the verifier is allowed to act on an unsubscribe.
+
+    Returns ``None`` for cadences we won't auto-verify (``ANNUALLY``,
+    ``UNKNOWN``, missing data) — those streams stay in the ``unsubscribed``
+    state indefinitely until the user finalises manually or Plaid itself
+    tombstones the stream.
+
+    For verifiable cadences: ``next_future_occurrence(last_date, freq) +
+    UNSUBSCRIBE_VERIFY_GRACE_DAYS``. The grace covers banking + Plaid lag.
+    """
+    if not last_date or not frequency:
+        return None
+    freq = frequency.upper()
+    if freq not in _AUTO_VERIFIABLE_CADENCES:
+        return None
+    # Local import to break the import cycle: reports.calculations does not
+    # depend on recurring; recurring depends on reports.calculations only
+    # at runtime.
+    from web.reports.calculations import next_future_occurrence
+
+    today_local = (now or datetime.now(timezone.utc)).date()
+    nxt = next_future_occurrence(last_date, freq, today=today_local)
+    if nxt is None:
+        return None
+    return datetime.combine(
+        nxt + timedelta(days=UNSUBSCRIBE_VERIFY_GRACE_DAYS),
+        datetime.min.time(),
+        tzinfo=timezone.utc,
+    )
 
 
 def _coerce_last_date(value: Any) -> Optional[date]:
@@ -100,7 +151,11 @@ class RecurringRepository:
         if active_only:
             conditions.append("rs.is_active = TRUE")
         if include_user_statuses is None:
-            include_user_statuses = ["active", "paused"]
+            # ``unsubscribed`` is a pending-verification state — we keep
+            # it visible alongside active/paused so the user can see the
+            # "we'll verify this in N days" pill, and cancel the
+            # cancellation if they change their mind.
+            include_user_statuses = ["active", "paused", "unsubscribed"]
         if include_user_statuses:
             conditions.append(f"rs.user_status = ANY(${idx}::text[])")
             params.append(list(include_user_statuses))
@@ -272,19 +327,49 @@ class RecurringRepository:
             return await self.get_stream(stream_id)
 
         # Side-effects on user_status transition: stamp / clear cancelled_at,
-        # clear paused_until when leaving 'paused'. Done as extra SET pairs so
-        # a single PATCH can flip multiple fields atomically.
+        # clear paused_until when leaving 'paused', stamp unsubscribed_at +
+        # verify_after when entering 'unsubscribed'. Done as extra SET pairs
+        # so a single PATCH can flip multiple fields atomically.
         if "user_status" in fields:
             new_status = fields["user_status"]
             if new_status == "cancelled":
                 fields["cancelled_at"] = datetime.now()
+                # Leaving 'unsubscribed' as the verified terminal state —
+                # clear the verifier metadata so an immediate Plaid resync
+                # can't accidentally reopen a charge alert against a
+                # row the user has explicitly closed.
+                fields["unsubscribed_at"] = None
+                fields["unsubscribe_verify_after"] = None
             elif new_status == "active":
                 fields["cancelled_at"] = None
+                fields["unsubscribed_at"] = None
+                fields["unsubscribe_verify_after"] = None
+                fields["unsubscribed_charge_alerted_at"] = None
                 # Don't drop paused_until here unless the caller didn't pass it
                 # — they may be re-pausing later from a different code path.
                 fields.setdefault("paused_until", None)
             elif new_status == "paused":
                 fields["cancelled_at"] = None
+                fields["unsubscribed_at"] = None
+                fields["unsubscribe_verify_after"] = None
+            elif new_status == "unsubscribed":
+                fields["cancelled_at"] = None
+                fields["paused_until"] = None
+                fields["unsubscribed_at"] = datetime.now(timezone.utc)
+                fields["unsubscribed_charge_alerted_at"] = None
+                # Compute verify_after from the row's own cadence. Needs a
+                # round-trip but keeps the API call atomic from the caller's
+                # POV (no extra fetch + patch).
+                row = await self.get_stream(stream_id)
+                if row:
+                    fields["unsubscribe_verify_after"] = (
+                        _compute_unsubscribe_verify_after(
+                            _coerce_last_date(row.get("last_date")),
+                            row.get("frequency"),
+                        )
+                    )
+                else:
+                    fields["unsubscribe_verify_after"] = None
 
         set_clause = ", ".join(f"{col} = ${i + 2}" for i, col in enumerate(fields.keys()))
         pool = await self._pool()
@@ -308,7 +393,13 @@ class RecurringRepository:
         See ``RecurringBulkAction`` in ``models.py`` for the action contract.
         Returns the number of rows updated.
         """
-        if action not in {"cancel", "pause", "reactivate", "snooze_price_change"}:
+        if action not in {
+            "cancel",
+            "pause",
+            "reactivate",
+            "unsubscribe",
+            "snooze_price_change",
+        }:
             raise ValueError(f"Unknown bulk action: {action}")
         if not ids:
             return 0
@@ -318,8 +409,10 @@ class RecurringRepository:
                 rows = await conn.fetch(
                     """
                     UPDATE recurring_streams
-                       SET user_status  = 'cancelled',
-                           cancelled_at = NOW()
+                       SET user_status                  = 'cancelled',
+                           cancelled_at                 = NOW(),
+                           unsubscribed_at              = NULL,
+                           unsubscribe_verify_after     = NULL
                      WHERE id = ANY($1::int[])
                     RETURNING id
                     """,
@@ -329,9 +422,11 @@ class RecurringRepository:
                 rows = await conn.fetch(
                     """
                     UPDATE recurring_streams
-                       SET user_status  = 'paused',
-                           paused_until = $2,
-                           cancelled_at = NULL
+                       SET user_status              = 'paused',
+                           paused_until             = $2,
+                           cancelled_at             = NULL,
+                           unsubscribed_at          = NULL,
+                           unsubscribe_verify_after = NULL
                      WHERE id = ANY($1::int[])
                     RETURNING id
                     """,
@@ -342,13 +437,70 @@ class RecurringRepository:
                 rows = await conn.fetch(
                     """
                     UPDATE recurring_streams
-                       SET user_status  = 'active',
-                           paused_until = NULL,
-                           cancelled_at = NULL
+                       SET user_status                    = 'active',
+                           paused_until                   = NULL,
+                           cancelled_at                   = NULL,
+                           unsubscribed_at                = NULL,
+                           unsubscribe_verify_after       = NULL,
+                           unsubscribed_charge_alerted_at = NULL
                      WHERE id = ANY($1::int[])
                     RETURNING id
                     """,
                     ids,
+                )
+            elif action == "unsubscribe":
+                # Bulk path: ONE atomic UPDATE, not N per-row UPDATEs.
+                #
+                # Originally we did `for m in meta: await conn.fetchrow(...)`
+                # which works for tiny inputs but is a latency landmine
+                # under contention: Plaid sync's ``upsert_streams`` holds
+                # row-level locks on the same rows for the duration of
+                # its ON CONFLICT DO UPDATE. Each per-row UPDATE waits in
+                # its own queue, multiplying the worst case by N. We hit
+                # the 30s ``command_timeout`` on the pool and the user
+                # got a 500.
+                #
+                # Now: pre-compute verify_after in Python (cadence policy
+                # already lives there), then a single UPDATE that joins
+                # against UNNEST($ids, $verify_afters). One round-trip,
+                # one lock acquisition, no path-dependency on per-row
+                # contention.
+                meta = await conn.fetch(
+                    "SELECT id, last_date, frequency FROM recurring_streams "
+                    "WHERE id = ANY($1::int[])",
+                    ids,
+                )
+                now_utc = datetime.now(timezone.utc)
+                ids_arr: List[int] = []
+                verify_after_arr: List[Optional[datetime]] = []
+                for m in meta:
+                    ids_arr.append(int(m["id"]))
+                    verify_after_arr.append(
+                        _compute_unsubscribe_verify_after(
+                            _coerce_last_date(m["last_date"]),
+                            m["frequency"],
+                            now=now_utc,
+                        )
+                    )
+                if not ids_arr:
+                    return 0
+                rows = await conn.fetch(
+                    """
+                    UPDATE recurring_streams AS rs
+                       SET user_status                    = 'unsubscribed',
+                           unsubscribed_at                = $2,
+                           unsubscribe_verify_after       = v.verify_after,
+                           unsubscribed_charge_alerted_at = NULL,
+                           cancelled_at                   = NULL,
+                           paused_until                   = NULL
+                      FROM UNNEST($1::int[], $3::timestamptz[])
+                           AS v(id, verify_after)
+                     WHERE rs.id = v.id
+                    RETURNING rs.id
+                    """,
+                    ids_arr,
+                    now_utc,
+                    verify_after_arr,
                 )
             else:  # action == "snooze_price_change" — validated above.
                 snooze_until = date.today() + timedelta(days=snooze_days or 30)

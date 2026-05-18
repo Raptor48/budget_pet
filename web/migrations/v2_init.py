@@ -775,6 +775,67 @@ async def _migrate_recurring_user_status(conn) -> None:
         )
 
 
+async def _migrate_recurring_unsubscribed_state(conn) -> None:
+    """V2.3: ``unsubscribed`` lifecycle state for recurring streams.
+
+    Difference from ``cancelled``: ``cancelled`` is a terminal user-declared
+    state; ``unsubscribed`` is a *pending verification* state. The user says
+    "I cancelled at the merchant" but we don't trust them yet — we wait one
+    cadence + a grace period, then check whether Plaid still posts charges
+    for the same merchant. The verifier (``web/recurring/verifier.py``) then
+    flips the row to ``cancelled`` (no charge → confirmed) or fires a P0
+    alert (charge came through → cancellation may not have gone through).
+
+    Columns added:
+
+    * ``unsubscribed_at`` — stamped when the user toggles into the
+      ``unsubscribed`` state. The verifier uses this as the floor for
+      "is the charge BEFORE or AFTER the unsubscribe action?"
+    * ``unsubscribe_verify_after`` — the earliest moment the verifier is
+      allowed to act. Computed as
+      ``next_future_occurrence(last_date, frequency) + 7 days grace``
+      so we tolerate Plaid lag + bank T+N settlement.
+    * ``unsubscribed_charge_alerted_at`` — last time we fired the
+      "you got charged after unsubscribing" alert. Prevents duplicate P0
+      pushes when the user hasn't acted on the previous one.
+
+    The CHECK constraint is rebuilt to add the ``unsubscribed`` value while
+    keeping the existing ``active / paused / cancelled`` ones intact.
+    """
+    for stmt in (
+        "ALTER TABLE recurring_streams ADD COLUMN IF NOT EXISTS unsubscribed_at TIMESTAMPTZ",
+        "ALTER TABLE recurring_streams ADD COLUMN IF NOT EXISTS unsubscribe_verify_after TIMESTAMPTZ",
+        "ALTER TABLE recurring_streams ADD COLUMN IF NOT EXISTS unsubscribed_charge_alerted_at TIMESTAMPTZ",
+    ):
+        await _ddl(conn, stmt)
+    # Rebuild the user_status CHECK so 'unsubscribed' is allowed. We drop
+    # whatever's there (the column has a defined-default fallback to
+    # 'active', so no rows will be invalid against the new check) and
+    # recreate with the wider set.
+    await _ddl(
+        conn,
+        "ALTER TABLE recurring_streams DROP CONSTRAINT IF EXISTS recurring_streams_user_status_check",
+    )
+    await _ddl(
+        conn,
+        """
+        ALTER TABLE recurring_streams ADD CONSTRAINT recurring_streams_user_status_check
+        CHECK (user_status IN ('active', 'paused', 'cancelled', 'unsubscribed'))
+        """,
+    )
+    # Index for the nightly verifier scan. Partial index keeps it tiny —
+    # only the rows in 'unsubscribed' state appear, which is a small
+    # fraction of recurring_streams.
+    await _ddl(
+        conn,
+        """
+        CREATE INDEX IF NOT EXISTS idx_recurring_streams_unsubscribe_verify
+            ON recurring_streams(unsubscribe_verify_after)
+         WHERE user_status = 'unsubscribed'
+        """,
+    )
+
+
 async def _migrate_recurring_first_detected_alerted(conn) -> None:
     """V2.3: per-stream "we already alerted the user about this stream" stamp.
 
@@ -1354,6 +1415,7 @@ async def run_v2_migrations(pool) -> None:
         await _migrate_categories_is_income(conn)
         await _migrate_recurring_price_change_signed(conn)
         await _migrate_recurring_user_status(conn)
+        await _migrate_recurring_unsubscribed_state(conn)
         await _migrate_recurring_first_detected_alerted(conn)
         await _migrate_merchant_aliases(conn)
         await _migrate_transactions_display_title_backfill(conn)

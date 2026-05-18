@@ -65,6 +65,15 @@ DEFAULT_NOTIFICATION_PREFS: List[Dict[str, Any]] = [
         "description": "New subscription detected or existing one charged more.",
     },
     {
+        "alert_type": "unsubscribe_charge_detected",
+        "label": "Cancellation didn't go through",
+        "enabled": True,
+        "description": (
+            "Push when a stream you marked as unsubscribed got charged "
+            "anyway — cancellation may not have taken effect."
+        ),
+    },
+    {
         "alert_type": "milestone",
         "label": "Net-worth milestones",
         "enabled": True,
@@ -196,7 +205,8 @@ class BotRepository:
                    SET telegram_chat_id = $2,
                        telegram_username = $3,
                        telegram_link_code = NULL,
-                       telegram_link_code_expires_at = NULL
+                       telegram_link_code_expires_at = NULL,
+                       telegram_blocked = FALSE
                  WHERE id = $1
                 """,
                 user_id,
@@ -232,13 +242,23 @@ class BotRepository:
         return _row_to_dict(row)
 
     async def list_users_with_chat(self) -> List[Dict[str, Any]]:
+        """Users with a Telegram chat the dispatcher should drain.
+
+        Now also surfaces ``telegram_blocked`` so the dispatcher can skip
+        rows where the bot has been blocked (the flag is flipped on a
+        permanent ``Forbidden`` error and cleared the next time the user
+        re-runs ``/start``). Selecting it here means a single SELECT per
+        tick instead of one per user.
+        """
         pool = await self._pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT id, username, telegram_chat_id, telegram_username
+                SELECT id, username, telegram_chat_id, telegram_username,
+                       COALESCE(telegram_blocked, FALSE) AS telegram_blocked
                 FROM users
                 WHERE telegram_chat_id IS NOT NULL
+                  AND COALESCE(telegram_blocked, FALSE) = FALSE
                 ORDER BY id
                 """,
             )
@@ -975,7 +995,7 @@ class BotRepository:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT amount_cents, currency, observed_at
+                SELECT amount_cents, currency, observed_at, alerted_at
                 FROM recurring_price_snapshots
                 WHERE recurring_id = $1
                 ORDER BY observed_at DESC
@@ -985,6 +1005,37 @@ class BotRepository:
                 limit,
             )
         return [dict(r) for r in rows]
+
+    async def mark_recurring_price_alerted(self, recurring_id: int) -> None:
+        """Stamp ``alerted_at`` on the *latest* price snapshot for a stream.
+
+        Called right after a ``subscription_creep`` price-change alert is
+        enqueued. The producer checks ``history[0]["alerted_at"]`` on the
+        next pass and skips re-alerting — without this, the 24h
+        ``notifications_queue`` dedup expires nightly and the same line
+        ships in the morning brief every day (see the migration
+        ``_migrate_recurring_price_snapshots_alerted`` for the postmortem).
+
+        Stamps only the most recent snapshot, and only when it's still
+        NULL, so a genuinely new price change (a fresh snapshot row) is
+        left un-stamped and alerts exactly once.
+        """
+        pool = await self._pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE recurring_price_snapshots
+                   SET alerted_at = NOW()
+                 WHERE id = (
+                     SELECT id FROM recurring_price_snapshots
+                      WHERE recurring_id = $1
+                      ORDER BY observed_at DESC
+                      LIMIT 1
+                 )
+                   AND alerted_at IS NULL
+                """,
+                recurring_id,
+            )
 
     # ------------------------------------------------------------------
     # Receipts
@@ -1449,17 +1500,50 @@ class BotRepository:
         }
 
     async def _leaderboard_query(self, conn, start: date, end: date):
+        # Mirrors the canonical reports aggregation: split-aware,
+        # sandbox-respecting, date is COALESCE(authorized_date, date).
+        # Without these the leaderboard disagreed with the main /reports
+        # views in two scenarios: (a) splits attributed the whole parent
+        # to one category, (b) sandbox-flagged rows leaked into demo
+        # leaderboards even when the env was set to exclude them.
+        from web.env_flags import reports_include_plaid_sandbox
+
+        sandbox_ex = (
+            ""
+            if reports_include_plaid_sandbox()
+            else " AND (t.source IS NULL OR t.source <> 'plaid_sandbox')"
+        )
         return await conn.fetch(
-            """
+            f"""
             WITH owned AS (
-                SELECT t.id, t.amount_cents, t.category_id,
+                SELECT actual.amount_cents, actual.category_id,
                        COALESCE(pi.user_id, a.user_id) AS user_id
-                FROM transactions t
-                JOIN accounts a ON a.id = t.account_id
+                FROM (
+                    SELECT t.id, t.account_id, t.category_id, t.amount_cents
+                    FROM transactions t
+                    WHERE COALESCE(t.authorized_date, t.date) >= $1
+                      AND COALESCE(t.authorized_date, t.date) < $2
+                      AND t.transaction_class = 'expense'
+                      AND NOT t.is_private
+                      AND NOT EXISTS (
+                          SELECT 1 FROM transaction_splits ts
+                          WHERE ts.parent_transaction_id = t.id
+                      )
+                      {sandbox_ex}
+
+                    UNION ALL
+
+                    SELECT t.id, t.account_id, ts.category_id, ts.amount_cents
+                    FROM transaction_splits ts
+                    JOIN transactions t ON t.id = ts.parent_transaction_id
+                    WHERE COALESCE(t.authorized_date, t.date) >= $1
+                      AND COALESCE(t.authorized_date, t.date) < $2
+                      AND t.transaction_class = 'expense'
+                      AND NOT t.is_private
+                      {sandbox_ex}
+                ) actual
+                JOIN accounts a ON a.id = actual.account_id
                 LEFT JOIN plaid_items pi ON pi.item_id = a.plaid_item_id
-                WHERE t.date >= $1 AND t.date < $2
-                  AND COALESCE(t.transaction_class, 'expense') = 'expense'
-                  AND NOT t.is_private
             ),
             ranked AS (
                 SELECT o.user_id, c.id AS category_id, c.name AS category_name,
@@ -1470,6 +1554,9 @@ class BotRepository:
                 FROM owned o
                 JOIN categories c ON c.id = o.category_id
                 WHERE o.user_id IS NOT NULL
+                  -- Shared (receivable) splits are a ledger, never count
+                  -- toward category totals.
+                  AND COALESCE(c.is_receivable, FALSE) = FALSE
                 GROUP BY o.user_id, c.id, c.name
             )
             SELECT r.user_id, u.username, r.category_id, r.category_name,
@@ -1486,21 +1573,57 @@ class BotRepository:
 
     async def _leaderboard_household_query(self, conn, start: date, end: date):
         """Per-category totals across everyone, presented as 'Household' so
-        the screen shows data even when account-ownership rows are NULL."""
+        the screen shows data even when account-ownership rows are NULL.
+
+        Same parity rules as :meth:`_leaderboard_query` — split-aware,
+        sandbox-respecting, ``COALESCE(authorized_date, date)``.
+        """
+        from web.env_flags import reports_include_plaid_sandbox
+
+        sandbox_ex = (
+            ""
+            if reports_include_plaid_sandbox()
+            else " AND (t.source IS NULL OR t.source <> 'plaid_sandbox')"
+        )
         return await conn.fetch(
-            """
+            f"""
+            WITH actual AS (
+                SELECT t.category_id, t.amount_cents
+                FROM transactions t
+                WHERE COALESCE(t.authorized_date, t.date) >= $1
+                  AND COALESCE(t.authorized_date, t.date) < $2
+                  AND t.transaction_class = 'expense'
+                  AND NOT t.is_private
+                  AND NOT EXISTS (
+                      SELECT 1 FROM transaction_splits ts
+                      WHERE ts.parent_transaction_id = t.id
+                  )
+                  {sandbox_ex}
+
+                UNION ALL
+
+                SELECT ts.category_id, ts.amount_cents
+                FROM transaction_splits ts
+                JOIN transactions t ON t.id = ts.parent_transaction_id
+                WHERE COALESCE(t.authorized_date, t.date) >= $1
+                  AND COALESCE(t.authorized_date, t.date) < $2
+                  AND t.transaction_class = 'expense'
+                  AND NOT t.is_private
+                  {sandbox_ex}
+            )
             SELECT 0 AS user_id,
                    'Household' AS username,
                    c.id AS category_id,
                    c.name AS category_name,
-                   SUM(t.amount_cents) AS amount_cents
-            FROM transactions t
-            JOIN categories c ON c.id = t.category_id
-            WHERE t.date >= $1 AND t.date < $2
-              AND COALESCE(t.transaction_class, 'expense') = 'expense'
-              AND NOT t.is_private
+                   SUM(actual.amount_cents) AS amount_cents
+            FROM actual
+            JOIN categories c ON c.id = actual.category_id
+            -- Shared (receivable) splits are a ledger, never count toward
+            -- category totals — household leaderboard treats them the same
+            -- way the per-user one does.
+            WHERE COALESCE(c.is_receivable, FALSE) = FALSE
             GROUP BY c.id, c.name
-            ORDER BY SUM(t.amount_cents) DESC
+            ORDER BY SUM(actual.amount_cents) DESC
             LIMIT 8
             """,
             start,

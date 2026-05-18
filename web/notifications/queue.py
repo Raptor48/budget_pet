@@ -112,13 +112,18 @@ async def list_pending_for_user(
 ) -> List[Dict[str, Any]]:
     """Pull pending rows. Use ``bundle_into_id=None`` (default) to fetch
     rows that have not yet been folded into a parent brief.
+
+    Honours the ``not_before`` embargo so a row that just got hit by a
+    Telegram ``RetryAfter`` waits out its cooldown before becoming
+    visible to the dispatcher again.
     """
     pool = await get_pool()
     sql = (
         "SELECT id, type, priority, payload, dedup_key, scheduled_at, created_at "
         "FROM notifications_queue "
         "WHERE user_id = $1 AND sent_at IS NULL AND failed_at IS NULL "
-        "AND bundled_into_id IS NULL"
+        "AND bundled_into_id IS NULL "
+        "AND (not_before IS NULL OR not_before <= NOW())"
     )
     args: List[Any] = [user_id]
     if priorities:
@@ -160,6 +165,48 @@ async def mark_failed(notif_id: int, error: str) -> None:
             "UPDATE notifications_queue SET failed_at = NOW(), error = $2 WHERE id = $1",
             notif_id,
             error,
+        )
+
+
+async def defer_until(notif_id: int, retry_after_seconds: int) -> None:
+    """Telegram ``RetryAfter``: leave the row in the queue and stamp the
+    ``not_before`` embargo so :func:`list_pending_for_user` skips it for
+    ``retry_after_seconds`` before becoming eligible again.
+
+    Pre-fix, ``RetryAfter`` was caught by the dispatcher's broad ``except``
+    and the row was marked ``failed`` — silently dropping briefs whenever
+    Telegram rate-limited us. ``not_before`` keeps the row alive without
+    re-enqueueing on the next minute.
+    """
+    if retry_after_seconds <= 0:
+        return
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE notifications_queue
+               SET not_before = NOW() + ($2 || ' seconds')::interval
+             WHERE id = $1
+            """,
+            notif_id,
+            int(retry_after_seconds),
+        )
+
+
+async def defer_many_until(ids: List[int], retry_after_seconds: int) -> None:
+    """Bulk variant of :func:`defer_until` for brief sends. Same semantics."""
+    if not ids or retry_after_seconds <= 0:
+        return
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE notifications_queue
+               SET not_before = NOW() + ($2 || ' seconds')::interval
+             WHERE id = ANY($1::bigint[])
+            """,
+            ids,
+            int(retry_after_seconds),
         )
 
 

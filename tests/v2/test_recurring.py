@@ -354,11 +354,14 @@ class TestUserStatusFilter:
         sql = conn.fetch.call_args.args[0]
         # Filter is applied as: rs.user_status = ANY($N::text[])
         assert "rs.user_status = ANY(" in sql
-        # And the default array is active+paused.
+        # And the default array is active+paused+unsubscribed
+        # (the `unsubscribed` state is a pending-verification surface and
+        # stays visible alongside active so the "we'll verify in N days"
+        # pill is reachable; only the terminal `cancelled` is hidden).
         passed_array = next(
             (a for a in conn.fetch.call_args.args if isinstance(a, list)), None
         )
-        assert passed_array == ["active", "paused"]
+        assert passed_array == ["active", "paused", "unsubscribed"]
 
     @pytest.mark.asyncio
     async def test_explicit_cancelled_status(self):
@@ -410,8 +413,14 @@ class TestBulkApply:
             )
         assert updated == 2
         sql = conn.fetch.call_args.args[0]
-        assert "user_status  = 'cancelled'" in sql
-        assert "cancelled_at = NOW()" in sql
+        # Normalise whitespace before substring-matching — the formatting
+        # inside the UPDATE has loose alignment that gets adjusted when
+        # adjacent columns expand (e.g. when the unsubscribe lifecycle
+        # was added). The test cares about the operations, not column
+        # padding.
+        normalised = " ".join(sql.split())
+        assert "user_status = 'cancelled'" in normalised
+        assert "cancelled_at = NOW()" in normalised
 
     @pytest.mark.asyncio
     async def test_pause_passes_paused_until_arg(self):

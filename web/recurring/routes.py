@@ -13,7 +13,7 @@ from .repo import RecurringRepository
 
 router = APIRouter(prefix="/api/recurring", tags=["recurring"])
 
-VALID_USER_STATUSES = ("active", "paused", "cancelled")
+VALID_USER_STATUSES = ("active", "paused", "cancelled", "unsubscribed")
 
 
 def _repo() -> RecurringRepository:
@@ -41,8 +41,9 @@ async def list_streams(
     user_status: Optional[List[str]] = Query(
         None,
         description=(
-            "Repeatable filter on user_status. Values: active, paused, cancelled. "
-            "Default = active+paused (cancelled is hidden)."
+            "Repeatable filter on user_status. Values: "
+            "active, paused, unsubscribed, cancelled. "
+            "Default = active+paused+unsubscribed (cancelled is hidden)."
         ),
     ),
 ):
@@ -70,11 +71,22 @@ async def get_price_changes(_request: Request):
 
 @router.post("/bulk", response_model=RecurringBulkResult)
 async def bulk_apply(body: RecurringBulkAction):
-    """Apply one lifecycle action (cancel / pause / reactivate / snooze_price_change)
-    to a list of stream ids. Plaid does not let third-party subscriptions be
-    paused or cancelled via API — this endpoint only flips local state for KPI
-    and Insights filtering. The user is still expected to cancel with the
-    merchant directly.
+    """Apply one lifecycle action to a list of stream ids:
+
+    * ``cancel`` — terminal: stream disappears from the recurring list.
+    * ``pause`` — temporary mute, optional ``paused_until``.
+    * ``reactivate`` — back to ``active``.
+    * ``unsubscribe`` — pending verification. The user declared they
+      cancelled at the merchant; the nightly verifier confirms after one
+      cadence + grace, either moving the stream to ``cancelled`` (no
+      charge posted → confirmed) or firing a P0 alert (charge posted →
+      cancellation may not have gone through).
+    * ``snooze_price_change`` — hide the price-change badge for N days.
+
+    Plaid does not let third-party subscriptions be paused or cancelled
+    via API — this endpoint only flips local state for KPI / Insights
+    filtering. The user is still expected to cancel with the merchant
+    directly.
     """
     updated = await _repo().bulk_apply(
         ids=body.ids,

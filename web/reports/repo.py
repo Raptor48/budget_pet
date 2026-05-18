@@ -23,62 +23,63 @@ from typing import Any, Dict, List, Literal, Optional
 
 from web.db import get_pool
 from web.env_flags import reports_include_plaid_sandbox
+from web.finance.predicates import (
+    expense_predicate as _expense_predicate,
+    income_predicate as _income_predicate,
+    internal_transfer_predicate as _internal_transfer_predicate,
+    non_receivable_category_filter as _non_receivable_cat_filter,
+    # Re-exported for legacy callers (tests import the underscore name from
+    # this module) — there is no remaining in-file consumer, so ruff would
+    # flag it as unused. Keep until external imports of the legacy alias
+    # have been migrated to ``web.finance.predicates`` directly.
+    not_internal_transfer_predicate as _not_internal_transfer,  # noqa: F401
+    private_visibility_filter as _private_tx_filter_with_idx,
+    sandbox_exclusion_filter as _sandbox_tx_filter,
+)
 from web.merchant_rules.aliases import alias_join_sql
 
 logger = logging.getLogger(__name__)
 
 
-def _sandbox_tx_filter(alias: str = "t") -> str:
-    if reports_include_plaid_sandbox():
-        return ""
-    return f" AND ({alias}.source IS NULL OR {alias}.source <> 'plaid_sandbox')"
-
-
 def _sandbox_tx_filter_no_alias() -> str:
-    if reports_include_plaid_sandbox():
-        return ""
-    return " AND (source IS NULL OR source <> 'plaid_sandbox')"
+    """Convenience wrapper for queries that ``FROM transactions`` without
+    an alias. Equivalent to ``_sandbox_tx_filter('')`` — kept as a separate
+    name for readability at callsites."""
+    return _sandbox_tx_filter("")
 
 
-def _private_tx_filter_with_idx(alias: str, idx: int) -> str:
-    """Return SQL fragment using asyncpg-style $N placeholder."""
-    prefix = f"{alias}." if alias else ""
-    return (
-        f" AND (NOT {prefix}is_private OR EXISTS ("
-        f"SELECT 1 FROM accounts _pa WHERE _pa.id = {prefix}account_id AND _pa.user_id = ${idx}))"
-    )
-
-
-def _income_predicate(alias: str = "t") -> str:
-    """
-    Canonical SQL predicate for "transaction is income".
-
-    Thin wrapper around ``transaction_class = 'income'`` kept for callsite
-    clarity. Every income aggregate (Cash Flow, Income tab, Financial
-    Health) goes through this helper so changes to the definition
-    happen in one place.
-    """
-    prefix = f"{alias}." if alias else ""
-    return f"{prefix}transaction_class = 'income'"
-
-
-def _expense_predicate(alias: str = "t") -> str:
-    """Canonical predicate for "transaction is an expense". Symmetric to ``_income_predicate``."""
-    prefix = f"{alias}." if alias else ""
-    return f"{prefix}transaction_class = 'expense'"
-
-
-def _internal_transfer_predicate(alias: str = "t") -> str:
-    """Canonical predicate for "transaction is an internal transfer"."""
-    prefix = f"{alias}." if alias else ""
-    return f"{prefix}transaction_class = 'internal_transfer'"
-
-
-# Retained for backwards compatibility with imports/tests that still reference
-# the old helper. The new code paths use ``_expense_predicate`` instead.
-def _not_internal_transfer(alias: str = "t") -> str:
-    prefix = f"{alias}." if alias else ""
-    return f"{prefix}transaction_class <> 'internal_transfer'"
+# ---------------------------------------------------------------------------
+# Receivable carve-out (shared expenses)
+# ---------------------------------------------------------------------------
+#
+# A transaction split routed to a receivable category (Shared) is a
+# *ledger* entry, not real income/expense. Two SQL shapes are needed:
+#
+#   * For aggregates already JOINing ``categories``: just add
+#     ``_non_receivable_cat_filter(alias)`` to the WHERE clause and the
+#     receivable rows drop out of the bucket they would otherwise inflate.
+#
+#   * For aggregates that work at the transaction (parent) level —
+#     cash_flow, cash_flow_window, cash_flow_history — we need to:
+#       (a) drop transactions whose *parent* category is receivable (so a
+#           matched Zelle categorised Shared doesn't show up as income);
+#       (b) carve the receivable-split portion out of parents whose own
+#           category is NOT receivable (so a $200 Travel with a $150
+#           Shared split counts as $50 of expense, not $200).
+#
+# (b) is implemented as a LEFT JOIN LATERAL that per-row sums the
+# receivable splits of the parent; the expense CASE then subtracts it.
+# Constant fragment so cash_flow / cash_flow_window / cash_flow_history
+# all share the same shape.
+_RECEIVABLE_SPLIT_LATERAL = """
+LEFT JOIN LATERAL (
+    SELECT COALESCE(SUM(ts.amount_cents), 0) AS recv_cents
+    FROM transaction_splits ts
+    JOIN categories cs ON cs.id = ts.category_id
+    WHERE ts.parent_transaction_id = t.id
+      AND cs.is_receivable = TRUE
+) r ON TRUE
+"""
 
 
 class ReportsRepository:
@@ -91,7 +92,11 @@ class ReportsRepository:
         Returns ``internal_transfer_cents`` alongside income and expenses so
         the UI can reassure the user that, e.g., a $1,200 CC payment is
         recognized as a movement between their own accounts rather than
-        silently dropped.
+        silently dropped. The value is the **gross outflow side** of
+        internal transfers (``SUM(GREATEST(amount_cents, 0))``) — the
+        netted form was effectively zero on every cents-exact pair, which
+        defeated the field's purpose. Matches the docstring on
+        :class:`web.reports.models.CashFlowMonth`.
         """
         pool = await self._pool()
         private_filter = (
@@ -104,12 +109,15 @@ class ReportsRepository:
             row = await conn.fetchrow(
                 f"""
                 SELECT
-                    COALESCE(SUM(CASE WHEN {_income_predicate("t")} THEN -t.amount_cents ELSE 0 END), 0) AS income_cents,
-                    COALESCE(SUM(CASE WHEN {_expense_predicate("t")} THEN t.amount_cents ELSE 0 END), 0) AS expenses_cents,
-                    COALESCE(SUM(CASE WHEN {_internal_transfer_predicate("t")} THEN t.amount_cents ELSE 0 END), 0) AS internal_transfer_cents
+                    COALESCE(SUM(CASE WHEN {_income_predicate("t")} THEN -t.amount_cents + r.recv_cents ELSE 0 END), 0) AS income_cents,
+                    COALESCE(SUM(CASE WHEN {_expense_predicate("t")} THEN t.amount_cents - r.recv_cents ELSE 0 END), 0) AS expenses_cents,
+                    COALESCE(SUM(CASE WHEN {_internal_transfer_predicate("t")} THEN GREATEST(t.amount_cents, 0) ELSE 0 END), 0) AS internal_transfer_cents
                 FROM transactions t
+                LEFT JOIN categories c ON c.id = t.category_id
+                {_RECEIVABLE_SPLIT_LATERAL}
                 WHERE COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
                   AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
+                  {_non_receivable_cat_filter("c")}
                   {_sandbox_tx_filter("t")}
                   {private_filter}
                 """,
@@ -151,12 +159,15 @@ class ReportsRepository:
             row = await conn.fetchrow(
                 f"""
                 SELECT
-                    COALESCE(SUM(CASE WHEN {_income_predicate("t")} THEN -t.amount_cents ELSE 0 END), 0) AS income_cents,
-                    COALESCE(SUM(CASE WHEN {_expense_predicate("t")} THEN t.amount_cents ELSE 0 END), 0) AS expenses_cents,
-                    COALESCE(SUM(CASE WHEN {_internal_transfer_predicate("t")} THEN t.amount_cents ELSE 0 END), 0) AS internal_transfer_cents
+                    COALESCE(SUM(CASE WHEN {_income_predicate("t")} THEN -t.amount_cents + r.recv_cents ELSE 0 END), 0) AS income_cents,
+                    COALESCE(SUM(CASE WHEN {_expense_predicate("t")} THEN t.amount_cents - r.recv_cents ELSE 0 END), 0) AS expenses_cents,
+                    COALESCE(SUM(CASE WHEN {_internal_transfer_predicate("t")} THEN GREATEST(t.amount_cents, 0) ELSE 0 END), 0) AS internal_transfer_cents
                 FROM transactions t
+                LEFT JOIN categories c ON c.id = t.category_id
+                {_RECEIVABLE_SPLIT_LATERAL}
                 WHERE COALESCE(t.authorized_date, t.date) >= $1
                   AND COALESCE(t.authorized_date, t.date) <= $2
+                  {_non_receivable_cat_filter("c")}
                   {_sandbox_tx_filter("t")}
                   {private_filter}
                 """,
@@ -187,11 +198,14 @@ class ReportsRepository:
                 f"""
                 SELECT
                     TO_CHAR(COALESCE(t.authorized_date, t.date), 'YYYY-MM') AS month,
-                    COALESCE(SUM(CASE WHEN {_income_predicate("t")} THEN -t.amount_cents ELSE 0 END), 0) AS income_cents,
-                    COALESCE(SUM(CASE WHEN {_expense_predicate("t")} THEN t.amount_cents ELSE 0 END), 0) AS expenses_cents,
-                    COALESCE(SUM(CASE WHEN {_internal_transfer_predicate("t")} THEN t.amount_cents ELSE 0 END), 0) AS internal_transfer_cents
+                    COALESCE(SUM(CASE WHEN {_income_predicate("t")} THEN -t.amount_cents + r.recv_cents ELSE 0 END), 0) AS income_cents,
+                    COALESCE(SUM(CASE WHEN {_expense_predicate("t")} THEN t.amount_cents - r.recv_cents ELSE 0 END), 0) AS expenses_cents,
+                    COALESCE(SUM(CASE WHEN {_internal_transfer_predicate("t")} THEN GREATEST(t.amount_cents, 0) ELSE 0 END), 0) AS internal_transfer_cents
                 FROM transactions t
+                LEFT JOIN categories c ON c.id = t.category_id
+                {_RECEIVABLE_SPLIT_LATERAL}
                 WHERE COALESCE(t.authorized_date, t.date) >= (CURRENT_DATE - INTERVAL '1 month' * $1)::date
+                  {_non_receivable_cat_filter("c")}
                   {_sandbox_tx_filter("t")}
                   {private_filter}
                 GROUP BY month
@@ -253,6 +267,7 @@ class ReportsRepository:
                       AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
                       AND t.category_id IS NOT NULL
                       AND NOT EXISTS (SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id)
+                      {_non_receivable_cat_filter("c")}
                       {_sandbox_tx_filter("t")}
                       {private_filter}
                     GROUP BY bucket_id, m
@@ -270,6 +285,7 @@ class ReportsRepository:
                       AND COALESCE(t.authorized_date, t.date) >= (($1 || '-01')::date - (INTERVAL '1 month' * $2))
                       AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
                       AND ts.category_id IS NOT NULL
+                      {_non_receivable_cat_filter("c")}
                       {_sandbox_tx_filter("t")}
                       {private_filter}
                     GROUP BY bucket_id, m
@@ -356,10 +372,12 @@ class ReportsRepository:
                 WITH actual AS (
                     SELECT t.category_id, SUM(t.amount_cents) AS amount_cents
                     FROM transactions t
+                    LEFT JOIN categories c ON c.id = t.category_id
                     WHERE {_expense_predicate("t")}
                       AND COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
                       AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
                       AND NOT EXISTS (SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id)
+                      {_non_receivable_cat_filter("c")}
                       {_sandbox_tx_filter("t")}
                       {private_filter}
                       {parent_filter_txn}
@@ -370,9 +388,11 @@ class ReportsRepository:
                     SELECT ts.category_id, SUM(ts.amount_cents)
                     FROM transaction_splits ts
                     JOIN transactions t ON t.id = ts.parent_transaction_id
+                    LEFT JOIN categories cs ON cs.id = ts.category_id
                     WHERE {_expense_predicate("t")}
                       AND COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
                       AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
+                      {_non_receivable_cat_filter("cs")}
                       {_sandbox_tx_filter("t")}
                       {private_filter}
                       {parent_filter_split}
@@ -465,6 +485,11 @@ class ReportsRepository:
             idx += 1
         if not reports_include_plaid_sandbox():
             conditions.append("(t.source IS NULL OR t.source <> 'plaid_sandbox')")
+        # Exclude receivable-categorised rows so a shared-expense parent
+        # whose category was set to Shared (e.g. an auto-matched Zelle)
+        # doesn't inflate any tag bucket. The LEFT JOIN below makes
+        # ``c`` available.
+        conditions.append("COALESCE(c.is_receivable, FALSE) = FALSE")
         if viewer_user_id is not None:
             conditions.append(
                 f"(NOT t.is_private OR EXISTS ("
@@ -482,6 +507,7 @@ class ReportsRepository:
                     tg.color AS tag_color,
                     SUM(t.amount_cents) AS amount_cents
                 FROM transactions t
+                LEFT JOIN categories c ON c.id = t.category_id
                 JOIN transaction_tags tt ON tt.transaction_id = t.id
                 JOIN tags tg ON tg.id = tt.tag_id
                 WHERE {where}
@@ -515,6 +541,10 @@ class ReportsRepository:
             idx += 1
         if not reports_include_plaid_sandbox():
             conditions.append("(t.source IS NULL OR t.source <> 'plaid_sandbox')")
+        # Exclude receivable-categorised rows from the top-merchants list
+        # (a Zelle the matcher categorised Shared is settlement, not a
+        # merchant purchase).
+        conditions.append("COALESCE(c.is_receivable, FALSE) = FALSE")
         if viewer_user_id is not None:
             conditions.append(
                 f"(NOT t.is_private OR EXISTS ("
@@ -540,6 +570,7 @@ class ReportsRepository:
                     SUM(t.amount_cents) AS amount_cents,
                     COUNT(*) AS transaction_count
                 FROM transactions t
+                LEFT JOIN categories c ON c.id = t.category_id
                 {alias_join_sql("t", "ma")}
                 WHERE {where}
                 GROUP BY COALESCE(ma.display_name, t.merchant_name)
@@ -563,6 +594,13 @@ class ReportsRepository:
         (``accounts.user_id``); unassigned accounts show up as a ``null``
         user so the frontend can still surface them.
 
+        Split-aware: when an income transaction has rows in
+        ``transaction_splits`` (rare, but possible — e.g. a paycheck split
+        between "Salary" and "Bonus"), the split categories drive the
+        breakdown instead of the parent's category. Mirrors the pattern used
+        by :meth:`get_by_category` so the per-category total in the Income
+        tab matches Cash Flow's monthly income figure.
+
         Private transactions owned by other family members are filtered out
         for the requesting viewer, mirroring the rest of the reports module.
 
@@ -578,24 +616,44 @@ class ReportsRepository:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
+                WITH actual AS (
+                    SELECT t.account_id, t.category_id, t.amount_cents
+                    FROM transactions t
+                    LEFT JOIN categories c ON c.id = t.category_id
+                    WHERE COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
+                      AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
+                      AND {_income_predicate("t")}
+                      AND NOT EXISTS (SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id)
+                      {_non_receivable_cat_filter("c")}
+                      {_sandbox_tx_filter("t")}
+                      {private_filter}
+
+                    UNION ALL
+
+                    SELECT t.account_id, ts.category_id, ts.amount_cents
+                    FROM transaction_splits ts
+                    JOIN transactions t ON t.id = ts.parent_transaction_id
+                    LEFT JOIN categories cs ON cs.id = ts.category_id
+                    WHERE COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
+                      AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
+                      AND {_income_predicate("t")}
+                      {_non_receivable_cat_filter("cs")}
+                      {_sandbox_tx_filter("t")}
+                      {private_filter}
+                )
                 SELECT
                     a.user_id                     AS user_id,
                     u.username                    AS username,
-                    t.category_id                 AS category_id,
+                    actual.category_id            AS category_id,
                     COALESCE(c.name, 'Uncategorized') AS category_name,
                     c.color                       AS category_color,
-                    SUM(-t.amount_cents)          AS amount_cents,
+                    SUM(-actual.amount_cents)     AS amount_cents,
                     COUNT(*)                      AS transaction_count
-                FROM transactions t
-                JOIN accounts a ON a.id = t.account_id
+                FROM actual
+                JOIN accounts a ON a.id = actual.account_id
                 LEFT JOIN users u ON u.id = a.user_id
-                LEFT JOIN categories c ON c.id = t.category_id
-                WHERE COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
-                  AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
-                  AND {_income_predicate("t")}
-                  {_sandbox_tx_filter("t")}
-                  {private_filter}
-                GROUP BY a.user_id, u.username, t.category_id, c.name, c.color
+                LEFT JOIN categories c ON c.id = actual.category_id
+                GROUP BY a.user_id, u.username, actual.category_id, c.name, c.color
                 ORDER BY a.user_id NULLS LAST, amount_cents DESC
                 """,
                 *params,
@@ -650,6 +708,13 @@ class ReportsRepository:
         behavior. Categories whose net spend for the month is zero (a
         refund exactly cancelling a purchase) are omitted to keep the UI
         clean. Internal transfers are excluded by the class predicate.
+
+        Split-aware: when a transaction has rows in ``transaction_splits``,
+        the split categories drive the breakdown instead of the parent's
+        category. Mirrors the pattern used by :meth:`get_by_category` so the
+        per-category total in the Expenses tab matches Cash Flow's monthly
+        expense figure (the splits invariant guarantees the family-level
+        total is preserved).
         """
         pool = await self._pool()
         private_filter = (
@@ -661,25 +726,45 @@ class ReportsRepository:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
+                WITH actual AS (
+                    SELECT t.account_id, t.category_id, t.amount_cents
+                    FROM transactions t
+                    LEFT JOIN categories c ON c.id = t.category_id
+                    WHERE COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
+                      AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
+                      AND {_expense_predicate("t")}
+                      AND NOT EXISTS (SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id)
+                      {_non_receivable_cat_filter("c")}
+                      {_sandbox_tx_filter("t")}
+                      {private_filter}
+
+                    UNION ALL
+
+                    SELECT t.account_id, ts.category_id, ts.amount_cents
+                    FROM transaction_splits ts
+                    JOIN transactions t ON t.id = ts.parent_transaction_id
+                    LEFT JOIN categories cs ON cs.id = ts.category_id
+                    WHERE COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
+                      AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
+                      AND {_expense_predicate("t")}
+                      {_non_receivable_cat_filter("cs")}
+                      {_sandbox_tx_filter("t")}
+                      {private_filter}
+                )
                 SELECT
                     a.user_id                     AS user_id,
                     u.username                    AS username,
-                    t.category_id                 AS category_id,
+                    actual.category_id            AS category_id,
                     COALESCE(c.name, 'Uncategorized') AS category_name,
                     c.color                       AS category_color,
-                    SUM(t.amount_cents)           AS amount_cents,
+                    SUM(actual.amount_cents)      AS amount_cents,
                     COUNT(*)                      AS transaction_count
-                FROM transactions t
-                JOIN accounts a ON a.id = t.account_id
+                FROM actual
+                JOIN accounts a ON a.id = actual.account_id
                 LEFT JOIN users u ON u.id = a.user_id
-                LEFT JOIN categories c ON c.id = t.category_id
-                WHERE COALESCE(t.authorized_date, t.date) >= ($1 || '-01')::date
-                  AND COALESCE(t.authorized_date, t.date) < (($1 || '-01')::date + INTERVAL '1 month')
-                  AND {_expense_predicate("t")}
-                  {_sandbox_tx_filter("t")}
-                  {private_filter}
-                GROUP BY a.user_id, u.username, t.category_id, c.name, c.color
-                HAVING SUM(t.amount_cents) <> 0
+                LEFT JOIN categories c ON c.id = actual.category_id
+                GROUP BY a.user_id, u.username, actual.category_id, c.name, c.color
+                HAVING SUM(actual.amount_cents) <> 0
                 ORDER BY a.user_id NULLS LAST, amount_cents DESC
                 """,
                 *params,
@@ -976,21 +1061,25 @@ class ReportsRepository:
             income_params: list = []
             if viewer_user_id is not None:
                 income_params.append(viewer_user_id)
+            # Average over a fixed denominator of 3 (not over the number of
+            # non-empty months). A user with a one-month gap (vacation,
+            # mid-month migration) should see the gap drag the average down
+            # — otherwise the score jumps the moment the gap appears in the
+            # window. SUM/3 is what the docstring promises; AVG over a
+            # GROUP BY m would silently divide by 1 or 2.
             monthly_income = await conn.fetchval(
                 f"""
-                SELECT COALESCE(AVG(monthly_total), 0)
-                FROM (
-                    SELECT
-                        TO_CHAR(COALESCE(authorized_date, date), 'YYYY-MM') AS m,
-                        SUM(-amount_cents) AS monthly_total
-                    FROM transactions
-                    WHERE {_income_predicate("")}
-                      AND COALESCE(authorized_date, date) >= (DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '3 months')
-                      AND COALESCE(authorized_date, date) < DATE_TRUNC('month', CURRENT_DATE)
-                      {_sandbox_tx_filter_no_alias()}
-                      {income_filter}
-                    GROUP BY m
-                ) sub
+                SELECT COALESCE(SUM(-amount_cents) / 3.0, 0)
+                FROM transactions
+                WHERE {_income_predicate("")}
+                  AND COALESCE(authorized_date, date) >= (DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '3 months')
+                  AND COALESCE(authorized_date, date) < DATE_TRUNC('month', CURRENT_DATE)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM categories _c
+                       WHERE _c.id = transactions.category_id AND _c.is_receivable = TRUE
+                  )
+                  {_sandbox_tx_filter_no_alias()}
+                  {income_filter}
                 """,
                 *income_params,
             )
@@ -1009,6 +1098,10 @@ class ReportsRepository:
                 WHERE {_income_predicate("")}
                   AND COALESCE(authorized_date, date) >= (DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '12 months')
                   AND COALESCE(authorized_date, date) < DATE_TRUNC('month', CURRENT_DATE)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM categories _c
+                       WHERE _c.id = transactions.category_id AND _c.is_receivable = TRUE
+                  )
                   {_sandbox_tx_filter_no_alias()}
                   {annual_filter}
                 """,
@@ -1023,21 +1116,20 @@ class ReportsRepository:
             exp_params: list = []
             if viewer_user_id is not None:
                 exp_params.append(viewer_user_id)
+            # SUM/3 (fixed denominator) — see ``monthly_income`` above.
             monthly_expenses = await conn.fetchval(
                 f"""
-                SELECT COALESCE(AVG(monthly_total), 0)
-                FROM (
-                    SELECT
-                        TO_CHAR(COALESCE(authorized_date, date), 'YYYY-MM') AS m,
-                        SUM(amount_cents) AS monthly_total
-                    FROM transactions
-                    WHERE {_expense_predicate("")}
-                      AND COALESCE(authorized_date, date) >= (DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '3 months')
-                      AND COALESCE(authorized_date, date) < DATE_TRUNC('month', CURRENT_DATE)
-                      {_sandbox_tx_filter_no_alias()}
-                      {exp_filter}
-                    GROUP BY m
-                ) sub
+                SELECT COALESCE(SUM(amount_cents) / 3.0, 0)
+                FROM transactions
+                WHERE {_expense_predicate("")}
+                  AND COALESCE(authorized_date, date) >= (DATE_TRUNC('month', CURRENT_DATE) - INTERVAL '3 months')
+                  AND COALESCE(authorized_date, date) < DATE_TRUNC('month', CURRENT_DATE)
+                  AND NOT EXISTS (
+                      SELECT 1 FROM categories _c
+                       WHERE _c.id = transactions.category_id AND _c.is_receivable = TRUE
+                  )
+                  {_sandbox_tx_filter_no_alias()}
+                  {exp_filter}
                 """,
                 *exp_params,
             )
@@ -1049,20 +1141,23 @@ class ReportsRepository:
             avg_params: list = []
             if viewer_user_id is not None:
                 avg_params.append(viewer_user_id)
+            # SUM/6 over the trailing 6 months (fixed denominator) — see
+            # ``monthly_income``. The window is "last 6 months from today"
+            # (not "6 *completed* months"), preserved from the original code
+            # so the emergency-fund estimate keeps surfacing recent spend
+            # the same week of the month it would have before this fix.
             avg_expenses = await conn.fetchval(
                 f"""
-                SELECT COALESCE(AVG(monthly_total), 0)
-                FROM (
-                    SELECT
-                        TO_CHAR(COALESCE(authorized_date, date), 'YYYY-MM') AS m,
-                        SUM(amount_cents) AS monthly_total
-                    FROM transactions
-                    WHERE {_expense_predicate("")}
-                      AND COALESCE(authorized_date, date) >= (CURRENT_DATE - INTERVAL '6 months')
-                      {_sandbox_tx_filter_no_alias()}
-                      {avg_filter}
-                    GROUP BY m
-                ) sub
+                SELECT COALESCE(SUM(amount_cents) / 6.0, 0)
+                FROM transactions
+                WHERE {_expense_predicate("")}
+                  AND COALESCE(authorized_date, date) >= (CURRENT_DATE - INTERVAL '6 months')
+                  AND NOT EXISTS (
+                      SELECT 1 FROM categories _c
+                       WHERE _c.id = transactions.category_id AND _c.is_receivable = TRUE
+                  )
+                  {_sandbox_tx_filter_no_alias()}
+                  {avg_filter}
                 """,
                 *avg_params,
             )

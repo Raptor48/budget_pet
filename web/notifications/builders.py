@@ -77,6 +77,39 @@ def _render_subscription_creep(payload: Dict[str, Any]) -> str:
     )
 
 
+def _render_unsubscribe_charge_detected(
+    payload: Dict[str, Any],
+) -> Tuple[str, List[List[Tuple[str, str]]]]:
+    """P0: user marked a stream as unsubscribed, but a fresh charge posted.
+
+    The action buttons mirror the three realistic responses:
+      * Reactivate — "yeah I changed my mind, treat it as active again";
+      * Keep unsubscribed — "this charge is a leftover, I trust my cancel
+        is in flight" (silences the next dedup window);
+      * Mark cancelled — "the charge is being disputed, force-confirm
+        the cancel" (terminal).
+    """
+    name = payload.get("name") or "Subscription"
+    amount = int(payload.get("amount_cents") or 0)
+    currency = payload.get("currency") or "USD"
+    charge_date = payload.get("charge_date") or ""
+    stream_id = payload.get("stream_id")
+    body = (
+        "⚠️ You unsubscribed from <b>"
+        f"{name}</b>, but a {_money(amount, currency)} charge posted "
+        f"on {charge_date}. Cancellation may not have gone through."
+    )
+    keyboard: List[List[Tuple[str, str]]] = []
+    if stream_id is not None:
+        keyboard = [
+            [
+                ("↩️ Reactivate", f"unsub:reactivate:{stream_id}"),
+                ("🚫 Mark cancelled", f"unsub:cancel:{stream_id}"),
+            ]
+        ]
+    return (body, keyboard)
+
+
 def _render_milestone(payload: Dict[str, Any]) -> str:
     threshold = payload.get("threshold_cents", 0)
     label = payload.get("label") or "Milestone"
@@ -135,6 +168,7 @@ _RENDERERS = {
     "plaid_reauth": _render_plaid_reauth,
     "new_merchant": _render_new_merchant,
     "subscription_creep": _render_subscription_creep,
+    "unsubscribe_charge_detected": _render_unsubscribe_charge_detected,
     "milestone": _render_milestone,
     "leaderboard": _render_leaderboard,
     "streak_milestone": _render_streak_milestone,

@@ -461,6 +461,221 @@ async def _migrate_merchant_seen_by_key(conn) -> None:
     )
 
 
+async def _migrate_telegram_seen_updates(conn) -> None:
+    """V2.3 hot-fix: idempotency table for Telegram webhook deliveries.
+
+    Telegram guarantees *at-least-once* delivery — if our 200 response is
+    delayed (Railway cold start, DB lock, etc.) the same ``update_id``
+    arrives a second time. Without dedup the side effects (cash entry,
+    OCR billing, /chores ack) fired twice. The table is keyed by the
+    Telegram-supplied ``update_id`` and pruned on a rolling 1-hour window
+    so it stays small. Insertions are ``ON CONFLICT DO NOTHING`` and the
+    webhook returns 200 immediately when the update was already seen.
+    """
+    await _ddl(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS telegram_seen_updates (
+            update_id BIGINT PRIMARY KEY,
+            seen_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+    )
+    await _ddl(
+        conn,
+        """
+        CREATE INDEX IF NOT EXISTS telegram_seen_updates_seen_at_idx
+            ON telegram_seen_updates(seen_at)
+        """,
+    )
+
+
+async def _migrate_users_telegram_blocked(conn) -> None:
+    """V2.3 hot-fix: ``users.telegram_blocked`` so the dispatcher stops
+    re-sending to chats where the bot has been blocked or kicked.
+
+    Before this column the loop kept retrying every minute and producing
+    a steady stream of ``Forbidden: bot was blocked by the user`` errors
+    in ``bot_activity_log``. The dispatcher now flips this flag the
+    first time it sees a permanent Telegram error and short-circuits all
+    subsequent sends for that user.
+    """
+    await _ddl(
+        conn,
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS telegram_blocked BOOLEAN NOT NULL DEFAULT FALSE",
+    )
+
+
+async def _migrate_bot_llm_usage(conn) -> None:
+    """V2.3: ``bot_llm_usage`` — per-user daily counter for LLM calls.
+
+    Used by :mod:`web.telegram.cash_parser` to cap how many times the
+    smart cash-entry fallback hits OpenAI per user per day. Without a
+    cap a user with broken keyboard mashing could rack up real cost
+    (gpt-4o-mini is cheap but not free). Default cap is 30/day; the
+    quota resets at UTC midnight.
+
+    Composite primary key on (user_id, day) lets us upsert atomically
+    via ``ON CONFLICT``. Days older than ~30 are pruned by the daily
+    log-prune job alongside ``bot_activity_log`` for storage hygiene.
+    """
+    await _ddl(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS bot_llm_usage (
+            user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            day        DATE    NOT NULL,
+            calls      INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (user_id, day)
+        )
+        """,
+    )
+
+
+async def _migrate_notifications_queue_not_before(conn) -> None:
+    """V2.3 hot-fix: ``notifications_queue.not_before`` so the dispatcher
+    can honour Telegram ``RetryAfter`` (HTTP 429) without losing the
+    enqueued row.
+
+    Pre-fix: a 429 was caught by the dispatcher's broad ``except`` and the
+    row was marked ``failed``. The next tick re-enqueued nothing (failed
+    row), so the brief silently went missing. Post-fix: ``RetryAfter``
+    leaves the row pending, stamps ``not_before = now + retry_seconds``,
+    and the queue selector's pending filter excludes rows whose embargo
+    hasn't lifted.
+    """
+    await _ddl(
+        conn,
+        "ALTER TABLE notifications_queue ADD COLUMN IF NOT EXISTS not_before TIMESTAMPTZ",
+    )
+
+
+async def _migrate_recurring_price_snapshots_alerted(conn) -> None:
+    """V2.3 hot-fix: ``recurring_price_snapshots.alerted_at`` — per-snapshot
+    "we already told the user about this price change" stamp.
+
+    The bug it fixes: ``detect_subscription_changes`` decided a stream had
+    a price change purely by comparing the two latest snapshots
+    (``history[0] != history[1]``). ``record_recurring_amount`` is a no-op
+    when the amount is unchanged, so once Plaid reports a new price the
+    history freezes at ``[new, old]`` forever. The producer re-detected
+    "price changed!" on every run, and the 24h ``notifications_queue``
+    dedup expired every night — so the *same* "Con Edison $133.66 →
+    $134.57" line shipped in the morning brief every single day.
+
+    The first-detection path was already protected by
+    ``recurring_streams.subscription_alerted_at``; this is the matching
+    stamp for the price-change path, but at *snapshot* granularity so a
+    genuinely new price change (new snapshot row) still alerts exactly
+    once.
+
+    Backfill: every existing snapshot is stamped ``alerted_at = NOW()``.
+    Anything already in the table predates this migration, so the user
+    has either already seen the alert or it's stale — either way, do not
+    re-alert. The next genuine price change inserts a fresh, un-stamped
+    snapshot and alerts normally.
+    """
+    await _ddl(
+        conn,
+        "ALTER TABLE recurring_price_snapshots "
+        "ADD COLUMN IF NOT EXISTS alerted_at TIMESTAMPTZ",
+    )
+    await conn.execute(
+        "UPDATE recurring_price_snapshots SET alerted_at = NOW() "
+        "WHERE alerted_at IS NULL"
+    )
+
+
+async def _migrate_shared_expense_lifecycle(conn) -> None:
+    """V2.3: shared-expense lifecycle (receivable category + split metadata).
+
+    Three additive schema bumps + one seed row:
+
+    * ``categories.is_receivable BOOLEAN`` — flips a category into ledger
+      mode. Splits routed to a receivable category are *excluded* from
+      every income/expense aggregation in the app, so a $200 Travel
+      transaction split as ``$50 Travel + $150 Shared`` counts as $50 of
+      expense, $150 as receivable balance (not income, not expense).
+
+    * ``transaction_splits.counterparty TEXT`` — optional free-form tag
+      (e.g. "Alex") so per-person balances are computable later without
+      a separate friends table. Phase 1 surfaces it as a chip under the
+      Description; Phase 2 will group it into Events.
+
+    * ``transaction_splits.auto_matched_at TIMESTAMPTZ`` — stamped when
+      the auto-matcher (web/transactions/shared_matcher.py) decides an
+      incoming Zelle/cash is the return for an outstanding receivable.
+      Drives the "🔗 matched" badge in the UI so the user can see the
+      auto-assignment and unlink it with one click.
+
+    Also relaxes the ``categories_source_check`` CHECK so we can mark
+    the seeded Shared row as ``source = 'system'`` (so users can't
+    rename or delete it).
+
+    Idempotent — every statement is ADD IF NOT EXISTS / DROP+ADD
+    constraint / INSERT … ON CONFLICT DO NOTHING.
+    """
+    # 1. New columns
+    for stmt in (
+        "ALTER TABLE categories ADD COLUMN IF NOT EXISTS is_receivable BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE transaction_splits ADD COLUMN IF NOT EXISTS counterparty TEXT",
+        "ALTER TABLE transaction_splits ADD COLUMN IF NOT EXISTS auto_matched_at TIMESTAMPTZ",
+    ):
+        await _ddl(conn, stmt)
+
+    # 2. Widen categories_source_check to allow 'system'. Drop + recreate
+    # is the only idempotent path since pg has no "ALTER CHECK" verb.
+    await _ddl(
+        conn,
+        "ALTER TABLE categories DROP CONSTRAINT IF EXISTS categories_source_check",
+    )
+    await _ddl(
+        conn,
+        """
+        ALTER TABLE categories ADD CONSTRAINT categories_source_check
+        CHECK (source IN ('plaid_pfc', 'custom', 'system'))
+        """,
+    )
+
+    # 3. Seed the one and only Shared system category. Name is UNIQUE
+    # so ON CONFLICT DO NOTHING gives us idempotency for free. The
+    # category is global (single row for the whole household — categories
+    # in this app are not per-user). is_receivable = TRUE is what
+    # excludes its splits from income/expense math.
+    await conn.execute(
+        """
+        INSERT INTO categories (name, source, color, icon, is_receivable)
+        VALUES ('Shared', 'system', '#14b8a6', 'HandCoins', TRUE)
+        ON CONFLICT (name) DO NOTHING
+        """,
+    )
+    # Defensive: if a 'Shared' category was hand-created before this
+    # migration shipped, flip it into receivable mode and stamp the
+    # system source so the auto-matcher can find it. NOOP otherwise.
+    await conn.execute(
+        """
+        UPDATE categories
+           SET is_receivable = TRUE,
+               source        = 'system',
+               color         = COALESCE(NULLIF(color, ''), '#14b8a6'),
+               icon          = COALESCE(NULLIF(icon, ''), 'HandCoins')
+         WHERE name = 'Shared'
+        """,
+    )
+
+    # 4. Index for the auto-matcher's "outstanding receivable splits in
+    # the last N days" lookup. Partial — only receivable rows qualify,
+    # which is a tiny fraction of all splits.
+    await _ddl(
+        conn,
+        """
+        CREATE INDEX IF NOT EXISTS idx_transaction_splits_receivable_lookup
+            ON transaction_splits (category_id, created_at)
+         WHERE category_id IS NOT NULL
+        """,
+    )
+
+
 async def _migrate_couple_settings_last_brief_sent(conn) -> None:
     """V2.3: add ``couple_settings.last_brief_sent_date`` so the dispatcher can
     de-dup the morning/Sunday brief within a single local day.
@@ -497,4 +712,10 @@ async def run_bot_migrations(pool) -> None:
                 raise
         await _migrate_merchant_seen_by_key(conn)
         await _migrate_couple_settings_last_brief_sent(conn)
+        await _migrate_telegram_seen_updates(conn)
+        await _migrate_users_telegram_blocked(conn)
+        await _migrate_notifications_queue_not_before(conn)
+        await _migrate_bot_llm_usage(conn)
+        await _migrate_recurring_price_snapshots_alerted(conn)
+        await _migrate_shared_expense_lifecycle(conn)
     logger.info("Bot v1 migrations complete.")

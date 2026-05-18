@@ -12,7 +12,7 @@ class CategoryOut(BaseModel):
     color: str = "#3b82f6"
     icon: Optional[str] = None
     pfc_icon_url: Optional[str] = None
-    source: Literal["plaid_pfc", "custom"] = "custom"
+    source: Literal["plaid_pfc", "custom", "system"] = "custom"
     created_at: datetime
     # NULL = top-level (primary/custom root). Depth is always ≤ 2 in the DB.
     parent_id: Optional[int] = None
@@ -21,6 +21,12 @@ class CategoryOut(BaseModel):
     # Financial Health, ...). Defaults are seeded from Plaid PFC=INCOME and
     # can be toggled per family via PATCH /api/categories/{id}.
     is_income: bool = False
+    # When TRUE the category behaves as a *ledger*, not a real income/expense
+    # bucket: its splits are excluded from every income/expense aggregate,
+    # and the SUM(amount_cents) tells you outstanding balance (positive =
+    # owed to you, negative = you owe). Used by the built-in ``Shared``
+    # category and any future receivable-style buckets.
+    is_receivable: bool = False
 
     class Config:
         from_attributes = True

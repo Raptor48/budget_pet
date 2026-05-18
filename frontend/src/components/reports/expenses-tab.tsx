@@ -37,9 +37,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { MonthYearPicker } from "@/components/ui/month-year-picker";
-import { reportsApi, transactionsApi } from "@/lib/api";
+import { categoriesApi, reportsApi, transactionsApi } from "@/lib/api";
+import { effectiveAmountForBucket, hasShareCarveOut } from "@/lib/splits";
 import { cn } from "@/lib/utils";
-import type { ExpenseByUser, ExpenseSource, Transaction } from "@/types/v2";
+import type { Category, ExpenseByUser, ExpenseSource, Transaction } from "@/types/v2";
 
 import { ExpenseCategoriesDialog } from "./expense-categories-dialog";
 import { ExpensesMathHelp } from "./reports-math-help";
@@ -307,6 +308,19 @@ function ExpenseSourceRow({
     staleTime: 30_000,
   });
 
+  // Drill-down rendered ``tx.amount_cents`` (parent total) even when
+  // splits routed part of the expense to another bucket — e.g. a $135
+  // MTA with a $90 Shared split showed up as $135 under Transit even
+  // though only $45 counted. Pull the categories list (cached) and use
+  // it to compute the per-bucket effective amount per row.
+  const { data: categories = [] } = useQuery({
+    queryKey: ["categories"],
+    queryFn: () => categoriesApi.list(),
+    staleTime: 5 * 60_000,
+    enabled: expanded,
+  });
+  const categoryById = new Map<number, Category>(categories.map((c) => [c.id, c]));
+
   const negative = source.amount_cents < 0;
 
   return (
@@ -381,7 +395,13 @@ function ExpenseSourceRow({
           {txQuery.data && txQuery.data.length > 0 && (
             <ul className="space-y-1">
               {txQuery.data.map((tx) => {
-                const isRefund = tx.amount_cents < 0;
+                const effective = effectiveAmountForBucket(
+                  tx, source.category_id ?? null, "detailed", categoryById,
+                );
+                const isRefund = effective < 0;
+                const carveOut = hasShareCarveOut(
+                  tx, source.category_id ?? null, "detailed", categoryById,
+                );
                 return (
                   <li
                     key={tx.id}
@@ -409,6 +429,14 @@ function ExpenseSourceRow({
                           refund
                         </span>
                       )}
+                      {carveOut && (
+                        <span
+                          className="shrink-0 rounded bg-teal-500/15 px-1.5 py-0.5 text-[10px] font-medium text-teal-700 dark:text-teal-300"
+                          title={`Your share of ${formatMoney(Math.abs(tx.amount_cents))} — the rest is in another category (e.g. Shared).`}
+                        >
+                          split · {formatMoney(Math.abs(tx.amount_cents))}
+                        </span>
+                      )}
                     </span>
                     <span
                       className={cn(
@@ -419,7 +447,7 @@ function ExpenseSourceRow({
                       )}
                     >
                       {isRefund ? "−" : ""}
-                      {formatMoney(Math.abs(tx.amount_cents))}
+                      {formatMoney(Math.abs(effective))}
                     </span>
                   </li>
                 );
