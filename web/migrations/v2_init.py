@@ -784,6 +784,15 @@ async def _migrate_merchant_logos(conn) -> None:
         )
         """,
     )
+    # Read-path JOINs match case-insensitively (Plaid's display titles
+    # drift in casing for the same merchant), so back the LOWER() lookup
+    # with a functional index. Cheap — the table is small, but keeps the
+    # scalar subquery off a seq-scan-per-row plan as it grows.
+    await _ddl(
+        conn,
+        "CREATE INDEX IF NOT EXISTS idx_merchant_logos_lower_name "
+        "ON merchant_logos (LOWER(merchant_name))",
+    )
 
 
 async def _migrate_merchant_aliases_website(conn) -> None:

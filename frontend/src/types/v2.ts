@@ -313,6 +313,10 @@ export interface Transaction {
    * The server already layers this onto ``display_title``; the field is exposed so the UI
    * can render an "aliased" affordance and expose a quick revert. */
   merchant_alias?: string | null;
+  /** Original (pre-alias) display title. Equals ``display_title`` when no alias is set.
+   * Use this — not the aliased ``display_title`` — to derive the alias merchant_key for
+   * rows without a ``merchant_name`` (ACH / checks), otherwise a second edit drifts the key. */
+  merchant_label?: string | null;
 }
 
 export interface TransactionFilters {

@@ -189,6 +189,15 @@ class MerchantAliasesRepository:
                     else (existing["display_name"] if existing else None)
                 )
                 if not merged_display:
+                    # Logo/website-only edit on a merchant with no prior
+                    # alias: don't force the user to type a rename — fall
+                    # back to the merchant's own label so the NOT NULL
+                    # display_name is satisfied with a sensible value.
+                    # ``nm`` is the raw merchant_name; ``fallback_display``
+                    # is the original (pre-alias) display title the client
+                    # passes as ``merchant_label``.
+                    merged_display = nm or (fallback_display or "").strip()
+                if not merged_display:
                     raise ValueError(
                         "display_name is required to create a merchant override"
                     )

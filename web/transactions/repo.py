@@ -13,6 +13,37 @@ from web.merchant_rules.aliases import alias_join_sql
 logger = logging.getLogger(__name__)
 
 
+def _merchant_logo_subquery(key_expr: str) -> str:
+    """Case-insensitive scalar lookup of the best cached merchant logo.
+
+    Returns at most one ``logo_url`` (scalar subquery — no LEFT JOIN
+    row multiplication when a merchant has multiple casing variants in
+    ``merchant_logos``), preferring a ``user_curated`` pick over an
+    auto-resolved one, and skipping rows with no logo (``no_hit``).
+
+    Case-insensitive because Plaid's display titles drift in casing for
+    the same merchant ("Rover Rover ST" vs "Rover Rover St"); without
+    LOWER() a user's curated logo would only cover the exact-cased rows
+    they happened to open. Backed by ``idx_merchant_logos_lower_name``.
+
+    ``key_expr`` is the SQL expression for the merchant key in the outer
+    query — ``COALESCE(merchant_name, display_title)`` for transactions,
+    ``rs.merchant_name`` for recurring streams.
+    """
+    return f"""(
+        SELECT _ml.logo_url
+        FROM merchant_logos _ml
+        WHERE LOWER(_ml.merchant_name) = LOWER({key_expr})
+          AND _ml.logo_url IS NOT NULL
+        ORDER BY (_ml.status = 'user_curated') DESC
+        LIMIT 1
+    )"""
+
+
+# Merchant key expression shared by both transaction read paths.
+_TX_MERCHANT_KEY = "COALESCE(NULLIF(t.merchant_name, ''), NULLIF(t.display_title, ''))"
+
+
 def _apply_alias_inplace(rows: List[Dict[str, Any]]) -> None:
     """Override ``display_title`` with the user's merchant alias when present.
 
@@ -20,8 +51,19 @@ def _apply_alias_inplace(rows: List[Dict[str, Any]]) -> None:
     historical row of the same merchant_key. ``merchant_alias`` stays in the
     response so the UI can render an "aliased" affordance and offer a quick
     revert. ``display_title`` in the DB remains the auto-normalized value.
+
+    Before overwriting, the *original* title is preserved in
+    ``merchant_label``. This matters for the rename/curate popover: it
+    derives the alias ``merchant_key`` from the title when a row has no
+    ``merchant_name`` (ACH / checks). If it derived from the *aliased*
+    title, the key would drift (e.g. "Rover Rover ST" → alias "Rover" →
+    key "name:rover" instead of the stored "name:rover rover st"), and a
+    second edit would miss the existing alias row and error out. Clients
+    use ``merchant_label`` for key derivation, ``display_title`` for
+    display.
     """
     for r in rows:
+        r.setdefault("merchant_label", r.get("display_title"))
         alias = r.get("merchant_alias")
         if alias:
             r["display_title"] = alias
@@ -182,15 +224,14 @@ class TransactionsRepository:
                        t.merchant_name,
                        t.merchant_entity_id,
                        -- Plaid's licensed logo wins when present (higher
-                       -- quality, served from Plaid's CDN). The Brandfetch
-                       -- fallback (web/enrichment/) fills in merchants
-                       -- Plaid doesn't have, joined via merchant_logos.
-                       -- The JOIN below keys on COALESCE(merchant_name,
-                       -- display_title) so Zelle / Wells Fargo / etc.
-                       -- (where Plaid leaves merchant_name NULL but our
-                       -- display title is a real brand) still hit the
-                       -- cache.
-                       COALESCE(NULLIF(t.logo_url, ''), ml.logo_url) AS logo_url,
+                       -- quality, served from Plaid's CDN). The Brandfetch /
+                       -- user-curated fallback (web/enrichment/) fills in
+                       -- merchants Plaid doesn't have, via a case-insensitive
+                       -- scalar lookup keyed on COALESCE(merchant_name,
+                       -- display_title) so Zelle / Wells Fargo / etc. (NULL
+                       -- merchant_name) still resolve.
+                       COALESCE(NULLIF(t.logo_url, ''),
+                                """ + _merchant_logo_subquery(_TX_MERCHANT_KEY) + """) AS logo_url,
                        t.website,
                        t.payment_channel,
                        t.pfc_primary,
@@ -222,20 +263,24 @@ class TransactionsRepository:
         else:
             # `t.*` carries logo_url through unchanged; the Python merge
             # below stitches in the Brandfetch fallback when Plaid's
-            # column is empty. Selecting `ml.logo_url AS _ml_logo_url`
-            # under a stash name avoids the duplicate-column error that
-            # a bare `ml.logo_url` would trigger against `t.*`.
-            select_tx = """
+            # column is empty. The scalar subquery (stashed under
+            # `_ml_logo_url`) avoids the duplicate-column error a bare
+            # `ml.logo_url` would trigger against `t.*`.
+            select_tx = (
+                """
                 SELECT t.*,
                        a.name     AS account_name,
                        a.mask     AS account_mask,
                        u.username AS owner_username,
                        ma.display_name AS merchant_alias,
-                       ml.logo_url AS _ml_logo_url,
+                       """
+                + _merchant_logo_subquery(_TX_MERCHANT_KEY)
+                + """ AS _ml_logo_url,
                        EXISTS(SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id) AS has_splits,
                        EXISTS(SELECT 1 FROM receipts r WHERE r.transaction_id = t.id) AS has_receipt
                 FROM transactions t
             """
+            )
 
         pool = await self._pool()
         async with pool.acquire() as conn:
@@ -245,8 +290,6 @@ class TransactionsRepository:
                 LEFT JOIN accounts a ON a.id = t.account_id
                 LEFT JOIN users u ON a.user_id = u.id
                 {alias_join_sql("t", "ma")}
-                LEFT JOIN merchant_logos ml ON ml.merchant_name =
-                    COALESCE(NULLIF(t.merchant_name, ''), NULLIF(t.display_title, ''))
                 WHERE {where}
                 ORDER BY COALESCE(t.authorized_date, t.date) DESC, t.id DESC
                 LIMIT ${idx} OFFSET ${idx + 1}
@@ -331,19 +374,17 @@ class TransactionsRepository:
                        ma.display_name AS merchant_alias,
                        -- Brandfetch / user-curated logo fallback. Mirrors
                        -- list_transactions: `t.*` already carries logo_url,
-                       -- so we stash the join column under a separate name
+                       -- so we stash the scalar lookup under a separate name
                        -- and merge in Python below (can't COALESCE inside a
-                       -- `*`). Keyed on COALESCE(merchant_name, display_title)
-                       -- so Zelle / Wells Fargo (NULL merchant_name) hit too.
-                       ml.logo_url AS _ml_logo_url,
+                       -- `*`). Case-insensitive, keyed on
+                       -- COALESCE(merchant_name, display_title).
+                       {_merchant_logo_subquery(_TX_MERCHANT_KEY)} AS _ml_logo_url,
                        EXISTS(SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id) AS has_splits,
                        EXISTS(SELECT 1 FROM receipts r WHERE r.transaction_id = t.id) AS has_receipt
                 FROM transactions t
                 LEFT JOIN accounts a ON a.id = t.account_id
                 LEFT JOIN users u ON a.user_id = u.id
                 {alias_join_sql("t", "ma")}
-                LEFT JOIN merchant_logos ml ON ml.merchant_name =
-                    COALESCE(NULLIF(t.merchant_name, ''), NULLIF(t.display_title, ''))
                 WHERE t.id = $1
                 """,
                 transaction_id,
