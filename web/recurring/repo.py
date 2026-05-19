@@ -289,9 +289,39 @@ class RecurringRepository:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
-                SELECT rs.*
+                SELECT
+                    rs.*,
+                    ma.display_name AS merchant_alias,
+                    -- Same two-source logo resolution as list_streams:
+                    -- Plaid's licensed asset (most recent tx for the
+                    -- merchant) wins, else the merchant_logos cache
+                    -- (Brandfetch / user_curated) via a case-insensitive
+                    -- lookup. Without this the dashboard price-change
+                    -- tiles always fell back to the gradient avatar.
+                    COALESCE(
+                        tx_logos.logo_url,
+                        (
+                            SELECT _ml.logo_url
+                            FROM merchant_logos _ml
+                            WHERE LOWER(_ml.merchant_name) = LOWER(rs.merchant_name)
+                              AND _ml.logo_url IS NOT NULL
+                            ORDER BY (_ml.status = 'user_curated') DESC
+                            LIMIT 1
+                        )
+                    ) AS logo_url
                 FROM recurring_streams rs
                 LEFT JOIN accounts a ON a.id = rs.account_id
+                LEFT JOIN merchant_aliases ma ON ma.merchant_key =
+                    'name:' || lower(NULLIF(TRIM(rs.merchant_name), ''))
+                LEFT JOIN (
+                    SELECT DISTINCT ON (merchant_name)
+                           merchant_name, logo_url
+                    FROM transactions
+                    WHERE merchant_name IS NOT NULL
+                      AND logo_url      IS NOT NULL
+                    ORDER BY merchant_name, date DESC NULLS LAST
+                ) tx_logos
+                  ON tx_logos.merchant_name = rs.merchant_name
                 WHERE rs.is_active = TRUE
                   AND rs.user_status <> 'cancelled'
                   AND (rs.price_change_snoozed_until IS NULL
@@ -304,7 +334,20 @@ class RecurringRepository:
                 """,
                 *params,
             )
-        out = [dict(r) for r in rows]
+        out: List[Dict[str, Any]] = []
+        for row in rows:
+            d = dict(row)
+            # Mirror list_streams so the rename shows on price-change
+            # surfaces too (same precedence: user_label > alias/merchant > description).
+            d["display_title"] = normalize_transaction_title(
+                {
+                    "merchant_name": d.get("merchant_alias") or d.get("merchant_name"),
+                    "name": d.get("description"),
+                    "description": d.get("description"),
+                    "user_label": d.get("user_label"),
+                }
+            )
+            out.append(d)
         _sort_streams_by_next_payment(out)
         return out
 
