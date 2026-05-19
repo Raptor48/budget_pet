@@ -185,6 +185,11 @@ class TransactionsRepository:
                        -- quality, served from Plaid's CDN). The Brandfetch
                        -- fallback (web/enrichment/) fills in merchants
                        -- Plaid doesn't have, joined via merchant_logos.
+                       -- The JOIN below keys on COALESCE(merchant_name,
+                       -- display_title) so Zelle / Wells Fargo / etc.
+                       -- (where Plaid leaves merchant_name NULL but our
+                       -- display title is a real brand) still hit the
+                       -- cache.
                        COALESCE(NULLIF(t.logo_url, ''), ml.logo_url) AS logo_url,
                        t.website,
                        t.payment_channel,
@@ -240,7 +245,8 @@ class TransactionsRepository:
                 LEFT JOIN accounts a ON a.id = t.account_id
                 LEFT JOIN users u ON a.user_id = u.id
                 {alias_join_sql("t", "ma")}
-                LEFT JOIN merchant_logos ml ON ml.merchant_name = t.merchant_name
+                LEFT JOIN merchant_logos ml ON ml.merchant_name =
+                    COALESCE(NULLIF(t.merchant_name, ''), NULLIF(t.display_title, ''))
                 WHERE {where}
                 ORDER BY COALESCE(t.authorized_date, t.date) DESC, t.id DESC
                 LIMIT ${idx} OFFSET ${idx + 1}
