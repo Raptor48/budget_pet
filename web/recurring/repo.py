@@ -212,6 +212,11 @@ class RecurringRepository:
                     ORDER BY merchant_name, date DESC NULLS LAST
                 ) tx_logos
                   ON tx_logos.merchant_name = rs.merchant_name
+                -- Recurring streams keep ``rs.merchant_name`` populated
+                -- whenever Plaid had it on the source transactions, so
+                -- this JOIN matches the same cache key the transactions
+                -- repo writes under (no COALESCE with display_title
+                -- needed — recurring rows wouldn't have a useful one).
                 LEFT JOIN merchant_logos ml
                   ON ml.merchant_name = rs.merchant_name
                 {where}
