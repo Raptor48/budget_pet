@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -20,15 +21,64 @@ import {
   LayoutDashboard,
   Lightbulb,
   LogOut,
+  Moon,
   PieChart,
   Receipt,
   Repeat,
   Settings,
+  Sun,
   Wallet,
   X,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { insightsApi, plaidApi } from "@/lib/api";
+
+/**
+ * Sidebar-styled theme toggle. Lives between the nav and the footer block
+ * so it sits ABOVE the divider that separates utility controls (theme)
+ * from account controls (Settings / user / Logout). Same dark-mode class
+ * dance as the standalone ThemeToggle in the theme module — kept inline
+ * here so it can match sidebar button styling (h-10, ghost, icon + label,
+ * collapse-aware).
+ */
+function SidebarThemeToggle({ collapsed }: { collapsed: boolean }) {
+  // SSR returns dark by default (matches the rest of the app's initial
+  // markup). Hydration reads the actual class on <html> and reconciles.
+  const [isDark, setIsDark] = useState(true);
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    setIsDark(document.documentElement.classList.contains("dark"));
+  }, []);
+  const handleToggle = () => {
+    const next = !isDark;
+    setIsDark(next);
+    document.documentElement.classList.toggle("dark", next);
+  };
+  const Icon = isDark ? Sun : Moon;
+  const label = isDark ? "Light mode" : "Dark mode";
+  const button = (
+    <Button
+      variant="ghost"
+      className={cn(
+        "h-10 w-full gap-3 text-muted-foreground hover:text-foreground",
+        collapsed ? "justify-center px-0" : "justify-start px-3",
+      )}
+      onClick={handleToggle}
+      aria-label={label}
+    >
+      <Icon className="size-4 shrink-0" />
+      {!collapsed && <span className="truncate">{label}</span>}
+    </Button>
+  );
+  return collapsed ? (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent side="right">{label}</TooltipContent>
+    </Tooltip>
+  ) : (
+    button
+  );
+}
 
 // `divider: true` inserts a thin separator above the row in the sidebar.
 // Bot row is suppressed when NEXT_PUBLIC_HIDE_BOT_TAB=true so demo/portfolio
@@ -254,6 +304,13 @@ export function Sidebar({
             })}
           </ul>
         </nav>
+
+        {/* Theme toggle — pinned right above the footer divider so utility
+            controls (theme) and account controls (Settings / user / Logout)
+            stay visually separated. */}
+        <div className="shrink-0 px-2 pb-1">
+          <SidebarThemeToggle collapsed={collapsed} />
+        </div>
 
         {/* Footer block: settings, account chip, logout. The logout sits below
             its own divider so it never gets clicked by accident next to the

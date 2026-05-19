@@ -50,12 +50,15 @@ export default function RootLayout({
     <html lang="en" className="dark">
       <head>
         {/* Telegram WebApp SDK — required so window.Telegram.WebApp exists
-            when the page is opened from the bot's MenuButton. Loads early
-            so the auth-context can read initData on first render. Harmless
-            no-op when the page is opened in a normal browser. */}
+            when the page is opened from the bot's MenuButton. afterInteractive
+            (not beforeInteractive) because the SDK writes --tg-viewport-* CSS
+            vars onto <html> as soon as it loads; running before hydration
+            causes a server/client style mismatch warning in normal browsers.
+            All consumers read window.Telegram lazily from effects, so deferring
+            past hydration is safe. */}
         <Script
           src="https://telegram.org/js/telegram-web-app.js"
-          strategy="beforeInteractive"
+          strategy="afterInteractive"
         />
       </head>
       <body
