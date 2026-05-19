@@ -151,10 +151,13 @@ export function StreamAvatar({
   return (
     <div
       className={cn(
-        "flex shrink-0 items-center justify-center overflow-hidden rounded-full text-sm font-semibold",
+        // Shared chip styling with the transactions/dashboard avatars:
+        // hairline ring + soft shadow. `ring` not `border` so it doesn't
+        // shrink the inner logo clip.
+        "flex shrink-0 items-center justify-center overflow-hidden rounded-full text-sm font-semibold shadow-sm ring-1 ring-border/60",
         showImg
-          ? "border border-border bg-muted text-muted-foreground"
-          : `bg-gradient-to-br text-white shadow-sm ${gradient}`,
+          ? "bg-muted text-muted-foreground"
+          : `bg-gradient-to-br text-white ${gradient}`,
       )}
       style={{ width: size, height: size }}
     >
