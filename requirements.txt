@@ -57,7 +57,10 @@ urllib3==2.5.0
 # accepts. Pinned here even though it's a transitive dep of openai +
 # python-telegram-bot so a future upstream removal doesn't break us.
 httpx==0.28.1
-httpcore==1.0.7
+# httpcore 1.0.9+ relaxes the h11 upper bound to <1 (1.0.7 required
+# h11<0.15 which collides with uvicorn 0.35's h11>=0.8 + our pinned
+# h11==0.16.0 — verified by a Railway build failure).
+httpcore==1.0.9
 
 # --- Telegram bot ------------------------------------------------------------
 python-telegram-bot==22.3
