@@ -16,7 +16,7 @@ type Tab = {
 const tabs: Tab[] = [
   {
     href: "/settings",
-    label: "App",
+    label: "Connections & Sync",
     match: (p) => p === "/settings",
   },
   {

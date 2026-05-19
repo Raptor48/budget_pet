@@ -2,13 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Info, Loader2, Clock, Webhook } from "lucide-react";
+import { HelpCircle, Loader2, Clock, Webhook } from "lucide-react";
 
 import { appSettingsApi } from "@/lib/api";
 import { onMutationError, notify } from "@/lib/notify";
 import type { AutosyncConfig, AutosyncFrequency } from "@/types/v2";
 
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -20,6 +19,12 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 /**
  * Human-readable description of each frequency option, including the anchor
@@ -227,60 +232,62 @@ export function AutosyncPanel() {
         ) : null}
       </p>
 
-      <div className="flex items-start justify-between gap-4 rounded-md border border-border/60 bg-background/50 px-3 py-2.5">
-        <div className="space-y-0.5">
-          <Label htmlFor="webhooks-toggle" className="flex items-center gap-2 text-sm">
-            <Webhook className="h-3.5 w-3.5" />
-            Instant updates (webhooks)
-          </Label>
-          <p className="text-xs text-muted-foreground">
-            Plaid pushes new transactions the moment they post — each push costs a Balance
-            call. Turn off to rely on the schedule above and cut Plaid costs roughly 2&times;.
-          </p>
+      <TooltipProvider delayDuration={200}>
+        <div className="flex items-start justify-between gap-4 rounded-md border border-border/60 bg-background/50 px-3 py-2.5">
+          <div className="space-y-0.5">
+            <Label htmlFor="webhooks-toggle" className="flex items-center gap-2 text-sm">
+              <Webhook className="h-3.5 w-3.5" />
+              Instant updates (webhooks)
+              {/* Two pieces of context that used to live as big banners
+                  below the toggle — now folded into a single `?` icon so
+                  the row stays one line tall. Hover reveals the details
+                  for users who care; the toggle's disabled state still
+                  conveys availability at a glance. */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="About webhooks and Plaid pricing"
+                    className="inline-flex size-4 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+                  >
+                    <HelpCircle className="size-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs space-y-2 text-xs">
+                  <p>
+                    Plaid pushes new transactions the moment they post —
+                    each push costs a Balance call. Turn off to rely on the
+                    schedule above and cut Plaid costs roughly 2&times;.
+                  </p>
+                  <p>
+                    Plaid bills <strong>$0.10 per Balance call</strong>.
+                    Fewer scheduled runs + webhooks off is typically enough
+                    for personal / family budgeting (data stays fresh to
+                    within one sync interval).
+                  </p>
+                  {!data.webhook_url_configured ? (
+                    <p className="text-destructive">
+                      Webhooks can&apos;t be enabled until the server has{" "}
+                      <code className="font-mono">PLAID_WEBHOOK_URL</code>{" "}
+                      configured. Ask the app owner to set it, then flip
+                      the toggle.
+                    </p>
+                  ) : null}
+                </TooltipContent>
+              </Tooltip>
+            </Label>
+          </div>
+          <div className="flex items-center gap-2">
+            {disabled ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
+            <Switch
+              id="webhooks-toggle"
+              checked={data.webhooks_enabled}
+              onCheckedChange={handleWebhooksToggle}
+              disabled={disabled || (!data.webhooks_enabled && !data.webhook_url_configured)}
+            />
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          {disabled ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
-          <Switch
-            id="webhooks-toggle"
-            checked={data.webhooks_enabled}
-            onCheckedChange={handleWebhooksToggle}
-            disabled={disabled || (!data.webhooks_enabled && !data.webhook_url_configured)}
-          />
-        </div>
-      </div>
-
-      {!data.webhook_url_configured && data.webhooks_enabled === false ? (
-        <Alert variant="destructive">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertDescription>
-            Webhooks can&apos;t be enabled until the server has{" "}
-            <code className="font-mono text-xs">PLAID_WEBHOOK_URL</code> configured.
-            Ask the app owner to set it, then flip the toggle.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      <Alert>
-        <Info className="h-4 w-4" />
-        <AlertDescription className="text-xs">
-          Plaid bills <strong>$0.10 per Balance call</strong>. Fewer scheduled runs + webhooks
-          off is typically enough for personal / family budgeting (data stays fresh to within
-          one sync interval).
-        </AlertDescription>
-      </Alert>
-
-      {data.updated_by_username ? (
-        <p className="text-xs text-muted-foreground">
-          Last changed by {data.updated_by_username}
-          {data.updated_at
-            ? ` on ${new Date(data.updated_at).toLocaleString(undefined, {
-                dateStyle: "medium",
-                timeStyle: "short",
-              })}`
-            : null}
-          .
-        </p>
-      ) : null}
+      </TooltipProvider>
     </div>
   );
 }
