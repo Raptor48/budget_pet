@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from web.version import APP_VERSION
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -34,7 +36,7 @@ def _cors_allow_origins() -> list[str]:
 # App + Middleware
 # ---------------------------------------------------------------------------
 
-app = FastAPI(title="Budget Pet API", version="2.1.0")
+app = FastAPI(title="Budget Pet API", version=APP_VERSION)
 
 app.add_middleware(
     CORSMiddleware,
@@ -135,13 +137,24 @@ async def startup_event():
     from web.migrations.bot_v1 import run_bot_migrations
     await run_bot_migrations(pool)
 
+    # DISABLE_SCHEDULERS lets a local dev process connect to the production
+    # DB without firing the Plaid sync, notification producers, or dispatcher
+    # on top of the Railway instance's own jobs. Read once here so the flag
+    # is visible to operators in the startup log.
+    schedulers_disabled = os.getenv("DISABLE_SCHEDULERS", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
     # 6. Ensure plaid_items + plaid_sync_log tables exist
     if os.getenv("PLAID_CLIENT_ID"):
         from web.plaid.repo import get_plaid_repo
         await get_plaid_repo().init_tables()
-        from web.plaid.scheduler import start_scheduler
-        start_scheduler()
-        logger.info("Plaid integration initialized and scheduler started")
+        if schedulers_disabled:
+            logger.info("Plaid tables ensured — scheduler skipped (DISABLE_SCHEDULERS)")
+        else:
+            from web.plaid.scheduler import start_scheduler
+            start_scheduler()
+            logger.info("Plaid integration initialized and scheduler started")
     else:
         logger.info("Plaid not configured — skipping Plaid setup")
 
@@ -154,9 +167,12 @@ async def startup_event():
         logger.info("Telegram bot not configured — skipping bot startup")
 
     # 8. Notification dispatcher — drains notifications_queue every minute.
-    from web.notifications.dispatcher import start_dispatcher
-    start_dispatcher()
-    logger.info("Notification dispatcher started")
+    if schedulers_disabled:
+        logger.info("Notification dispatcher skipped (DISABLE_SCHEDULERS)")
+    else:
+        from web.notifications.dispatcher import start_dispatcher
+        start_dispatcher()
+        logger.info("Notification dispatcher started")
 
 
 @app.on_event("shutdown")
@@ -174,4 +190,4 @@ async def shutdown_event():
 
 @app.get("/healthz")
 async def health_check():
-    return {"ok": True, "version": "V2.3"}
+    return {"ok": True, "version": APP_VERSION}
