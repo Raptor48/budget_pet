@@ -226,7 +226,7 @@ function MerchantAvatar({
         alt=""
         width={size}
         height={size}
-        className="shrink-0 rounded-full object-cover"
+        className="shrink-0 rounded-full object-cover shadow-sm ring-1 ring-border/60"
         style={{ width: size, height: size }}
         onError={() => setFailed(true)}
         unoptimized
@@ -237,7 +237,7 @@ function MerchantAvatar({
   return (
     <div
       className={cn(
-        "flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-xs font-semibold text-white shadow-sm",
+        "flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-xs font-semibold text-white shadow-sm ring-1 ring-border/60",
         gradient,
       )}
       style={{ width: size, height: size }}

@@ -302,10 +302,13 @@ function MerchantAvatar({ tx }: { tx: Transaction }) {
   return (
     <div
       className={cn(
-        "flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full text-sm font-semibold",
+        // Shared chip styling: a hairline ring + soft shadow lifts the
+        // circle off the row. `ring` (not `border`) so it paints over
+        // the edge without shrinking the inner image clip.
+        "flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-full text-sm font-semibold shadow-sm ring-1 ring-border/60",
         showImg
-          ? "border border-border bg-muted text-muted-foreground"
-          : `bg-gradient-to-br text-white shadow-sm ${gradient}`,
+          ? "bg-muted text-muted-foreground"
+          : `bg-gradient-to-br text-white ${gradient}`,
       )}
     >
       {showImg ? (
