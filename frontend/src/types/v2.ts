@@ -696,6 +696,9 @@ export interface ForecastEntry {
   amount_cents: number;
   frequency: string | null;
   stream_id: number;
+  /** Resolved merchant logo (Plaid / Brandfetch / user-curated), carried
+   * from the source recurring stream. NULL when no logo resolved. */
+  logo_url?: string | null;
 }
 
 export interface IncomeSource {

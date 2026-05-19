@@ -125,6 +125,10 @@ def build_forecast(
                     "amount_cents": stream.get("last_amount_cents") or stream.get("average_amount_cents") or 0,
                     "frequency": stream.get("frequency"),
                     "stream_id": stream["id"],
+                    # Carried from list_streams' COALESCE(plaid, brandfetch/
+                    # user-curated) resolution so the dashboard's Upcoming
+                    # Bills tiles render the same logo as the Recurring page.
+                    "logo_url": stream.get("logo_url"),
                 }
             )
 

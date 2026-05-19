@@ -144,6 +144,9 @@ class ForecastEntry(BaseModel):
     amount_cents: int
     frequency: Optional[str] = None
     stream_id: int
+    # Resolved merchant logo (Plaid / Brandfetch / user-curated), carried
+    # from the source recurring stream so the dashboard can render it.
+    logo_url: Optional[str] = None
 
 
 class IncomeSource(BaseModel):
