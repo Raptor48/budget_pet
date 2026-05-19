@@ -51,6 +51,13 @@ certifi==2025.8.3
 charset-normalizer==3.4.3
 idna==3.10
 urllib3==2.5.0
+# httpx for the Brandfetch enrichment client. Brandfetch's CloudFront WAF
+# returns 403 on aiohttp's default TLS fingerprint (verified empirically
+# 2026-05-19); httpx negotiates a browser-like handshake that the WAF
+# accepts. Pinned here even though it's a transitive dep of openai +
+# python-telegram-bot so a future upstream removal doesn't break us.
+httpx==0.28.1
+httpcore==1.0.7
 
 # --- Telegram bot ------------------------------------------------------------
 python-telegram-bot==22.3

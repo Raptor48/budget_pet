@@ -148,7 +148,21 @@ async def startup_event():
     # 6. Ensure plaid_items + plaid_sync_log tables exist
     if os.getenv("PLAID_CLIENT_ID"):
         from web.plaid.repo import get_plaid_repo
-        await get_plaid_repo().init_tables()
+        repo = get_plaid_repo()
+        await repo.init_tables()
+        # Best-effort fill-in of missing institution logos via Brandfetch
+        # (Plaid doesn't return one for some banks, Chase being the famous
+        # example). Idempotent: only touches rows where institution_logo
+        # IS NULL, so re-running on every boot is cheap once filled.
+        try:
+            filled = await repo.backfill_missing_institution_logos()
+            if filled:
+                logger.info(
+                    "Brandfetch: filled %d missing institution logo(s)",
+                    filled,
+                )
+        except Exception as exc:
+            logger.warning("Brandfetch institution backfill failed: %s", exc)
         if schedulers_disabled:
             logger.info("Plaid tables ensured — scheduler skipped (DISABLE_SCHEDULERS)")
         else:
