@@ -381,7 +381,7 @@ function DayPopoverRow({
       onClick={() => onClick(stream.id)}
       className="hover:bg-muted/60 flex items-center gap-2 rounded-sm px-1.5 py-1 text-left text-xs"
     >
-      <StreamAvatar stream={stream} size={20} />
+      <StreamAvatar stream={stream} logoUrl={stream.logo_url} size={20} />
       <span className="min-w-0 flex-1 truncate">{streamTitle(stream)}</span>
       <span className="tabular-nums">{formatMoney(cents)}</span>
     </button>

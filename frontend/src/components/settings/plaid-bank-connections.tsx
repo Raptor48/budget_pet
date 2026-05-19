@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { usePlaidLink } from "react-plaid-link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { formatDistanceToNow } from "date-fns";
 import {
   Card, CardContent, CardDescription, CardHeader, CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Dialog,
@@ -18,15 +18,49 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Building2, RefreshCw, Trash2, CheckCircle, AlertCircle, Clock, RotateCcw, Loader2,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  Building2, ChevronDown, Trash2, AlertCircle, Clock, RotateCcw, Loader2,
   ImageDown,
 } from "lucide-react";
-import { plaidApi } from "@/lib/api";
+import { accountsApi, plaidApi } from "@/lib/api";
 import { notify } from "@/lib/notify";
-import { Progress } from "@/components/ui/progress";
+import { cn } from "@/lib/utils";
 import { TRANSACTIONS_DATE_RANGE_QUERY_KEY } from "@/lib/hooks/use-transactions-date-range";
-import type { PlaidItem, PlaidSyncResult } from "@/types/v2";
+import type { Account, PlaidItem } from "@/types/v2";
 import { AutosyncPanel } from "./autosync-card";
+
+// ---------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------
+function formatAccountSubtype(account: Account): string {
+  const sub = (account.subtype || "").trim();
+  if (sub) return sub.replaceAll("_", " ").replace(/^\w/, (c) => c.toUpperCase());
+  const t = (account.type || "").trim();
+  if (t) return t.replace(/^\w/, (c) => c.toUpperCase());
+  return "Account";
+}
+
+/**
+ * Build a one-line account summary for the collapsed bank header. Sole
+ * purpose: distinguish duplicate banks (Chase × 2, PayPal × 2) without
+ * forcing the user to expand each row. Uses the first account's
+ * mask + owner; falls back to owner-only when masks are missing; returns
+ * null when there's nothing distinguishing.
+ */
+function buildBankSummary(accounts: Account[]): string | null {
+  if (accounts.length === 0) return null;
+  const first = accounts[0];
+  const parts: string[] = [];
+  if (first.mask) parts.push(`··${first.mask}`);
+  if (first.owner_username) parts.push(`@${first.owner_username}`);
+  if (accounts.length > 1) parts.push(`+${accounts.length - 1} more`);
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
 
 // ---------------------------------------------------------------
 // Plaid Link button
@@ -153,53 +187,71 @@ function DangerConfirmDialog({
 // ---------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------
-type SyncUiProgress = {
-  index: number;
-  total: number;
-  bankLabel: string | null;
-};
 
 export function PlaidBankConnections() {
   const queryClient = useQueryClient();
 
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [resetTarget, setResetTarget] = useState<string | null>(null);
-  const [syncUiProgress, setSyncUiProgress] = useState<SyncUiProgress | null>(null);
+  // Set of item_ids whose details panel is open. Multi-open allowed so the
+  // user can compare two banks side-by-side without clicking back and forth.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Track whether we've already auto-expanded the attention-needing items
+  // on this mount so subsequent refetches don't re-expand rows the user
+  // explicitly closed.
+  const autoExpandedRef = useRef(false);
 
   const { data: items = [], isLoading: itemsLoading } = useQuery<PlaidItem[]>({
     queryKey: ["plaid-items"],
     queryFn: plaidApi.listItems,
   });
 
-  const { data: syncLog = [] } = useQuery({
-    queryKey: ["plaid-sync-log"],
-    queryFn: plaidApi.getSyncLog,
+  // Auto-expand rows that need login fixes — puts the Fix-connection
+  // button one click away instead of two, and explains the global
+  // attention banner above.
+  useEffect(() => {
+    if (autoExpandedRef.current || items.length === 0) return;
+    const needAttention = items.filter((i) => i.item_login_required).map((i) => i.item_id);
+    if (needAttention.length > 0) {
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        needAttention.forEach((id) => next.add(id));
+        return next;
+      });
+    }
+    autoExpandedRef.current = true;
+  }, [items]);
+
+  const toggleExpand = useCallback((itemId: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  }, []);
+
+  // Fetch accounts so we can show what came from each Plaid item. Backend
+  // already scopes by viewer (admin sees all, user sees own) — the same
+  // policy applies to items, so accounts and items align row-for-row.
+  const { data: accounts = [] } = useQuery<Account[]>({
+    queryKey: ["accounts"],
+    queryFn: () => accountsApi.list(true),
   });
 
-  const syncMutation = useMutation<PlaidSyncResult[]>({
-    mutationFn: async () => {
-      const snapshot = items;
-      const total = snapshot.length;
-      setSyncUiProgress({ index: 0, total, bankLabel: null });
-      return plaidApi.syncStream((ev) => {
-        setSyncUiProgress({
-          index: ev.index,
-          total: ev.total,
-          bankLabel:
-            snapshot.find((i) => i.item_id === ev.result.item_id)?.institution_name ??
-            "Bank",
-        });
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["plaid-items"] });
-      queryClient.invalidateQueries({ queryKey: ["plaid-sync-log"] });
-      queryClient.invalidateQueries({ queryKey: ["accounts"] });
-      queryClient.invalidateQueries({ queryKey: ["transactions"] });
-      queryClient.invalidateQueries({ queryKey: TRANSACTIONS_DATE_RANGE_QUERY_KEY });
-    },
-    onSettled: () => setSyncUiProgress(null),
-  });
+  // O(1) lookup of accounts belonging to a given plaid_item_id. Cash wallet
+  // and any standalone manual accounts have no plaid_item_id and are
+  // skipped — they don't belong under a bank in this list.
+  const accountsByItem = useMemo(() => {
+    const map = new Map<string, Account[]>();
+    for (const a of accounts) {
+      if (!a.plaid_item_id) continue;
+      const arr = map.get(a.plaid_item_id) ?? [];
+      arr.push(a);
+      map.set(a.plaid_item_id, arr);
+    }
+    return map;
+  }, [accounts]);
 
   const deleteMutation = useMutation({
     mutationFn: ({ itemId, purge }: { itemId: string; purge: boolean }) =>
@@ -247,41 +299,33 @@ export function PlaidBankConnections() {
       notify.error(err instanceof Error ? err.message : "Could not refresh branding."),
   });
 
-  const lastSync = syncLog[0] as (typeof syncLog)[0] | undefined;
-
   return (
-    <Card id="settings-bank-connections">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Building2 className="h-5 w-5" />
-          Bank Connections
-        </CardTitle>
-        <CardDescription>
-          Connect your bank via Plaid to automatically import transactions, sync balances and
-          discover recurring subscriptions.
-        </CardDescription>
+    <Card id="settings-bank-connections" className="gap-3">
+      <CardHeader className="flex flex-row items-start justify-between gap-3 pb-3 border-b">
+        <div>
+          <CardTitle className="flex items-center gap-2 text-base font-bold text-foreground">
+            <Building2 className="h-4 w-4 text-muted-foreground" />
+            Bank Connections
+          </CardTitle>
+          <CardDescription className="mt-1">
+            Connect your bank via Plaid to import transactions, sync balances and
+            discover recurring subscriptions.
+          </CardDescription>
+        </div>
+        <ConnectBankButton
+          onSuccess={() => queryClient.invalidateQueries({ queryKey: ["plaid-items"] })}
+          buttonSize="sm"
+        />
       </CardHeader>
       <CardContent className="space-y-6">
-        {items.some((i) => i.item_login_required) ? (
-          <Alert variant="destructive" className="border-amber-600/50 bg-amber-500/10 text-amber-950 dark:text-amber-100">
-            <AlertCircle className="h-4 w-4" />
-            <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
-              <span>
-                A bank connection needs attention. Open Link to refresh credentials.
-              </span>
-            </AlertDescription>
-          </Alert>
-        ) : null}
+        {/* Per-row `Needs attention` pill + auto-expand replace the old
+            global attention banner — the call-to-action sits exactly on
+            the broken bank instead of telling the user one of them is
+            broken. */}
 
-        {/* Connected banks */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium">Connected Accounts</span>
-            <ConnectBankButton
-              onSuccess={() => queryClient.invalidateQueries({ queryKey: ["plaid-items"] })}
-            />
-          </div>
-
+        {/* Connected banks. Header / Connect-Bank button moved up into the
+            Card header to remove the redundant `Connected Accounts` sublabel. */}
+        <div className="space-y-2">
           {itemsLoading ? (
             <p className="text-sm text-muted-foreground">Loading...</p>
           ) : items.length === 0 ? (
@@ -293,185 +337,230 @@ export function PlaidBankConnections() {
               </AlertDescription>
             </Alert>
           ) : (
+            <TooltipProvider delayDuration={300}>
             <div className="space-y-2">
-              {items.map((item) => (
+              {items.map((item) => {
+                const childAccounts = accountsByItem.get(item.item_id) ?? [];
+                const isExpanded = expanded.has(item.item_id);
+                const needsAttention = Boolean(item.item_login_required);
+                const summary = buildBankSummary(childAccounts);
+                const syncedDate = item.last_synced_at ? new Date(item.last_synced_at) : null;
+                return (
                 <div
                   key={item.item_id}
-                  className="flex items-center justify-between rounded-lg border px-4 py-3"
+                  className={cn(
+                    "overflow-hidden rounded-lg border transition-colors",
+                    needsAttention && "border-amber-500/50",
+                    isExpanded && "bg-muted/10",
+                  )}
                 >
-                  <div className="min-w-0 flex-1 space-y-0.5">
-                    <p className="text-sm font-medium">
-                      {item.institution_name ?? "Unknown Bank"}
-                    </p>
-                    <p className="text-xs text-muted-foreground flex items-center gap-1">
-                      <Clock className="h-3 w-3 shrink-0" />
-                      {item.last_synced_at
-                        ? `Last synced: ${new Date(item.last_synced_at).toLocaleString()}`
-                        : "Never synced"}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 flex-wrap items-center justify-end gap-1 ml-3">
-                    <ConnectBankButton
-                      itemId={item.item_id}
-                      label={item.item_login_required ? "Fix connection" : "Update login"}
-                      buttonVariant={item.item_login_required ? "default" : "outline"}
-                      buttonSize="sm"
-                      onSuccess={() => {
-                        queryClient.invalidateQueries({ queryKey: ["plaid-items"] });
-                        queryClient.invalidateQueries({ queryKey: ["plaid-sync-log"] });
-                      }}
-                    />
-                    {/* Refresh branding — only when no Plaid logo is on
-                        file. Plaid coverage isn't always present at link
-                        time (their docs admit "not all institutions' logos
-                        are available"); this asks again. */}
-                    {!item.institution_logo ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        title="Re-fetch institution logo from Plaid"
-                        className="gap-1.5"
-                        onClick={() => refreshBrandingMutation.mutate(item.item_id)}
-                        disabled={
-                          refreshBrandingMutation.isPending &&
-                          refreshBrandingMutation.variables === item.item_id
-                        }
-                      >
-                        {refreshBrandingMutation.isPending &&
-                        refreshBrandingMutation.variables === item.item_id ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <ImageDown className="h-3.5 w-3.5" />
-                        )}
-                        Refresh logo
-                      </Button>
-                    ) : null}
-                    {/* Reset cursor — danger */}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      title="Reset sync cursor — re-imports all transactions on next sync"
-                      className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:border-destructive gap-1.5"
-                      onClick={() => setResetTarget(item.item_id)}
-                      disabled={resetCursorMutation.isPending && resetTarget === item.item_id}
-                    >
-                      <RotateCcw className="h-3.5 w-3.5" />
-                      Reset
-                    </Button>
-                    {/* Delete — danger */}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:border-destructive gap-1.5"
-                      onClick={() => setDeleteTarget(item.item_id)}
-                      disabled={deleteMutation.isPending && deleteTarget === item.item_id}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Remove
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Manual sync — directly under bank list */}
-        <div className="rounded-lg border border-border/60 bg-muted/20 px-4 py-3">
-          <div className="flex items-start justify-between gap-4">
-            <div className="space-y-0.5">
-              <p className="text-sm font-medium">Sync Now</p>
-              <p className="text-xs text-muted-foreground">
-                Pull latest transactions, update balances, recurring streams, and investments.
-              </p>
-              {/* Last sync info */}
-              {!syncMutation.data && lastSync ? (
-                <div className="flex items-center gap-2 pt-1">
-                  <Badge
-                    variant={lastSync.status === "ok" ? "default" : "destructive"}
-                    className="text-xs"
+                  {/* Clickable header — toggles the details panel. Whole
+                      row is one button so the click target is generous. */}
+                  <button
+                    type="button"
+                    onClick={() => toggleExpand(item.item_id)}
+                    aria-expanded={isExpanded}
+                    aria-controls={`bank-details-${item.item_id}`}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/30"
                   >
-                    {lastSync.status}
-                  </Badge>
-                  <span className="text-xs text-muted-foreground">
-                    {new Date(lastSync.synced_at).toLocaleString()} —
-                    +{lastSync.transactions_added} transactions
-                  </span>
-                </div>
-              ) : null}
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              aria-busy={syncMutation.isPending}
-              onClick={() => {
-                if (syncMutation.isPending) return;
-                syncMutation.mutate();
-              }}
-              disabled={syncMutation.isPending || items.length === 0}
-              className="relative min-w-[7.5rem] shrink-0 gap-2"
-            >
-              <span
-                className={syncMutation.isPending ? "invisible flex items-center gap-2" : "flex items-center gap-2"}
-              >
-                <RefreshCw className="h-4 w-4" />
-                Sync
-              </span>
-              {syncMutation.isPending ? (
-                <span className="pointer-events-none absolute inset-0 flex items-center justify-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                  Syncing…
-                </span>
-              ) : null}
-            </Button>
-          </div>
+                    {/* Logo. Base64 data URL prefix added at render boundary
+                        per CLAUDE.md / docs/data-model.md. */}
+                    <div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-muted">
+                      {item.institution_logo ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={`data:image/png;base64,${item.institution_logo}`}
+                          alt=""
+                          className="size-full object-contain"
+                        />
+                      ) : (
+                        <Building2 className="size-5 text-muted-foreground" />
+                      )}
+                    </div>
 
-          {syncMutation.isPending && syncUiProgress && syncUiProgress.total > 0 ? (
-            <div className="mt-3 space-y-2">
-              <Progress
-                value={Math.min(100, (syncUiProgress.index / syncUiProgress.total) * 100)}
-                className="h-2"
-              />
-              <p className="text-xs text-muted-foreground">
-                {syncUiProgress.index === 0
-                  ? `Starting sync (${syncUiProgress.total} ${syncUiProgress.total === 1 ? "bank" : "banks"})…`
-                  : `Finished ${syncUiProgress.index} of ${syncUiProgress.total} · ${syncUiProgress.bankLabel ?? "Bank"}`}
-              </p>
-            </div>
-          ) : null}
+                    {/* Name + summary + sync time. Summary line (mask · owner)
+                        is what disambiguates duplicate Plaid items (Chase × 2)
+                        in the collapsed state — without it the only clue is
+                        the sync timestamp, which differs by seconds. */}
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm font-medium">
+                        <span>{item.institution_name ?? "Unknown Bank"}</span>
+                        {summary ? (
+                          <span className="text-xs font-normal text-muted-foreground">
+                            {summary}
+                          </span>
+                        ) : null}
+                        {needsAttention ? (
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-300"
+                            title="Bank login expired — click to fix"
+                          >
+                            <AlertCircle className="size-3" />
+                            Needs attention
+                          </span>
+                        ) : null}
+                      </p>
+                      {/* Relative time keeps the row scannable. Full
+                          timestamp lives in the tooltip for anyone who
+                          needs the precise moment. */}
+                      {syncedDate ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="inline-flex cursor-help items-center gap-1 text-xs text-muted-foreground">
+                              <Clock className="h-3 w-3 shrink-0" />
+                              Synced{" "}
+                              {formatDistanceToNow(syncedDate, { addSuffix: true })}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" className="text-xs">
+                            {syncedDate.toLocaleString()}
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                          <Clock className="h-3 w-3 shrink-0" />
+                          Never synced
+                        </span>
+                      )}
+                    </div>
 
-          {/* Sync results */}
-          {syncMutation.data && (
-            <div className="mt-3 space-y-1">
-              {syncMutation.data.map((r) => {
-                const bankLabel =
-                  items.find((i) => i.item_id === r.item_id)?.institution_name ?? r.item_id;
-                return (
-                <Alert key={r.item_id} variant={r.status === "ok" ? "default" : "destructive"}>
-                  {r.status === "ok"
-                    ? <CheckCircle className="h-4 w-4" />
-                    : <AlertCircle className="h-4 w-4" />}
-                  <AlertDescription>
-                    {r.status === "ok"
-                      ? `${bankLabel}: +${r.transactions_added} transactions, ${r.balances_updated} balances updated`
-                      : (
-                          <>
-                            <span className="font-medium">{bankLabel}</span>
-                            <span className="text-muted-foreground"> ({r.item_id})</span>
-                            {": "}
-                            {r.error_msg}
-                          </>
+                    {/* Trailing chip: account count + chevron. Rotates 180°
+                        when expanded — single visual cue for the row state. */}
+                    <div className="flex shrink-0 items-center gap-3 text-xs text-muted-foreground">
+                      <span className="tabular-nums">
+                        {childAccounts.length}{" "}
+                        {childAccounts.length === 1 ? "account" : "accounts"}
+                      </span>
+                      <ChevronDown
+                        className={cn(
+                          "size-4 transition-transform duration-200",
+                          isExpanded && "rotate-180",
                         )}
-                  </AlertDescription>
-                </Alert>
+                      />
+                    </div>
+                  </button>
+
+                  {/* Expanded details panel — accounts list + actions. Lives
+                      in DOM only when open so the page stays compact when
+                      everything is collapsed. */}
+                  {isExpanded ? (
+                    <div
+                      id={`bank-details-${item.item_id}`}
+                      className="border-t border-border/60 px-4 py-3 space-y-4"
+                    >
+                      {childAccounts.length > 0 ? (
+                        <div>
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground mb-1.5">
+                            Accounts
+                          </p>
+                          <ul className="grid grid-cols-1 gap-y-1 sm:grid-cols-2">
+                            {childAccounts.map((a) => (
+                              <li
+                                key={a.id}
+                                className="flex min-w-0 items-center gap-2 text-xs"
+                              >
+                                <span className="inline-flex shrink-0 items-center rounded border border-border/60 bg-muted/40 px-1.5 py-0.5 font-mono tabular-nums text-muted-foreground">
+                                  {a.mask ? `··${a.mask}` : "—"}
+                                </span>
+                                <span className="min-w-0 truncate font-medium">
+                                  {a.name}
+                                </span>
+                                <span className="shrink-0 text-muted-foreground">
+                                  {formatAccountSubtype(a)}
+                                </span>
+                                {a.owner_username ? (
+                                  <span className="ml-auto shrink-0 text-muted-foreground">
+                                    @{a.owner_username}
+                                  </span>
+                                ) : null}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          No accounts yet — try syncing this bank.
+                        </p>
+                      )}
+
+                      {/* Two action clusters split by `justify-between`:
+                          neutral / primary actions on the left (the things
+                          a user does routinely), destructive on the right
+                          (the things you only do once). Visual gap between
+                          them prevents misclicks. */}
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <ConnectBankButton
+                            itemId={item.item_id}
+                            label={item.item_login_required ? "Fix connection" : "Update login"}
+                            buttonVariant={item.item_login_required ? "default" : "outline"}
+                            buttonSize="sm"
+                            onSuccess={() => {
+                              queryClient.invalidateQueries({ queryKey: ["plaid-items"] });
+                              queryClient.invalidateQueries({ queryKey: ["plaid-sync-log"] });
+                            }}
+                          />
+                          {!item.institution_logo ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              title="Re-fetch institution logo from Plaid"
+                              className="gap-1.5"
+                              onClick={() => refreshBrandingMutation.mutate(item.item_id)}
+                              disabled={
+                                refreshBrandingMutation.isPending &&
+                                refreshBrandingMutation.variables === item.item_id
+                              }
+                            >
+                              {refreshBrandingMutation.isPending &&
+                              refreshBrandingMutation.variables === item.item_id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <ImageDown className="h-3.5 w-3.5" />
+                              )}
+                              Refresh logo
+                            </Button>
+                          ) : null}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            title="Reset sync cursor — re-imports all transactions on next sync"
+                            className="gap-1.5"
+                            onClick={() => setResetTarget(item.item_id)}
+                            disabled={resetCursorMutation.isPending && resetTarget === item.item_id}
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                            Reset
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="gap-1.5"
+                            onClick={() => setDeleteTarget(item.item_id)}
+                            disabled={deleteMutation.isPending && deleteTarget === item.item_id}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Remove
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
                 );
               })}
             </div>
+            </TooltipProvider>
           )}
         </div>
 
-        {/* Autosync schedule + webhook toggle — after Sync Now. Hidden when no banks. */}
+        {/* "Sync now" lives in the global AppLayout header now — it's
+            persistent across navigations, single source. The local Sync Now
+            box that used to live here was a confusing duplicate. */}
+
+        {/* Autosync schedule + webhook toggle. Hidden when no banks. */}
         {items.length > 0 ? <AutosyncPanel /> : null}
       </CardContent>
 

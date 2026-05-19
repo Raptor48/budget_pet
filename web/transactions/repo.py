@@ -181,7 +181,11 @@ class TransactionsRepository:
                        t.name,
                        t.merchant_name,
                        t.merchant_entity_id,
-                       t.logo_url,
+                       -- Plaid's licensed logo wins when present (higher
+                       -- quality, served from Plaid's CDN). The Brandfetch
+                       -- fallback (web/enrichment/) fills in merchants
+                       -- Plaid doesn't have, joined via merchant_logos.
+                       COALESCE(NULLIF(t.logo_url, ''), ml.logo_url) AS logo_url,
                        t.website,
                        t.payment_channel,
                        t.pfc_primary,
@@ -211,12 +215,18 @@ class TransactionsRepository:
                 FROM transactions t
             """
         else:
+            # `t.*` carries logo_url through unchanged; the Python merge
+            # below stitches in the Brandfetch fallback when Plaid's
+            # column is empty. Selecting `ml.logo_url AS _ml_logo_url`
+            # under a stash name avoids the duplicate-column error that
+            # a bare `ml.logo_url` would trigger against `t.*`.
             select_tx = """
                 SELECT t.*,
                        a.name     AS account_name,
                        a.mask     AS account_mask,
                        u.username AS owner_username,
                        ma.display_name AS merchant_alias,
+                       ml.logo_url AS _ml_logo_url,
                        EXISTS(SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id) AS has_splits,
                        EXISTS(SELECT 1 FROM receipts r WHERE r.transaction_id = t.id) AS has_receipt
                 FROM transactions t
@@ -230,6 +240,7 @@ class TransactionsRepository:
                 LEFT JOIN accounts a ON a.id = t.account_id
                 LEFT JOIN users u ON a.user_id = u.id
                 {alias_join_sql("t", "ma")}
+                LEFT JOIN merchant_logos ml ON ml.merchant_name = t.merchant_name
                 WHERE {where}
                 ORDER BY COALESCE(t.authorized_date, t.date) DESC, t.id DESC
                 LIMIT ${idx} OFFSET ${idx + 1}
@@ -237,6 +248,14 @@ class TransactionsRepository:
                 *params,
             )
         out = [dict(r) for r in rows]
+        # Heavy-fields branch carries the Brandfetch fallback as
+        # `_ml_logo_url` (we can't COALESCE inside `t.*`). Stitch it in
+        # here so callers see a single `logo_url` field regardless of
+        # which SELECT shape ran.
+        for r in out:
+            stash = r.pop("_ml_logo_url", None)
+            if (not r.get("logo_url")) and stash:
+                r["logo_url"] = stash
         _apply_alias_inplace(out)
         return out
 

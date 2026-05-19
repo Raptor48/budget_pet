@@ -4,8 +4,6 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -19,14 +17,16 @@ import { plaidApi } from "@/lib/api";
 import { PlaidBankConnections } from "./plaid-bank-connections";
 import { SystemStatusBar } from "./system-status-bar";
 import {
-  Settings as SettingsIcon,
-  Database,
-  Download,
   Loader2,
   Trash2,
   AlertTriangle,
   CheckCircle,
 } from "lucide-react";
+
+// `Delete Test Data` only makes sense in the demo deploy (Plaid sandbox).
+// Driven by an env flag rather than runtime detection so we don't ship the
+// destructive button to prod users by accident.
+const SHOW_DEMO_TOOLS = process.env.NEXT_PUBLIC_SHOW_DEMO_TOOLS === "true";
 
 export function SettingsPage() {
   const queryClient = useQueryClient();
@@ -55,48 +55,27 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Settings</h1>
-          <p className="text-muted-foreground">Configure your budget management preferences</p>
-        </div>
-        <Badge variant="secondary" className="gap-2">
-          <SettingsIcon className="h-4 w-4" />
-          V2.2
-        </Badge>
+      {/* Header — single H1, no version badge (version lives in the System
+          status row below, single source of truth via `/healthz`). */}
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
       </div>
 
-      {/* Compact statusbar: System Status (left) + Appearance (right) */}
+      {/* Compact statusbar: System Status (API/DB/version). Theme switcher
+          moved to the sidebar so it's reachable from any page. */}
       <SystemStatusBar />
 
       {/* Bank Connections (Plaid) — includes the autosync schedule + webhook toggle */}
       <PlaidBankConnections />
 
-      {/* Data Management */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Database className="h-5 w-5" />
-            Data Management
-          </CardTitle>
-          <CardDescription>Backup and manage your budget data</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label className="text-base">Export Data</Label>
-              <p className="text-sm text-muted-foreground">Download your transactions as CSV</p>
-            </div>
-            <Button variant="outline" size="sm" className="gap-2">
-              <Download className="h-4 w-4" />
-              Export
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      {/* Data Management section removed — Export Data button was a UI shell
+          with no backend endpoint wired up. If we add CSV export or DB backup
+          later, restore the section then. */}
 
-      {/* Danger Zone */}
+      {/* Danger Zone — demo deploys only (driven by NEXT_PUBLIC_SHOW_DEMO_TOOLS).
+          The single action here is Plaid sandbox data deletion, which makes no
+          sense in production. */}
+      {SHOW_DEMO_TOOLS ? (
       <Card className="border-destructive/40">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-destructive">
@@ -153,8 +132,10 @@ export function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+      ) : null}
 
-      {/* Sandbox delete confirmation dialog */}
+      {/* Sandbox delete confirmation dialog — only mounted in demo. */}
+      {SHOW_DEMO_TOOLS ? (
       <Dialog open={sandboxDialogOpen} onOpenChange={setSandboxDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -222,6 +203,7 @@ export function SettingsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      ) : null}
     </div>
   );
 }

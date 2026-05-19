@@ -29,7 +29,15 @@ export function isPlaidTxnInflowCents(cents: number): boolean {
   return cents < 0;
 }
 
-function formatCurrencyUnsigned(cents: number, currency: string): string {
+/**
+ * Format an amount as plain currency without any leading `+`/`-` sign. Use
+ * this when the caller decorates direction separately — either with a tone
+ * (rose for outflow, emerald for inflow) or by prepending an explicit sign
+ * character. Avoids the historic `+-$X.XX` / `--$X.XX` double-sign bug that
+ * bit the Shared activity chip when it prepended a sign onto a formatter
+ * that already produced one.
+ */
+export function formatPlaidTxnAmountUnsigned(cents: number, currency = "USD"): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency,
@@ -59,7 +67,7 @@ export function formatPlaidTxnAmountForDisplay(cents: number, currency = "USD"):
   if (!isPlaidSignedTxnDisplayEnabled()) {
     return formatPlaidTxnAmountLegacy(cents, currency);
   }
-  const core = formatCurrencyUnsigned(cents, currency);
+  const core = formatPlaidTxnAmountUnsigned(cents, currency);
   if (cents > 0) return `-${core}`;
   if (cents < 0) return `+${core}`;
   return core;

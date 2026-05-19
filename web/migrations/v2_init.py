@@ -737,6 +737,55 @@ async def _migrate_merchant_aliases(conn) -> None:
     )
 
 
+async def _migrate_merchant_logos(conn) -> None:
+    """V2.5: Brandfetch-sourced cache of merchant logos.
+
+    Plaid populates ``transactions.logo_url`` for ~57% of named merchants
+    (the licensed brand set). The remaining ~43% — local businesses,
+    niche subscriptions, sketchy bank descriptors — show up with NULL
+    logos. Brandfetch's free Brand Search covers most of the recognizable
+    long tail (DoorDash, Affirm, Revolut, Con Edison ...); the truly
+    local merchants (NYC bodegas, smoke shops) stay on our gradient
+    avatars.
+
+    Joined onto ``transactions`` and ``recurring_streams`` at read time
+    rather than backfilled onto ``transactions.logo_url`` so a single
+    enrichment lookup fixes every past and future row of the same
+    merchant in one shot. The COALESCE in those queries always prefers
+    Plaid's own logo when it exists (Plaid licenses higher-quality
+    asset sets than Brandfetch for the brands it covers).
+
+    Schema notes:
+
+    * ``merchant_name`` is the natural key — Plaid keeps it stable per
+      merchant_entity_id, and we never look up without it.
+    * ``logo_url`` may be NULL when we looked but found no hit. The
+      presence of the row (with NULL logo + status='no_hit') is the
+      "don't bother re-checking for a while" marker.
+    * ``status`` makes the no-hit cases inspectable from the audit log.
+    * ``miss_count`` + ``refreshed_at`` drive exponential backoff so
+      we don't burn the rate budget on the same dead lookups every
+      sync. Resolved rows are never re-checked.
+
+    All additive + idempotent.
+    """
+    await _ddl(
+        conn,
+        """
+        CREATE TABLE IF NOT EXISTS merchant_logos (
+            merchant_name   TEXT PRIMARY KEY,
+            logo_url        TEXT,
+            brand_domain    TEXT,
+            quality_score   REAL,
+            status          TEXT NOT NULL DEFAULT 'no_hit'
+                CHECK (status IN ('resolved', 'no_hit', 'low_quality')),
+            miss_count      INTEGER NOT NULL DEFAULT 0,
+            refreshed_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+    )
+
+
 async def _migrate_recurring_user_status(conn) -> None:
     """V2.3: user-managed lifecycle for recurring streams.
 
@@ -1418,6 +1467,7 @@ async def run_v2_migrations(pool) -> None:
         await _migrate_recurring_unsubscribed_state(conn)
         await _migrate_recurring_first_detected_alerted(conn)
         await _migrate_merchant_aliases(conn)
+        await _migrate_merchant_logos(conn)
         await _migrate_transactions_display_title_backfill(conn)
         await _migrate_transactions_transaction_class(conn)
         await _migrate_fix_internal_transfer_class_drift(conn)

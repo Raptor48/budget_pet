@@ -6,10 +6,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
 import {
   BellOff,
+  Calendar as CalendarIcon,
   CalendarClock,
   CheckSquare2,
   ChevronDown,
   ChevronUp,
+  Layers,
+  List as ListIcon,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -81,6 +84,27 @@ import {
   parsePriceChangePct,
   streamTitle,
 } from "./_components/recurring-helpers";
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Backend `primary_category_name` is normally already rolled up to the parent
+ * ("Rent & Utilities"), but the fallback path in `web/recurring/repo.py`
+ * formats unlinked PFC streams as "Parent: Detail"
+ * (e.g. "Loan Payments: Credit Card Loans"). That collapses badly in a chip
+ * — the right half gets ellipsised and the user reads "Loan Payments: Credit…".
+ * Defensive client-side split: keep only the part before the first colon so
+ * the chip always shows the top-level category.
+ */
+function parentCategoryLabel(name: string | null | undefined): string | null {
+  if (!name) return null;
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+  const idx = trimmed.indexOf(":");
+  return idx === -1 ? trimmed : trimmed.slice(0, idx).trim();
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -358,37 +382,23 @@ export default function RecurringPage() {
   );
   const annualTotalCents = monthlyTotalCents * 12;
   const activeCount = kpiStreams.length;
-  const nextUp = useMemo(() => {
-    // streams come pre-sorted by next payment in the API.
-    return kpiStreams.find(
-      (s) => s.last_date && s.frequency && s.frequency !== "UNKNOWN",
-    );
+  // Streams come pre-sorted by next payment from the API. Take the first
+  // few that have a usable cadence so the "Next payments" KPI shows a real
+  // mini-timeline instead of a single row.
+  const upcomingPayments = useMemo(() => {
+    return kpiStreams
+      .filter((s) => s.last_date && s.frequency && s.frequency !== "UNKNOWN")
+      .slice(0, 3);
   }, [kpiStreams]);
 
   const visibleRows = streams; // already filtered server-side
   const allVisibleSelected =
     visibleRows.length > 0 && visibleRows.every((r) => selected.has(r.id));
 
-  // When Plaid's recurring data was last pulled into our DB. The full
-  // Plaid sync (which includes /transactions/recurring/get) stamps
-  // last_synced_at = NOW() on every upserted stream, so the *latest*
-  // value across all streams is effectively "the last time we hit the
-  // Plaid recurring endpoint". Surface it in the header so the user can
-  // see how stale the predicted-next-charge dates are when a stream
-  // misbehaves (e.g. ConEd predicted Tuesday but charged Monday — was it
-  // a Plaid update lag or our sync cadence?).
-  const lastRecurringRefresh = useMemo(() => {
-    let latest: number | null = null;
-    for (const s of streams) {
-      // Skip manual rows — their last_synced_at is just their creation
-      // time and tells us nothing about Plaid freshness.
-      if (s.stream_source === "manual") continue;
-      if (!s.last_synced_at) continue;
-      const t = new Date(s.last_synced_at).getTime();
-      if (Number.isFinite(t) && (latest === null || t > latest)) latest = t;
-    }
-    return latest === null ? null : new Date(latest);
-  }, [streams]);
+  // Plaid sync freshness used to render under the H1 (`Plaid prediction
+  // refreshed N ago`). That live in the global AppLayout header now, and
+  // the per-stream freshness lives in the row's next-payment tooltip — so
+  // we no longer compute a page-level aggregate here.
 
   // Determines whether the bulk action bar should offer Reactivate vs Cancel.
   // We swap the destructive button for Reactivate only when the whole
@@ -406,41 +416,24 @@ export default function RecurringPage() {
       <TooltipProvider>
         <div className="space-y-6 pb-24">
           {/* Header */}
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-3">
               <h1 className="text-2xl font-semibold tracking-tight">Recurring</h1>
-              <p className="text-muted-foreground text-sm">
-                Subscriptions and recurring inflows synced from your bank. Add manual
-                bills that behave like Plaid streams.
-              </p>
-              {lastRecurringRefresh ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <p className="text-muted-foreground/80 mt-1 cursor-help text-xs">
-                      Plaid prediction refreshed{" "}
-                      <span className="font-medium tabular-nums">
-                        {formatDistanceToNow(lastRecurringRefresh, { addSuffix: true })}
-                      </span>
-                    </p>
-                  </TooltipTrigger>
-                  <TooltipContent
-                    side="bottom"
-                    className="max-w-xs text-xs leading-relaxed"
-                  >
-                    <p>
-                      <span className="font-medium">
-                        {lastRecurringRefresh.toLocaleString()}
-                      </span>
-                    </p>
-                    <p className="mt-1 text-muted-foreground">
-                      We pull Plaid&apos;s recurring streams on every sync (default
-                      daily). Plaid itself re-runs its stream detector roughly weekly,
-                      so a predicted next-charge date may lag the real charge by a day
-                      or two.
-                    </p>
-                  </TooltipContent>
-                </Tooltip>
-              ) : null}
+              {/* Outflows / Inflows live here as navigation tabs — they switch
+                  what KPI / Movers / list are looking at, so visually they
+                  belong with the H1 (the "what am I looking at?" anchor),
+                  not next to the status / view filters below. */}
+              <Tabs
+                value={direction === "outflow" ? "out" : "in"}
+                onValueChange={(v) =>
+                  setDirection(v === "out" ? "outflow" : "inflow")
+                }
+              >
+                <TabsList>
+                  <TabsTrigger value="out">Outflows</TabsTrigger>
+                  <TabsTrigger value="in">Inflows</TabsTrigger>
+                </TabsList>
+              </Tabs>
             </div>
             <button
               type="button"
@@ -461,7 +454,7 @@ export default function RecurringPage() {
             monthlyCents={monthlyTotalCents}
             annualCents={annualTotalCents}
             activeCount={activeCount}
-            nextUp={nextUp ?? null}
+            upcoming={upcomingPayments}
           />
 
           {/* Movers (price changes) */}
@@ -496,21 +489,12 @@ export default function RecurringPage() {
             </p>
           ) : null}
 
-          {/* Tabs + filters */}
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <Tabs
-              value={direction === "outflow" ? "out" : "in"}
-              onValueChange={(v) => setDirection(v === "out" ? "outflow" : "inflow")}
-            >
-              <TabsList>
-                <TabsTrigger value="out">Outflows</TabsTrigger>
-                <TabsTrigger value="in">Inflows</TabsTrigger>
-              </TabsList>
-            </Tabs>
-            <div className="flex flex-wrap items-center gap-2">
-              <StatusFilterBar value={statusFilter} onChange={setStatusFilter} />
-              <ViewModeBar value={viewMode} onChange={setViewMode} />
-            </div>
+          {/* Secondary filters — status (which streams) + view mode (how to
+              render them). The Outflows/Inflows tabs lives up by the H1 since
+              it changes what the whole page is about. */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <StatusFilterBar value={statusFilter} onChange={setStatusFilter} />
+            <ViewModeBar value={viewMode} onChange={setViewMode} />
           </div>
 
           {/* Body */}
@@ -726,80 +710,108 @@ function KpiStrip({
   monthlyCents,
   annualCents,
   activeCount,
-  nextUp,
+  upcoming,
 }: {
   direction: Direction;
   monthlyCents: number;
   annualCents: number;
   activeCount: number;
-  nextUp: RecurringStream | null;
+  upcoming: RecurringStream[];
 }) {
   const isOut = direction === "outflow";
-  const monthLabel = isOut ? "Monthly outflows" : "Monthly inflows";
-  const yearLabel = isOut ? "Annual outflows" : "Annual inflows";
-  // Compose the Next-payment sub line so the user sees *what* charges
-  // and *where* it lands in one glance: "Paymthly · $26.98 · ··5993 · @Denis".
-  const nextSubParts: string[] = [];
-  if (nextUp) {
-    nextSubParts.push(streamTitle(nextUp));
-    nextSubParts.push(
-      formatMoney(
-        Math.abs(nextUp.last_amount_cents ?? nextUp.average_amount_cents ?? 0),
-      ),
-    );
-    const tag = accountTag(nextUp);
-    if (tag) nextSubParts.push(tag);
-  }
+  const spendLabel = isOut ? "Recurring spend" : "Recurring inflows";
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      <KpiCard
-        icon={<Wallet className="size-4" aria-hidden />}
-        label={monthLabel}
-        value={formatMoney(monthlyCents)}
-        sub={`${activeCount} active stream${activeCount === 1 ? "" : "s"}`}
+    <div className="grid gap-3 lg:grid-cols-2">
+      <RecurringSpendCard
+        label={spendLabel}
+        monthlyCents={monthlyCents}
+        annualCents={annualCents}
+        activeCount={activeCount}
       />
-      <KpiCard
-        icon={<TrendingUp className="size-4" aria-hidden />}
-        label={yearLabel}
-        value={formatMoney(annualCents)}
-        sub="Estimate · 12× monthly equivalent"
-      />
-      <KpiCard
-        icon={<CalendarClock className="size-4" aria-hidden />}
-        label="Next payment"
-        value={
-          nextUp
-            ? formatNextRecurringDate(nextUp.last_date, nextUp.frequency)
-            : "—"
-        }
-        sub={nextUp ? nextSubParts.join(" · ") : "Nothing scheduled"}
-      />
+      <UpcomingPaymentsCard upcoming={upcoming} />
     </div>
   );
 }
 
-function KpiCard({
-  icon,
+function RecurringSpendCard({
   label,
-  value,
-  sub,
+  monthlyCents,
+  annualCents,
+  activeCount,
 }: {
-  icon: React.ReactNode;
   label: string;
-  value: string;
-  sub?: string;
+  monthlyCents: number;
+  annualCents: number;
+  activeCount: number;
 }) {
   return (
-    <Card className="border-border/70">
-      <CardContent className="flex flex-col gap-1 p-4">
-        <div className="text-muted-foreground inline-flex items-center gap-1.5 text-xs uppercase tracking-wide">
-          {icon}
-          <span>{label}</span>
+    <Card className="gap-3 border-border/70">
+      <CardHeader className="pb-3 border-b">
+        <CardTitle className="flex items-center gap-2 text-base font-bold text-foreground">
+          <Wallet className="size-4 text-muted-foreground" aria-hidden />
+          {label}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          <span className="text-2xl font-semibold tracking-tight tabular-nums">
+            {formatMoney(monthlyCents)}
+            <span className="text-base font-medium text-muted-foreground"> /mo</span>
+          </span>
+          <span className="text-lg font-medium tabular-nums text-muted-foreground">
+            ≈ {formatMoney(annualCents)}
+            <span className="text-sm"> /yr</span>
+          </span>
         </div>
-        <div className="text-2xl font-semibold tracking-tight tabular-nums">
-          {value}
+        <div className="text-xs text-muted-foreground">
+          {activeCount} active stream{activeCount === 1 ? "" : "s"} · annual is
+          12× the monthly equivalent
         </div>
-        {sub ? <div className="text-muted-foreground text-xs">{sub}</div> : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function UpcomingPaymentsCard({ upcoming }: { upcoming: RecurringStream[] }) {
+  // Text-only mini-list — small (24px) avatars with 14px initials inside
+  // read as a typographic mess in a KPI card. The merchant name is a
+  // strong-enough identifier here, so we drop the visual ornament and
+  // give the list a clean ledger feel: date · name · amount.
+  return (
+    <Card className="gap-3 border-border/70">
+      <CardHeader className="pb-3 border-b">
+        <CardTitle className="flex items-center gap-2 text-base font-bold text-foreground">
+          <CalendarClock className="size-4 text-muted-foreground" aria-hidden />
+          Next payments
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        {upcoming.length === 0 ? (
+          <p className="text-sm text-muted-foreground">Nothing scheduled.</p>
+        ) : (
+          <ul className="divide-y divide-border/40">
+            {upcoming.map((s) => {
+              const label = streamTitle(s);
+              const amount = formatMoney(
+                Math.abs(s.last_amount_cents ?? s.average_amount_cents ?? 0),
+              );
+              return (
+                <li
+                  key={s.id}
+                  className="grid grid-cols-[5rem_1fr_auto] items-baseline gap-3 py-1.5 first:pt-0 last:pb-0 text-sm"
+                >
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    {formatNextRecurringDate(s.last_date, s.frequency)}
+                  </span>
+                  <span className="truncate font-medium">{label}</span>
+                  <span className="shrink-0 text-right font-semibold tabular-nums">
+                    {amount}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </CardContent>
     </Card>
   );
@@ -848,52 +860,91 @@ function MoversSection({
 }) {
   const hikes = movers.filter((m) => m.monthlyDeltaCents > 0);
   const drops = movers.filter((m) => m.monthlyDeltaCents < 0);
-  const HIDDEN_TAKE = 3;
-  const hikesToShow = showAll ? hikes : hikes.slice(0, HIDDEN_TAKE);
-  const dropsToShow = showAll ? drops : drops.slice(0, HIDDEN_TAKE);
-  const hiddenCount = hikes.length + drops.length - hikesToShow.length - dropsToShow.length;
+  const [expanded, setExpanded] = useState(false);
+
+  // Compact summary line (always visible) — same information as the chips
+  // but in a single horizontal strip. Toggle reveals the full chip board
+  // for users who want to triage individual movers.
+  const summaryParts = [
+    hikes.length > 0
+      ? `${hikes.length} stream${hikes.length === 1 ? "" : "s"} got more expensive`
+      : null,
+    drops.length > 0
+      ? `${drops.length} got cheaper`
+      : null,
+  ].filter(Boolean);
 
   return (
-    <Card className="border-border/70 bg-muted/20">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-base">Price changes</CardTitle>
-        <p className="text-muted-foreground text-xs">
-          Streams with notable movement vs the long-term average. Sorted by monthly
-          $ impact, not %. Click a chip to jump to the row.
-        </p>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        {hikesToShow.length > 0 ? (
-          <MoverRow
-            heading="Got more expensive"
-            tone="warn"
-            movers={hikesToShow}
-            onChipClick={onChipClick}
-            onSnooze={onSnooze}
-          />
-        ) : null}
-        {dropsToShow.length > 0 ? (
-          <MoverRow
-            heading="Got cheaper"
-            tone="good"
-            movers={dropsToShow}
-            onChipClick={onChipClick}
-            onSnooze={onSnooze}
-          />
-        ) : null}
-        {hiddenCount > 0 || showAll ? (
-          <button
-            type="button"
-            onClick={onToggleShowAll}
-            className="text-muted-foreground hover:text-foreground self-start text-xs underline-offset-2 hover:underline"
-          >
-            {showAll
-              ? "Show fewer"
-              : `Show ${hiddenCount} more change${hiddenCount === 1 ? "" : "s"}`}
-          </button>
-        ) : null}
-      </CardContent>
-    </Card>
+    <div className="rounded-md border border-border/70 bg-muted/20">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center gap-3 px-3 py-2 text-left sm:px-4"
+        aria-expanded={expanded}
+      >
+        <span className="inline-flex items-center gap-2 text-sm font-medium">
+          {hikes.length > 0 ? (
+            <TrendingUp className="size-4 text-orange-600 dark:text-orange-400" aria-hidden />
+          ) : (
+            <TrendingDown className="size-4 text-emerald-600 dark:text-emerald-400" aria-hidden />
+          )}
+          Price changes
+        </span>
+        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+          {summaryParts.join(" · ")}
+        </span>
+        <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
+          {expanded ? "Hide" : "Show details"}
+          {expanded ? (
+            <ChevronUp className="size-3.5" aria-hidden />
+          ) : (
+            <ChevronDown className="size-3.5" aria-hidden />
+          )}
+        </span>
+      </button>
+      {expanded ? (
+        <div className="flex flex-col gap-3 border-t border-border/60 px-3 py-3 sm:px-4">
+          <p className="text-muted-foreground text-xs">
+            Sorted by monthly $ impact, not %. Click a chip to jump to the row.
+          </p>
+          {hikes.length > 0 ? (
+            <MoverRow
+              heading="Got more expensive"
+              tone="warn"
+              movers={showAll ? hikes : hikes.slice(0, 3)}
+              onChipClick={onChipClick}
+              onSnooze={onSnooze}
+            />
+          ) : null}
+          {drops.length > 0 ? (
+            <MoverRow
+              heading="Got cheaper"
+              tone="good"
+              movers={showAll ? drops : drops.slice(0, 3)}
+              onChipClick={onChipClick}
+              onSnooze={onSnooze}
+            />
+          ) : null}
+          {(() => {
+            const visibleHikes = showAll ? hikes.length : Math.min(3, hikes.length);
+            const visibleDrops = showAll ? drops.length : Math.min(3, drops.length);
+            const hidden = hikes.length + drops.length - visibleHikes - visibleDrops;
+            if (hidden <= 0 && !showAll) return null;
+            return (
+              <button
+                type="button"
+                onClick={onToggleShowAll}
+                className="text-muted-foreground hover:text-foreground self-start text-xs underline-offset-2 hover:underline"
+              >
+                {showAll
+                  ? "Show fewer"
+                  : `Show ${hidden} more change${hidden === 1 ? "" : "s"}`}
+              </button>
+            );
+          })()}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -1016,26 +1067,36 @@ function ViewModeBar({
   value: ViewMode;
   onChange: (v: ViewMode) => void;
 }) {
+  // Icon-only buttons: list / grouped / calendar is the standard UI vocabulary
+  // for list / grid / calendar (the gestalt is clear from the glyphs alone).
+  // Tooltips carry the prose for screen-readers and unfamiliar users.
+  const options: Array<{ key: ViewMode; label: string; icon: React.ReactNode }> = [
+    { key: "list", label: "List", icon: <ListIcon className="size-4" /> },
+    { key: "by-category", label: "By category", icon: <Layers className="size-4" /> },
+    { key: "calendar", label: "Calendar", icon: <CalendarIcon className="size-4" /> },
+  ];
   return (
     <div className="bg-muted text-muted-foreground inline-flex h-9 items-center rounded-md p-1">
-      {[
-        { key: "list" as const, label: "List" },
-        { key: "by-category" as const, label: "By category" },
-        { key: "calendar" as const, label: "Calendar" },
-      ].map((opt) => (
-        <button
-          key={opt.key}
-          type="button"
-          onClick={() => onChange(opt.key)}
-          className={cn(
-            "h-7 rounded-sm px-2.5 text-xs transition-colors",
-            value === opt.key
-              ? "bg-background text-foreground shadow-sm"
-              : "hover:text-foreground",
-          )}
-        >
-          {opt.label}
-        </button>
+      {options.map((opt) => (
+        <Tooltip key={opt.key}>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={() => onChange(opt.key)}
+              aria-label={opt.label}
+              aria-pressed={value === opt.key}
+              className={cn(
+                "inline-flex h-7 w-8 items-center justify-center rounded-sm transition-colors",
+                value === opt.key
+                  ? "bg-background text-foreground shadow-sm"
+                  : "hover:text-foreground",
+              )}
+            >
+              {opt.icon}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{opt.label}</TooltipContent>
+        </Tooltip>
       ))}
     </div>
   );
@@ -1152,7 +1213,13 @@ function ListView({
         <span className="w-[120px] shrink-0">Next payment</span>
         <span className="w-[110px] shrink-0 text-right">Amount</span>
         <span className="w-[160px] shrink-0">Category</span>
-        <span className="w-8 shrink-0 sr-only">Actions</span>
+        {/* Reserve the 32px the row's actions menu occupies on the right.
+            `sr-only` on the placeholder itself would set position:absolute +
+            width:1px, collapsing the layout — keep the wrapper as a regular
+            inline-block taking real width and tuck the a11y label inside. */}
+        <span className="w-8 shrink-0" aria-hidden>
+          <span className="sr-only">Actions</span>
+        </span>
       </div>
       {rows.map((row) => (
         <RecurringRow
@@ -1236,13 +1303,11 @@ function RecurringRow({
   ) => void;
 }) {
   const title = streamTitle(row);
-  const pct = parsePriceChangePct(row.price_change_pct);
-  const showPriceAlert =
-    pct != null && Math.abs(pct) > PRICE_CHANGE_THRESHOLD_PCT && !isSnoozedNow(row);
+  // pct + showPriceAlert moved into AmountCell (lives next to the dollar).
   const lifecycle = effectiveUserStatus(row);
   const muted = lifecycle === "cancelled";
   const categoryColor = row.primary_category_color ?? null;
-  const categoryName = row.primary_category_name?.trim() || null;
+  const categoryName = parentCategoryLabel(row.primary_category_name);
   const acctTag = accountTag(row);
 
   return (
@@ -1276,7 +1341,7 @@ function RecurringRow({
       </button>
 
       {/* Avatar */}
-      <StreamAvatar stream={row} size={36} />
+      <StreamAvatar stream={row} logoUrl={row.logo_url} size={36} />
 
       {/* Description / edit form */}
       <div className="min-w-0 flex-1">
@@ -1339,18 +1404,9 @@ function RecurringRow({
                 ) : null}
               </Tooltip>
               <UserStatusPill status={lifecycle} />
-              {showPriceAlert ? (
-                <PriceChangeBadge pct={pct} direction={row.direction} compact />
-              ) : null}
-              {isSnoozedNow(row) ? (
-                <span
-                  className="text-muted-foreground inline-flex items-center gap-1 rounded-full border bg-muted/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
-                  title={`Price-change alerts snoozed until ${row.price_change_snoozed_until}`}
-                >
-                  <BellOff className="size-2.5" />
-                  Snoozed
-                </span>
-              ) : null}
+              {/* Price-change badge + Snoozed pill describe the AMOUNT,
+                  not the merchant identity, so they render inside
+                  AmountCell on the right side of the row. */}
             </div>
             <div className="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
               <span>{formatFrequency(row.frequency)}</span>
@@ -1371,9 +1427,6 @@ function RecurringRow({
                 <span className="text-foreground tabular-nums">
                   {formatNextRecurringDate(row.last_date, row.frequency)}
                 </span>
-                {row.last_date ? (
-                  <span>· last {formatRecurringDate(row.last_date)}</span>
-                ) : null}
               </span>
               {categoryName ? (
                 <span
@@ -1395,28 +1448,31 @@ function RecurringRow({
         )}
       </div>
 
-      {/* Desktop-only: Next payment column.
-          Wrapped in a Tooltip so the user can see when Plaid last
-          refreshed THIS specific stream's prediction — useful when a
+      {/* Desktop-only: Next payment column. Shows only the next date in the
+          cell to keep the row scannable. The tooltip carries the secondary
+          context — last-charge date and Plaid sync stamp — useful when a
           predicted date doesn't match the real charge (Plaid's stream
           detector lags by 1-2 days even on a daily sync). */}
       <Tooltip>
         <TooltipTrigger asChild>
-          <div className="hidden w-[120px] shrink-0 cursor-help text-xs leading-tight sm:block">
+          <div className="hidden w-[120px] shrink-0 cursor-help text-sm leading-tight sm:block">
             <div className="text-foreground tabular-nums">
               {formatNextRecurringDate(row.last_date, row.frequency)}
             </div>
-            {row.last_date ? (
-              <div className="text-muted-foreground tabular-nums">
-                last {formatRecurringDate(row.last_date)}
-              </div>
-            ) : null}
           </div>
         </TooltipTrigger>
         <TooltipContent side="top" className="text-xs">
+          {row.last_date ? (
+            <p>
+              Last charge{" "}
+              <span className="font-medium tabular-nums">
+                {formatRecurringDate(row.last_date)}
+              </span>
+            </p>
+          ) : null}
           {row.last_synced_at ? (
             <>
-              <p>
+              <p className="mt-1">
                 Plaid prediction refreshed{" "}
                 <span className="font-medium tabular-nums">
                   {formatDistanceToNow(new Date(row.last_synced_at), {
@@ -1428,9 +1484,9 @@ function RecurringRow({
                 {new Date(row.last_synced_at).toLocaleString()}
               </p>
             </>
-          ) : (
+          ) : !row.last_date ? (
             <p>No refresh stamp on this stream.</p>
-          )}
+          ) : null}
         </TooltipContent>
       </Tooltip>
 
@@ -1478,21 +1534,59 @@ function AmountCell({ row }: { row: RecurringStream }) {
   const avg = row.average_amount_cents ?? 0;
   const pct = parsePriceChangePct(row.price_change_pct);
   const tone = classifyPriceChange(pct, row.direction);
+  const snoozed = isSnoozedNow(row);
+  const showPriceAlert =
+    pct != null && Math.abs(pct) > PRICE_CHANGE_THRESHOLD_PCT && !snoozed;
   const lastClass =
     tone === "warn"
       ? "text-orange-700 dark:text-orange-300"
       : tone === "good"
         ? "text-emerald-700 dark:text-emerald-300"
         : "text-foreground";
+  // Price-change badge (or Snoozed indicator) stacks above the latest charge
+  // — the magnitude (`-41%`) plus the new dollar value (`$35.00`) read top-
+  // down as one coherent unit. Long-term average + exact pct live in the
+  // tooltip so the cell stays narrow.
   return (
-    <div className="text-right tabular-nums leading-tight">
-      <div className={cn("text-sm font-semibold", lastClass)}>
-        {formatMoney(Math.abs(last))}
-      </div>
-      <div className="text-muted-foreground text-xs">
-        avg {formatMoney(Math.abs(avg))}
-      </div>
-    </div>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="flex cursor-help flex-col items-end gap-0.5 leading-tight">
+          {showPriceAlert ? (
+            <PriceChangeBadge pct={pct} direction={row.direction} compact />
+          ) : snoozed ? (
+            <span
+              className="text-muted-foreground inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide"
+              title={`Price-change alerts snoozed until ${row.price_change_snoozed_until}`}
+            >
+              <BellOff className="size-2.5" />
+              Snoozed
+            </span>
+          ) : null}
+          <div
+            className={cn(
+              "text-right text-sm font-semibold tabular-nums",
+              lastClass,
+            )}
+          >
+            {formatMoney(Math.abs(last))}
+          </div>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="text-xs">
+        <p>
+          Long-term avg{" "}
+          <span className="font-medium tabular-nums">
+            {formatMoney(Math.abs(avg))}
+          </span>
+        </p>
+        {pct != null ? (
+          <p className="text-muted-foreground">
+            Latest is {pct > 0 ? "+" : ""}
+            {pct.toFixed(1)}% vs avg
+          </p>
+        ) : null}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -1752,7 +1846,7 @@ function ByCategoryView({
     const map = new Map<string, Group>();
     for (const r of rows) {
       const key = String(r.primary_category_id ?? "uncat");
-      const name = r.primary_category_name?.trim() || "Uncategorized";
+      const name = parentCategoryLabel(r.primary_category_name) ?? "Uncategorized";
       const color = r.primary_category_color ?? null;
       const g = map.get(key) ?? { key, name, color, rows: [], monthlyCents: 0 };
       g.rows.push(r);
@@ -1896,7 +1990,7 @@ function CategoryGroupRow({
       >
         {isSelected ? <CheckSquare2 className="size-4" /> : <Square className="size-4" />}
       </button>
-      <StreamAvatar stream={row} size={28} />
+      <StreamAvatar stream={row} logoUrl={row.logo_url} size={28} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="min-w-0 max-w-full truncate text-sm font-medium">

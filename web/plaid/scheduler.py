@@ -180,6 +180,20 @@ async def _sync_item_payload(
         except Exception as exc:
             logger.warning("Shared auto-matcher failed for item %s: %s", item_id, exc)
 
+        # Brandfetch merchant-logo enrichment: fill in logos for
+        # merchants Plaid didn't enrich (~43% of named merchants in
+        # the wild). Fire-and-forget so a 250ms-throttled lookup loop
+        # doesn't tack ~10s onto the user-visible sync time during
+        # the initial 254-merchant backfill. Steady-state runs touch
+        # 0–2 new merchants per sync, but the background pattern is
+        # the same so the sync path is always non-blocking.
+        try:
+            from web.enrichment.service import schedule_merchant_enrichment
+
+            schedule_merchant_enrichment()
+        except Exception as exc:
+            logger.warning("Brandfetch enrichment kickoff failed for item %s: %s", item_id, exc)
+
         await repo.clear_connection_flags(item_id)
 
         logger.info(

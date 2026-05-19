@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Fragment as ReactFragment,
   useCallback,
   useDeferredValue,
   useEffect,
@@ -29,11 +30,18 @@ import {
   Eye,
   EyeOff,
   FileText,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  Check,
   HandCoins,
   Info,
+  Link2,
   Loader2,
   MapPin,
+  MoreHorizontal,
   Receipt,
+  Repeat,
   Settings,
   StickyNote,
   Store,
@@ -41,6 +49,7 @@ import {
   Trash2,
   Users,
   Wifi,
+  X,
   type LucideIcon,
 } from "lucide-react";
 
@@ -65,6 +74,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { MonthYearPicker } from "@/components/ui/month-year-picker";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -99,8 +113,8 @@ import {
 import { TRANSACTIONS_DATE_RANGE_QUERY_KEY } from "@/lib/hooks/use-transactions-date-range";
 import { confirm, notify, onMutationError } from "@/lib/notify";
 import {
-  formatPlaidTxnAmountForDisplay,
   formatPlaidTxnAmountLegacy,
+  formatPlaidTxnAmountUnsigned,
 } from "@/lib/plaid-transaction-amount";
 import { normalizeTransactionTitle, rawTransactionTitle } from "@/lib/transaction-display";
 import { cn } from "@/lib/utils";
@@ -118,8 +132,12 @@ import type {
 
 const ALL = "all";
 
+/** Plain `$X.XX` without a `+/-` prefix. Callers that need direction either
+ *  use a tone (PlaidTxnAmount) or prepend their own sign (SharedActivityChip).
+ *  Previously called `formatPlaidTxnAmountForDisplay` which embedded a sign;
+ *  that produced `+-$X.XX` when SharedActivityChip stacked its own sign on top. */
 function formatMoney(cents: number): string {
-  return formatPlaidTxnAmountForDisplay(cents, "USD");
+  return formatPlaidTxnAmountUnsigned(cents, "USD");
 }
 
 function currentMonth(): string {
@@ -141,10 +159,68 @@ function displayName(tx: Transaction): string {
 function displayDate(tx: Transaction): string {
   const d = tx.authorized_date || tx.date;
   try {
-    return format(new Date(d), "MMM d, yyyy");
+    // Year is already selected in the page filter (Month / Year dropdowns)
+    // so the row itself only needs weekday + day + month. The weekday
+    // prefix doubles the at-a-glance temporal context with no width cost.
+    return format(new Date(d), "EEE, MMM d");
   } catch {
     return d;
   }
+}
+
+/** Banner-row label for the date-group header. Spelled-out weekday +
+ *  long date for the header where the row's compact form would feel terse. */
+function formatGroupDayLabel(iso: string): string {
+  try {
+    return format(new Date(iso), "EEEE, MMM d");
+  } catch {
+    return iso;
+  }
+}
+
+/** Clickable column header that cycles desc → asc → idle. The arrow icon
+ *  signals current sort state; idle shows a neutral up/down icon so users
+ *  know the column is sortable without committing to a direction. */
+function SortableHeader({
+  label,
+  active,
+  dir,
+  onClick,
+  align = "left",
+}: {
+  label: string;
+  active: boolean;
+  dir: "asc" | "desc";
+  onClick: () => void;
+  align?: "left" | "right";
+}) {
+  const Icon = !active ? ArrowUpDown : dir === "asc" ? ArrowUp : ArrowDown;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "inline-flex items-center gap-1.5 text-sm font-medium transition-colors hover:text-foreground",
+        active ? "text-foreground" : "text-muted-foreground",
+        align === "right" && "flex-row-reverse",
+      )}
+    >
+      <Icon className={cn("size-3.5", !active && "opacity-50")} aria-hidden />
+      <span>{label}</span>
+    </button>
+  );
+}
+
+/** Per-day spend - income summary for the group-header banner. Internal
+ *  transfers are excluded so the number lines up with the page summary. */
+function computeDayTotal(rows: Transaction[]): { incomeCents: number; expenseCents: number } {
+  let income = 0;
+  let expense = 0;
+  for (const tx of rows) {
+    if (tx.transaction_class === "income") income += -tx.amount_cents;
+    else if (tx.transaction_class === "expense") expense += tx.amount_cents;
+  }
+  return { incomeCents: income, expenseCents: expense };
 }
 
 function channelIcon(paymentChannel: string | null) {
@@ -181,18 +257,22 @@ function AccountChip({ tx }: { tx: Transaction }) {
   );
 }
 
-// 8 vivid gradients used as a deterministic fallback when Plaid did not
-// enrich the merchant with a logo. Listed as full literal strings so
-// Tailwind's JIT actually generates the classes.
+// Muted 8-gradient fallback when Plaid did not enrich the merchant with a
+// logo. 500 → 700 with /70-/75 alpha so the avatar reads as a tinted
+// background block rather than a saturated chip — keeps deterministic
+// per-merchant identity without competing with status / price-change
+// signals in the same row. Listed as full literal strings so Tailwind's
+// JIT actually generates the classes.
+// Keep in sync with recurring-helpers.tsx and app/page.tsx.
 const MERCHANT_GRADIENTS = [
-  "from-rose-500 to-pink-500",
-  "from-orange-500 to-amber-500",
-  "from-yellow-500 to-lime-500",
-  "from-emerald-500 to-teal-500",
-  "from-cyan-500 to-sky-500",
-  "from-blue-500 to-indigo-500",
-  "from-violet-500 to-fuchsia-500",
-  "from-fuchsia-500 to-rose-500",
+  "from-rose-500/70 to-pink-700/75",
+  "from-orange-500/70 to-amber-700/75",
+  "from-yellow-500/70 to-lime-700/75",
+  "from-emerald-500/70 to-teal-700/75",
+  "from-cyan-500/70 to-sky-700/75",
+  "from-blue-500/70 to-indigo-700/75",
+  "from-violet-500/70 to-fuchsia-700/75",
+  "from-fuchsia-500/70 to-rose-700/75",
 ] as const;
 
 function pickMerchantGradient(seed: string): string {
@@ -2005,6 +2085,95 @@ export default function TransactionsPage() {
     return m;
   }, [categories]);
 
+  // Header summary metric: count + income/expense aggregate for the rows
+  // currently in view. Income is stored as a negative amount_cents in the
+  // Plaid sign convention, so we flip it for display.
+  const summary = useMemo(() => {
+    let income = 0;
+    let expense = 0;
+    for (const tx of filteredTransactions) {
+      if (tx.transaction_class === "income") {
+        income += -tx.amount_cents;
+      } else if (tx.transaction_class === "expense") {
+        expense += tx.amount_cents;
+      }
+    }
+    return {
+      count: filteredTransactions.length,
+      incomeCents: income,
+      expenseCents: expense,
+    };
+  }, [filteredTransactions]);
+
+  // Column-sort state. Default sort is the server's "newest first" — we
+  // toggle to a client-side sort only when the user clicks a sortable
+  // header. Three states per column: idle → desc → asc → idle.
+  const [sortKey, setSortKey] = useState<"date" | "amount" | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const cycleSort = useCallback((key: "date" | "amount") => {
+    setSortKey((prevKey) => {
+      if (prevKey !== key) {
+        setSortDir("desc");
+        return key;
+      }
+      // Already sorting on this key — flip direction; on the second flip,
+      // clear the sort entirely so server-default returns.
+      setSortDir((prevDir) => (prevDir === "desc" ? "asc" : "desc"));
+      return prevKey;
+    });
+  }, []);
+  // Second click on the same column flips desc→asc; third click on the
+  // same column (when already asc) clears. The cycleSort helper above
+  // alternates desc/asc; the clear is a separate setSortKey(null) below.
+  const handleSortClick = useCallback(
+    (key: "date" | "amount") => {
+      if (sortKey === key && sortDir === "asc") {
+        setSortKey(null);
+        setSortDir("desc");
+        return;
+      }
+      cycleSort(key);
+    },
+    [sortKey, sortDir, cycleSort],
+  );
+
+  const sortedTransactions = useMemo(() => {
+    if (sortKey == null) return filteredTransactions;
+    const list = [...filteredTransactions];
+    const dir = sortDir === "asc" ? 1 : -1;
+    list.sort((a, b) => {
+      if (sortKey === "amount") {
+        return (a.amount_cents - b.amount_cents) * dir;
+      }
+      // date: prefer authorized_date, fall back to date
+      const ad = a.authorized_date || a.date || "";
+      const bd = b.authorized_date || b.date || "";
+      return ad < bd ? -1 * dir : ad > bd ? 1 * dir : 0;
+    });
+    return list;
+  }, [filteredTransactions, sortKey, sortDir]);
+
+  // Group sorted transactions by day for the new date-header layout. Idle
+  // sort or date-sort use the natural day grouping; sorting by amount
+  // disables grouping (the user explicitly asked to break the day
+  // structure in favour of price ordering).
+  const groupedByDay = useMemo(() => {
+    if (sortKey === "amount") {
+      return [{ day: "__all__", rows: sortedTransactions }];
+    }
+    const groups: { day: string; rows: typeof sortedTransactions }[] = [];
+    let cur: { day: string; rows: typeof sortedTransactions } | null = null;
+    for (const tx of sortedTransactions) {
+      const day = tx.authorized_date || tx.date || "";
+      if (!cur || cur.day !== day) {
+        cur = { day, rows: [] };
+        groups.push(cur);
+      }
+      cur.rows.push(tx);
+    }
+    return groups;
+  }, [sortedTransactions, sortKey]);
+
   const updateMutation = useMutation({
     mutationFn: (payload: {
       id: number;
@@ -2189,28 +2358,11 @@ export default function TransactionsPage() {
   return (
     <AppLayout>
       <div className="mx-auto max-w-6xl space-y-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Transactions</h1>
-            <p className="text-sm text-muted-foreground">
-              Review, tag, and categorize imported, cash, and linked account activity.
-            </p>
-          </div>
-          <div className="flex shrink-0 gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              onClick={() => setInternalTransferSettingsOpen(true)}
-              title="Internal-transfer settings"
-              aria-label="Internal-transfer settings"
-            >
-              <Settings className="size-4" />
-            </Button>
-            <Button type="button" onClick={() => setAddCashOpen(true)}>
-              Add cash transaction
-            </Button>
-          </div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold tracking-tight">Transactions</h1>
+          <Button type="button" onClick={() => setAddCashOpen(true)}>
+            Add cash transaction
+          </Button>
         </div>
 
         <AddCashTransactionDialog open={addCashOpen} onOpenChange={setAddCashOpen} categories={categories} />
@@ -2219,162 +2371,195 @@ export default function TransactionsPage() {
           onOpenChange={setInternalTransferSettingsOpen}
         />
 
-        <Card className="border-border/80 shadow-sm">
-          <CardHeader className="pb-4">
-            <CardTitle className="text-base">Filters</CardTitle>
-            <CardDescription>Narrow down by period, account, category, person, or text.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:flex lg:flex-row lg:flex-wrap lg:items-end">
-              <div className="col-span-full grid min-w-0 gap-2 sm:col-span-2 md:col-span-3 lg:col-span-1 lg:w-[min(100%,17.5rem)] lg:max-w-none lg:shrink-0">
-                <Label>Month</Label>
-                <MonthYearPicker value={month} onChange={setMonth} />
-              </div>
+        {/* Slim filter toolbar — collapses the old "Filters" card into a
+            single row of compact controls. Power-options (toggles + export
+            + internal-transfer settings) live behind the ⋯ More popover so
+            they don't dominate the top of the page. */}
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="min-w-0 grow basis-[260px] lg:grow-0">
+            <MonthYearPicker value={month} onChange={setMonth} />
+          </div>
 
-              <div className="grid min-w-0 gap-2 lg:min-w-[200px] lg:flex-1">
-                <Label>Account</Label>
-                <Select value={accountId} onValueChange={setAccountId}>
-                  <SelectTrigger className="w-full [&_[data-slot=select-value]]:truncate">
-                    <SelectValue placeholder="Account" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL}>All accounts</SelectItem>
-                    {accounts.map((a) => (
-                      <SelectItem key={a.id} value={String(a.id)}>
-                        {formatAccountPickerLabel(a)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+          <div className="min-w-0 grow basis-[180px]">
+            <Select value={accountId} onValueChange={setAccountId}>
+              <SelectTrigger className="w-full [&_[data-slot=select-value]]:truncate">
+                <SelectValue placeholder="All accounts" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>All accounts</SelectItem>
+                {accounts.map((a) => (
+                  <SelectItem key={a.id} value={String(a.id)}>
+                    {formatAccountPickerLabel(a)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
-              <div className="grid min-w-0 gap-2 lg:min-w-[200px] lg:flex-1">
-                <Label>Category</Label>
-                <Select value={categoryId} onValueChange={setCategoryId}>
-                  <SelectTrigger className="w-full [&_[data-slot=select-value]]:truncate">
-                    <SelectValue placeholder="Category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL}>All categories</SelectItem>
-                    {categories.map((c) => (
-                      <SelectItem key={c.id} value={String(c.id)}>
-                        {c.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+          <div className="min-w-0 grow basis-[180px]">
+            <Select value={categoryId} onValueChange={setCategoryId}>
+              <SelectTrigger className="w-full [&_[data-slot=select-value]]:truncate">
+                <SelectValue placeholder="All categories" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>All categories</SelectItem>
+                {categories.map((c) => (
+                  <SelectItem key={c.id} value={String(c.id)}>
+                    {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
-              {/* Tag dropdown hidden from the default filter strip: in
-                  practice nobody used it (no place produces tag-driven
-                  insights yet) so the column was dead weight. Phase 2
-                  Events will resurrect tags as the per-event grouping
-                  primitive — at which point we'll surface a dedicated
-                  Events filter rather than reviving this dropdown.
-                  ``tagFilterId`` state stays so reset / URL params
-                  keep working. */}
+          {members.length > 1 && (
+            <div className="min-w-0 grow basis-[140px]">
+              <Select value={personId} onValueChange={setPersonId}>
+                <SelectTrigger className="w-full [&_[data-slot=select-value]]:truncate">
+                  <SelectValue placeholder="Everyone" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL}>Everyone</SelectItem>
+                  {members.map((m) => (
+                    <SelectItem key={m.id} value={String(m.id)}>
+                      {m.username}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
 
-              {members.length > 1 && (
-                <div className="grid min-w-0 gap-2 lg:min-w-[150px]">
-                  <Label>Person</Label>
-                  <Select value={personId} onValueChange={setPersonId}>
-                    <SelectTrigger className="w-full [&_[data-slot=select-value]]:truncate">
-                      <SelectValue placeholder="Person" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={ALL}>Everyone</SelectItem>
-                      {members.map((m) => (
-                        <SelectItem key={m.id} value={String(m.id)}>
-                          {m.username}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+          <div className="min-w-0 grow basis-[220px]">
+            <Input
+              id="search"
+              placeholder="Search merchant, name, note…"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+            />
+          </div>
+
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                aria-label="More filter options"
+                title="More filter options"
+              >
+                <MoreHorizontal className="size-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-80 space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1">
+                  <Label htmlFor="show-internal-transfers" className="cursor-pointer text-sm font-medium">
+                    Show internal transactions
+                  </Label>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Intra-family transfers excluded from income / expense totals.
+                  </p>
                 </div>
-              )}
-
-              {/* Channel dropdown removed from the visible strip — the
-                  online/in-store/other distinction is already shown as
-                  an inline icon on every row and rarely used as a
-                  filter. ``channel`` state preserved so URL params
-                  / reset semantics don't regress. */}
-
-              <div className="col-span-1 grid gap-2 sm:col-span-2 md:col-span-3 lg:col-span-1 lg:min-w-[220px] lg:flex-[2]">
-                <Label htmlFor="search">Search</Label>
-                <Input
-                  id="search"
-                  placeholder="Merchant, name, note…"
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
+                <Switch
+                  id="show-internal-transfers"
+                  checked={showInternalTransfers}
+                  onCheckedChange={setShowInternalTransfers}
+                  className="mt-0.5"
                 />
               </div>
 
-              <Button type="button" variant="secondary" className="col-span-2 gap-2 sm:col-span-1 lg:col-auto lg:shrink-0" onClick={handleExportCsv}>
-                <Download className="size-4" />
-                Export CSV
-              </Button>
-            </div>
-
-            <div className="flex flex-col gap-3 border-t border-border/70 pt-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-                <div className="flex items-start gap-2.5">
-                  <Switch
-                    id="show-internal-transfers"
-                    checked={showInternalTransfers}
-                    onCheckedChange={setShowInternalTransfers}
-                    className="mt-0.5"
-                  />
-                  <div className="flex flex-col gap-0.5">
-                    <Label htmlFor="show-internal-transfers" className="cursor-pointer text-sm">
-                      Show internal transactions
-                    </Label>
-                    <p className="text-xs text-muted-foreground">
-                      Hidden by default. Toggle on to audit intra-family transfers excluded from income / expense totals.
-                    </p>
-                  </div>
-                </div>
-
-                {/* Segmented Shared filter — matches the existing
-                    Internal toggle's purpose (filter rows by a structural
-                    property) but with 3 states because "all / shared
-                    only / outstanding only" maps to 3 distinct intents.
-                    Receivable categories collected at render time so a
-                    rare second receivable category (future) just works. */}
-                <div className="flex flex-col gap-1.5">
-                  <Label className="text-sm">Shared expenses</Label>
-                  <div className="bg-muted text-muted-foreground inline-flex h-9 items-center rounded-md p-1">
-                    {(["all", "shared", "outstanding"] as const).map((opt) => (
-                      <button
-                        key={opt}
-                        type="button"
-                        onClick={() => setSharedFilter(opt)}
-                        className={cn(
-                          "h-7 rounded-sm px-2.5 text-xs capitalize transition-colors",
-                          sharedFilter === opt
-                            ? "bg-background text-foreground shadow-sm"
-                            : "hover:text-foreground",
-                        )}
-                      >
-                        {opt}
-                      </button>
-                    ))}
-                  </div>
+              <div>
+                <Label className="text-sm font-medium">Shared expenses</Label>
+                <div className="mt-1.5 inline-flex h-8 w-full items-center rounded-md bg-muted p-1 text-muted-foreground">
+                  {(["all", "shared", "outstanding"] as const).map((opt) => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => setSharedFilter(opt)}
+                      className={cn(
+                        "h-6 flex-1 rounded-sm px-2 text-xs capitalize transition-colors",
+                        sharedFilter === opt
+                          ? "bg-background text-foreground shadow-sm"
+                          : "hover:text-foreground",
+                      )}
+                    >
+                      {opt}
+                    </button>
+                  ))}
                 </div>
               </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="gap-1.5 self-end text-muted-foreground hover:text-foreground sm:self-auto"
-                onClick={resetFilters}
-                disabled={filtersAreDefault}
-                title="Clear account, category, person, search, internal-transfer, and shared-expense filters"
-              >
-                Reset filters
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+
+              <div className="space-y-1.5 border-t border-border/60 pt-3">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="w-full justify-start gap-2"
+                  onClick={handleExportCsv}
+                >
+                  <Download className="size-4" />
+                  Export CSV
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="w-full justify-start gap-2"
+                  onClick={() => setInternalTransferSettingsOpen(true)}
+                >
+                  <Settings className="size-4" />
+                  Internal-transfer settings
+                </Button>
+              </div>
+            </PopoverContent>
+          </Popover>
+
+          {!filtersAreDefault && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-muted-foreground hover:text-foreground"
+              onClick={resetFilters}
+              title="Clear account, category, person, search, internal-transfer, and shared-expense filters"
+            >
+              <X className="size-3.5" />
+              Clear filters
+            </Button>
+          )}
+        </div>
+
+        {/* Summary metric: count + income + expense for the rows currently
+            in view. Lives between the filter strip and the table so it
+            updates the moment the user narrows the list. Internal-transfer
+            counts are excluded because they're not real income/expense. */}
+        {!isLoading && filteredTransactions.length > 0 && (
+          <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1 text-sm text-muted-foreground">
+            <span>
+              <span className="font-semibold tabular-nums text-foreground">
+                {summary.count}
+              </span>{" "}
+              {summary.count === 1 ? "transaction" : "transactions"}
+            </span>
+            {summary.expenseCents > 0 && (
+              <span>
+                Spend{" "}
+                <span className="font-semibold tabular-nums text-rose-600 dark:text-rose-400">
+                  −{formatMoney(summary.expenseCents)}
+                </span>
+              </span>
+            )}
+            {summary.incomeCents > 0 && (
+              <span>
+                Income{" "}
+                <span className="font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                  +{formatMoney(summary.incomeCents)}
+                </span>
+              </span>
+            )}
+          </div>
+        )}
 
         {error ? (
           <p className="text-sm text-destructive" role="alert">
@@ -2408,7 +2593,7 @@ export default function TransactionsPage() {
         {!isLoading && filteredTransactions.length > 0 ? (
           <>
             <div className="space-y-2 md:hidden">
-              {filteredTransactions.map((tx, idx) => (
+              {sortedTransactions.map((tx, idx) => (
                 <TransactionMobileCard
                   key={tx.id}
                   index={idx}
@@ -2438,59 +2623,130 @@ export default function TransactionsPage() {
                         <TableHead className="w-[44px]" />
                         <TableHead>Transaction</TableHead>
                         <TableHead className="hidden md:table-cell">Category</TableHead>
-                        <TableHead className="hidden sm:table-cell">Date</TableHead>
-                        <TableHead className="text-right">Amount</TableHead>
+                        <TableHead className="hidden sm:table-cell">
+                          <SortableHeader
+                            label="Date"
+                            active={sortKey === "date"}
+                            dir={sortDir}
+                            onClick={() => handleSortClick("date")}
+                          />
+                        </TableHead>
+                        <TableHead className="text-right">
+                          <SortableHeader
+                            label="Amount"
+                            active={sortKey === "amount"}
+                            dir={sortDir}
+                            onClick={() => handleSortClick("amount")}
+                            align="right"
+                          />
+                        </TableHead>
                         <TableHead className="hidden min-w-[148px] text-right sm:table-cell">
                           Actions
                         </TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredTransactions.map((tx, idx) => {
-                        const cat =
-                          tx.category_id != null ? categoryById.get(tx.category_id) : undefined;
-                        const catLabel =
-                          cat?.name ?? tx.pfc_detailed ?? tx.pfc_primary ?? "Uncategorized";
-                        const availableTagsToAdd = allTags.filter(
-                          (t) => !tx.tags.some((x) => x.id === t.id),
-                        );
-
+                      {groupedByDay.map((group) => {
+                        // When amount-sort is active we collapse all rows into
+                        // a single synthetic group (day === "__all__"); skip
+                        // the banner row in that case.
+                        const showBanner = group.day !== "__all__";
+                        const total = showBanner ? computeDayTotal(group.rows) : null;
                         return (
-                          <FragmentRow
-                            key={tx.id}
-                            index={idx}
-                            tx={tx}
-                            catLabel={catLabel}
-                            categoryById={categoryById}
-                            availableTagsToAdd={availableTagsToAdd}
-                            loadingList={loadingList}
-                            highlight={highlightId === tx.id}
-                            onRowClick={() => {
-                              setDetailTxId(tx.id);
-                              setDetailOpen(true);
-                            }}
-                            onOpenSplit={(e) => {
-                              e.stopPropagation();
-                              setDetailOpen(false);
-                              setDetailTxId(null);
-                              setSplitTx(tx);
-                              setSplitOpen(true);
-                            }}
-                            onAddTag={(tagId) => addTagMutation.mutate({ txId: tx.id, tagId })}
-                            onRemoveTag={(tagId, e) => {
-                              e.stopPropagation();
-                              removeTagMutation.mutate({ txId: tx.id, tagId });
-                            }}
-                            onDeleteCash={
-                              tx.source === "cash"
-                                ? (ev) => requestDeleteCashTx(tx, ev)
-                                : undefined
-                            }
-                            cashDeletePending={
-                              deleteCashMutation.isPending &&
-                              deleteCashMutation.variables === tx.id
-                            }
-                          />
+                          <ReactFragment key={group.day}>
+                            {showBanner ? (
+                              <TableRow className="border-0 bg-muted/60 hover:bg-muted/60">
+                                <TableCell
+                                  colSpan={6}
+                                  className="border-y-2 border-y-background py-3"
+                                >
+                                  <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                                    <div className="flex items-baseline gap-x-2.5">
+                                      <span className="text-sm font-semibold tracking-tight text-foreground">
+                                        {formatGroupDayLabel(group.day)}
+                                      </span>
+                                      <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                                        {group.rows.length}{" "}
+                                        {group.rows.length === 1 ? "txn" : "txns"}
+                                      </span>
+                                    </div>
+                                    {total &&
+                                    (total.expenseCents > 0 || total.incomeCents > 0) ? (
+                                      <div className="flex items-baseline gap-x-3 text-sm font-semibold tabular-nums">
+                                        {total.expenseCents > 0 ? (
+                                          <span className="text-rose-600 dark:text-rose-400">
+                                            −{formatMoney(total.expenseCents)}
+                                          </span>
+                                        ) : null}
+                                        {total.incomeCents > 0 ? (
+                                          <span className="text-emerald-600 dark:text-emerald-400">
+                                            +{formatMoney(total.incomeCents)}
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            ) : null}
+                            {group.rows.map((tx, idx) => {
+                              const cat =
+                                tx.category_id != null ? categoryById.get(tx.category_id) : undefined;
+                              // Show the top-level category in the list ("Food & Drink"),
+                              // not the parent:detail tuple ("Food & Drink: Fast Food").
+                              // The detailed sub-category is still visible in the row's
+                              // detail dialog. For top-level categories (no parent), this
+                              // is a no-op.
+                              const catParent =
+                                cat?.parent_id != null
+                                  ? categoryById.get(cat.parent_id)
+                                  : null;
+                              const displayCat = catParent ?? cat;
+                              const catLabel =
+                                displayCat?.name ?? tx.pfc_primary ?? "Uncategorized";
+                              const availableTagsToAdd = allTags.filter(
+                                (t) => !tx.tags.some((x) => x.id === t.id),
+                              );
+
+                              return (
+                                <FragmentRow
+                                  key={tx.id}
+                                  index={idx}
+                                  tx={tx}
+                                  catLabel={catLabel}
+                                  categoryById={categoryById}
+                                  availableTagsToAdd={availableTagsToAdd}
+                                  loadingList={loadingList}
+                                  highlight={highlightId === tx.id}
+                                  onRowClick={() => {
+                                    setDetailTxId(tx.id);
+                                    setDetailOpen(true);
+                                  }}
+                                  onOpenSplit={(e) => {
+                                    e.stopPropagation();
+                                    setDetailOpen(false);
+                                    setDetailTxId(null);
+                                    setSplitTx(tx);
+                                    setSplitOpen(true);
+                                  }}
+                                  onAddTag={(tagId) => addTagMutation.mutate({ txId: tx.id, tagId })}
+                                  onRemoveTag={(tagId, e) => {
+                                    e.stopPropagation();
+                                    removeTagMutation.mutate({ txId: tx.id, tagId });
+                                  }}
+                                  onDeleteCash={
+                                    tx.source === "cash"
+                                      ? (ev) => requestDeleteCashTx(tx, ev)
+                                      : undefined
+                                  }
+                                  cashDeletePending={
+                                    deleteCashMutation.isPending &&
+                                    deleteCashMutation.variables === tx.id
+                                  }
+                                />
+                              );
+                            })}
+                          </ReactFragment>
                         );
                       })}
                     </TableBody>
@@ -2587,6 +2843,11 @@ function FragmentRow({
   cashDeletePending?: boolean;
 }) {
   const cat = tx.category_id != null ? categoryById.get(tx.category_id) : undefined;
+  // List shows the parent category only; sub-categories live in the detail
+  // dialog. See the catLabel comment at the call site.
+  const catParent =
+    cat?.parent_id != null ? categoryById.get(cat.parent_id) : null;
+  const displayCat = catParent ?? cat;
   const hasSplits = tx.splits && tx.splits.length > 0;
 
   return (
@@ -2595,7 +2856,11 @@ function FragmentRow({
         id={`txn-row-${tx.id}`}
         data-txn-id={tx.id}
         className={cn(
-          "cursor-pointer transition-[box-shadow] duration-300",
+          // Row separator uses the page-background color (a tone darker
+          // than the table's card bg) and is 2px tall — this creates a
+          // recessed "groove" between rows instead of the near-invisible
+          // hairline default `border-b` produced.
+          "group cursor-pointer border-b-2 border-b-background transition-[box-shadow] duration-300",
           "motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-300",
           highlight && "ring-2 ring-primary ring-offset-2 ring-offset-background",
           tx.is_private && "bg-muted/30",
@@ -2615,15 +2880,6 @@ function FragmentRow({
               >
                 {displayName(tx)}
               </span>
-              {tx.is_pending ? (
-                <Badge
-                  variant="secondary"
-                  className="text-[10px] uppercase tracking-wide"
-                  title="Awaiting clearing — amount may change when the bank posts the transaction."
-                >
-                  Pending
-                </Badge>
-              ) : null}
               {tx.has_receipt ? (
                 <Receipt
                   className="size-3.5 shrink-0 text-muted-foreground"
@@ -2688,8 +2944,20 @@ function FragmentRow({
               ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {channelIcon(tx.payment_channel)}
               <AccountChip tx={tx} />
+              {/* Pending chip — lives on the second row right after the
+                  account chip so its presence/absence doesn't push the
+                  merchant name around as rows update from pending→posted.
+                  Smaller and slightly muted because most freshly-synced
+                  rows carry it; loud styling would drown the list. */}
+              {tx.is_pending ? (
+                <span
+                  className="inline-flex items-center rounded-full bg-amber-500/[0.07] px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-amber-600/75 dark:text-amber-400/65"
+                  title="Awaiting clearing — amount may change when the bank posts the transaction."
+                >
+                  Pending
+                </span>
+              ) : null}
               {onDeleteCash ? (
                 <Button
                   type="button"
@@ -2751,7 +3019,7 @@ function FragmentRow({
               {hasSplits ? (
                 <SplitBreakdown splits={tx.splits} categoryById={categoryById} />
               ) : (
-                <CategoryBadgeInline tx={tx} catLabel={catLabel} category={cat} />
+                <CategoryBadgeInline tx={tx} catLabel={catLabel} category={displayCat} />
               )}
             </div>
           </div>
@@ -2762,7 +3030,7 @@ function FragmentRow({
           {hasSplits ? (
             <SplitBreakdown splits={tx.splits} categoryById={categoryById} />
           ) : (
-            <CategoryBadgeInline tx={tx} catLabel={catLabel} category={cat} />
+            <CategoryBadgeInline tx={tx} catLabel={catLabel} category={displayCat} />
           )}
         </TableCell>
 
@@ -2784,7 +3052,7 @@ function FragmentRow({
         </TableCell>
 
         <TableCell className="hidden text-right align-middle sm:table-cell">
-          <div className="flex flex-wrap items-center justify-end gap-1">
+          <div className="flex flex-wrap items-center justify-end gap-1 opacity-50 transition-opacity duration-150 group-hover:opacity-100 focus-within:opacity-100">
             {onDeleteCash ? (
               <Button
                 type="button"
@@ -2861,7 +3129,8 @@ function SplitBreakdown({
     <div className="flex flex-col gap-0.5">
       {splits.map((s) => {
         const cat = s.category_id != null ? categoryById.get(s.category_id) : undefined;
-        const catName = cat?.name ?? "Uncategorized";
+        const parent = cat?.parent_id != null ? categoryById.get(cat.parent_id) : null;
+        const catName = (parent ?? cat)?.name ?? "Uncategorized";
         // Receivable (Shared) splits get a teal HandCoins glyph and the
         // category's own colour on the icon — this is the only "I'm
         // not really an expense, I'm a ledger entry" affordance in the
@@ -2943,7 +3212,7 @@ function SharedActivityChip({
         className="inline-flex items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-medium text-sky-800 dark:text-sky-200"
         title="Auto-matched as the return for an outstanding shared expense. Edit the split to undo."
       >
-        🔗 {label}
+        <Link2 className="size-3" aria-hidden /> {label}
       </span>
     );
   }
@@ -2969,7 +3238,7 @@ function SharedActivityChip({
               className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/70 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
               title="Shared expense fully settled."
             >
-              ✓ settled{label}
+              <Check className="size-3" aria-hidden /> settled{label}
             </span>
           );
         }
@@ -2985,7 +3254,7 @@ function SharedActivityChip({
                 : "You owe this amount."
             }
           >
-            🤝 {sign}{formatMoney(abs)}{label}
+            <HandCoins className="size-3" aria-hidden /> {sign}{formatMoney(abs)}{label}
           </span>
         );
       })}

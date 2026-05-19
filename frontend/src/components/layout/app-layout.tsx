@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Sidebar } from "./sidebar";
+import { SyncButton } from "./sync-button";
 import { Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -124,10 +125,15 @@ export function AppLayout({ children }: AppLayoutProps) {
 
       {/* ── Main content ── */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* Mobile top bar — shrinks + blurs when user scrolls. */}
+        {/* Top bar — visible on every viewport so the global Plaid Sync
+            control + last-synced timestamp live somewhere persistent.
+            Mobile keeps the menu toggle on the left; desktop just shows
+            the right-aligned sync chip. Shrinks + blurs as the user
+            scrolls into content (same trick as before, now applied on
+            all sizes). */}
         <header
           className={cn(
-            "sticky top-0 z-20 shrink-0 border-b transition-[background-color,backdrop-filter,border-color,padding] duration-200 md:hidden",
+            "sticky top-0 z-20 shrink-0 border-b transition-[background-color,backdrop-filter,border-color,padding] duration-200",
             scrolled
               ? "border-border/60 bg-background/70 supports-[backdrop-filter]:backdrop-blur-md"
               : "border-border bg-card",
@@ -136,31 +142,34 @@ export function AppLayout({ children }: AppLayoutProps) {
           <div className="pt-[env(safe-area-inset-top,0px)] pr-[env(safe-area-inset-right,0px)] pl-[env(safe-area-inset-left,0px)]">
             <div
               className={cn(
-                "flex items-center gap-3 px-4 transition-[height] duration-200",
+                "flex items-center gap-3 px-4 transition-[height] duration-200 sm:px-6",
                 scrolled ? "h-11" : "h-14",
               )}
             >
               <Button
                 variant="ghost"
                 size="icon"
-                className="shrink-0"
+                className="shrink-0 md:hidden"
                 onClick={() => setMobileOpen(true)}
                 aria-label="Open navigation"
               >
                 <Menu className="size-5" />
               </Button>
-              <span className="font-semibold text-primary">Family Budget</span>
+              <span className="font-semibold text-primary md:hidden">Family Budget</span>
               {mobileOpen && (
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="ml-auto shrink-0"
+                  className="shrink-0 md:hidden"
                   onClick={closeMobile}
                   aria-label="Close navigation"
                 >
                   <X className="size-5" />
                 </Button>
               )}
+              <div className="ml-auto">
+                <SyncButton />
+              </div>
             </div>
           </div>
         </header>

@@ -185,6 +185,106 @@ class PlaidRepository:
             )
         return self._row_with_decrypted_token(dict(row)) if row else None
 
+    async def backfill_missing_institution_logos(self) -> int:
+        """Fill ``plaid_items.institution_logo`` via Brandfetch.
+
+        Plaid's institutions endpoint doesn't return a logo for every
+        bank (Chase is the famous miss — licensing-related). We fall
+        back to Brandfetch for the gap: search by ``institution_name``,
+        call Brand API for the canonical asset URL, fetch bytes
+        server-side, base64-encode, store.
+
+        Idempotent: only touches rows where ``institution_logo IS NULL``,
+        so re-running after a successful fill is a no-op. Skips silently
+        when Brandfetch isn't configured (no env vars set). Per-item
+        failures are logged and swallowed — a flaky third-party must
+        never break startup or a sync. Returns the number of rows updated.
+        """
+        from web.enrichment.brandfetch import (
+            best_match,
+            fetch_asset_as_png_base64,
+            get_brand,
+            has_brand_api,
+            is_configured,
+            pick_icon_url,
+            search,
+        )
+
+        if not is_configured() or not has_brand_api():
+            return 0
+
+        pool = await self._pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT item_id, institution_name FROM plaid_items "
+                "WHERE institution_logo IS NULL AND institution_name IS NOT NULL"
+            )
+        if not rows:
+            return 0
+
+        # Two Chase rows share the same institution_name → resolve once
+        # and reuse. Keyed by name (case-insensitive) so casing drift
+        # between Plaid's institution metadata across links doesn't cost
+        # us a duplicate Brand API call (those count against the 100/mo
+        # free tier).
+        resolved_cache: Dict[str, Optional[str]] = {}
+        updated = 0
+        for row in rows:
+            item_id = row["item_id"]
+            name = row["institution_name"]
+            cache_key = (name or "").strip().lower()
+            try:
+                if cache_key in resolved_cache:
+                    b64 = resolved_cache[cache_key]
+                    if not b64:
+                        continue
+                else:
+                    hits = await search(name)
+                    top = best_match(hits, min_quality=0.5)
+                    if not top or not top.get("domain"):
+                        logger.info(
+                            "brandfetch: no usable institution match for %r (item=%s)",
+                            name,
+                            item_id,
+                        )
+                        resolved_cache[cache_key] = None
+                        continue
+                    brand = await get_brand(top["domain"])
+                    if not brand:
+                        resolved_cache[cache_key] = None
+                        continue
+                    asset_url = pick_icon_url(brand)
+                    if not asset_url:
+                        resolved_cache[cache_key] = None
+                        continue
+                    b64 = await fetch_asset_as_png_base64(asset_url)
+                    if not b64:
+                        resolved_cache[cache_key] = None
+                        continue
+                    resolved_cache[cache_key] = b64
+                    logger.info(
+                        "brandfetch: resolved institution %r via %s (qS=%.2f, %dKB)",
+                        name,
+                        top["domain"],
+                        float(top.get("qualityScore") or 0),
+                        len(b64) // 1024,
+                    )
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        "UPDATE plaid_items SET institution_logo = $2 WHERE item_id = $1",
+                        item_id,
+                        b64,
+                    )
+                updated += 1
+            except Exception as exc:  # noqa: BLE001 — best-effort
+                logger.info(
+                    "brandfetch institution backfill failed for item %s (%r): %s",
+                    item_id,
+                    name,
+                    exc,
+                )
+        return updated
+
     async def get_items(self) -> List[Dict[str, Any]]:
         pool = await self._pool()
         async with pool.acquire() as conn:

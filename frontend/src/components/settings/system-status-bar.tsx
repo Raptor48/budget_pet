@@ -1,9 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { Database, Loader2, Palette } from "lucide-react";
+import { Database, Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { ThemeToggle } from "@/components/theme/theme-toggle";
 import { healthApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -49,9 +48,12 @@ function StatusDot({ state, label }: { state: DotState; label: string }) {
 }
 
 /**
- * Compact statusbar-style card combining System Status (left) and
- * Appearance (right) in one row. Replaces two full-size cards with
- * a denser, more utilitarian strip above the page.
+ * Compact System status strip — diagnostic info only (API + DB liveness,
+ * version). The Theme switcher lived here previously but has moved to the
+ * sidebar footer so it's reachable from any page, not just Settings.
+ *
+ * Version comes from `/healthz` (`web/version.py::APP_VERSION`) — single
+ * source, no hand-typed badges anywhere in the UI.
  */
 export function SystemStatusBar() {
   const { data: health, isLoading } = useQuery({
@@ -65,28 +67,16 @@ export function SystemStatusBar() {
 
   return (
     <Card className="overflow-hidden py-0">
-      <div className="grid grid-cols-1 divide-y divide-border/60 md:grid-cols-[1fr_auto] md:divide-x md:divide-y-0">
-        {/* System Status — compact row */}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-2.5">
-          <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            <Database className="size-3.5" />
-            System
-          </span>
-          <StatusDot state={apiState} label="API" />
-          <StatusDot state={dbState} label="DB" />
-          <span className="ml-auto font-mono text-[10px] text-muted-foreground/80">
-            {health?.version ?? "—"}
-          </span>
-        </div>
-
-        {/* Appearance — single-control row */}
-        <div className="flex items-center justify-between gap-3 px-4 py-2">
-          <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            <Palette className="size-3.5" />
-            Theme
-          </span>
-          <ThemeToggle />
-        </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-2.5">
+        <span className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          <Database className="size-3.5" />
+          System
+        </span>
+        <StatusDot state={apiState} label="API" />
+        <StatusDot state={dbState} label="DB" />
+        <span className="ml-auto font-mono text-[10px] text-muted-foreground/80">
+          {health?.version ?? "—"}
+        </span>
       </div>
     </Card>
   );
