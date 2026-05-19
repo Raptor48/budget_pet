@@ -329,12 +329,21 @@ class TransactionsRepository:
                        u.username AS owner_username,
                        a.user_id  AS account_user_id,
                        ma.display_name AS merchant_alias,
+                       -- Brandfetch / user-curated logo fallback. Mirrors
+                       -- list_transactions: `t.*` already carries logo_url,
+                       -- so we stash the join column under a separate name
+                       -- and merge in Python below (can't COALESCE inside a
+                       -- `*`). Keyed on COALESCE(merchant_name, display_title)
+                       -- so Zelle / Wells Fargo (NULL merchant_name) hit too.
+                       ml.logo_url AS _ml_logo_url,
                        EXISTS(SELECT 1 FROM transaction_splits ts WHERE ts.parent_transaction_id = t.id) AS has_splits,
                        EXISTS(SELECT 1 FROM receipts r WHERE r.transaction_id = t.id) AS has_receipt
                 FROM transactions t
                 LEFT JOIN accounts a ON a.id = t.account_id
                 LEFT JOIN users u ON a.user_id = u.id
                 {alias_join_sql("t", "ma")}
+                LEFT JOIN merchant_logos ml ON ml.merchant_name =
+                    COALESCE(NULLIF(t.merchant_name, ''), NULLIF(t.display_title, ''))
                 WHERE t.id = $1
                 """,
                 transaction_id,
@@ -350,6 +359,12 @@ class TransactionsRepository:
             and result.get("account_user_id") != viewer_user_id
         ):
             return None
+        # Stitch the Brandfetch/user-curated fallback into logo_url when
+        # Plaid's own column is empty, then drop the stash key so callers
+        # see a single logo_url field (same contract as list_transactions).
+        stash = result.pop("_ml_logo_url", None)
+        if (not result.get("logo_url")) and stash:
+            result["logo_url"] = stash
         _apply_alias_inplace([result])
         return result
 
