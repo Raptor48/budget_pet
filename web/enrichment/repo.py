@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Optional
 
 from web.db import get_pool
+from web.transactions.display import _GENERIC_MERCHANT_NAMES
 
 
 class MerchantLogosRepository:
@@ -28,6 +29,11 @@ class MerchantLogosRepository:
            (Plaid didn't enrich it).
         2. Either there's no ``merchant_logos`` row yet, OR the existing
            row is unresolved and its backoff window has expired.
+        3. It isn't a generic single-word leak from Plaid like "Online"
+           or "Mobile Recurring" — Brandfetch confidently matches those
+           to *real* but unrelated brands (the "Online" hit comes back
+           as ``rs-online.com`` with qS 0.96), so blocking them at the
+           query layer keeps junk logos out of the row UI entirely.
 
         Backoff: starting from 1 day after the first miss, doubling each
         retry, capped at 30 days. Resolved rows are never re-fetched
@@ -35,6 +41,10 @@ class MerchantLogosRepository:
         admin-triggered code path, not in scope here.
         """
         pool = await get_pool()
+        # ``_GENERIC_MERCHANT_NAMES`` is a frozenset; ``list(...)`` keeps
+        # asyncpg's text[] binding happy and the SQL plan stable across
+        # set iteration order.
+        generic_lower = list(_GENERIC_MERCHANT_NAMES)
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
@@ -43,6 +53,8 @@ class MerchantLogosRepository:
                     FROM transactions
                     WHERE merchant_name IS NOT NULL
                       AND (logo_url IS NULL OR logo_url = '')
+                      AND LOWER(REGEXP_REPLACE(merchant_name, '\\s+', ' ', 'g'))
+                          <> ALL($2::text[])
                 )
                 SELECT c.merchant_name
                 FROM candidates c
@@ -57,6 +69,7 @@ class MerchantLogosRepository:
                 LIMIT $1
                 """,
                 limit,
+                generic_lower,
             )
         return [r["merchant_name"] for r in rows]
 
