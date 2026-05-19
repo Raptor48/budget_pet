@@ -120,10 +120,51 @@ def _coerce_str(value: Any) -> str:
     return str(value).strip()
 
 
+# Generic single words Plaid occasionally serves as ``merchant_name`` for
+# transactions it couldn't actually enrich (e.g. "Online", "Mobile",
+# "Payment" for a Bank of America credit-card autopay). These leak through
+# the lowercase check in ``_looks_pretty`` and produce displays like just
+# "Online" — less informative than cleaning the raw bank string would be.
+# Comparison is case-insensitive against the *normalized* (lowercased,
+# whitespace-collapsed) name so "online", "Online ", "ONLINE" all match.
+_GENERIC_MERCHANT_NAMES = frozenset({
+    "online",
+    "mobile",
+    "payment",
+    "recurring",
+    "transfer",
+    "withdrawal",
+    "deposit",
+    "purchase",
+    "debit",
+    "credit",
+    "online payment",
+    "online transfer",
+    "mobile payment",
+    "mobile recurring",
+    "online mobile",
+    "bill payment",
+    "auto pay",
+    "direct deposit",
+    "ach payment",
+    "ach transfer",
+    "web payment",
+})
+
+
 def _looks_pretty(value: str) -> bool:
     """Heuristic: a string is "pretty" if it has lowercase letters or is short
-    and clean. Plaid's `merchant_name` and counterparty `name` are pretty."""
+    and clean. Plaid's `merchant_name` and counterparty `name` are pretty.
+
+    Generic single-word merchant names ("Online", "Mobile", ...) are
+    rejected so the cleanup pipeline falls through to the raw bank string
+    — "ONLINE/MOBILE RECURRING" → "Online/mobile Recurring" beats just
+    "Online" in every UI surface that renders a transaction.
+    """
     if not value:
+        return False
+    normalized = " ".join(value.lower().split())
+    if normalized in _GENERIC_MERCHANT_NAMES:
         return False
     if any(c.islower() for c in value):
         return True

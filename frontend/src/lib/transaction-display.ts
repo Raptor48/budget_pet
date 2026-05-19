@@ -103,9 +103,39 @@ function coerceStr(value: unknown): string {
   return String(value).trim();
 }
 
+// Mirrors the backend ``_GENERIC_MERCHANT_NAMES`` set — Plaid
+// occasionally serves single generic words as merchant_name when its
+// enrichment punted (e.g. "Online" for a BofA autopay). Keep in sync
+// with ``web/transactions/display.py``.
+const GENERIC_MERCHANT_NAMES = new Set<string>([
+  "online",
+  "mobile",
+  "payment",
+  "recurring",
+  "transfer",
+  "withdrawal",
+  "deposit",
+  "purchase",
+  "debit",
+  "credit",
+  "online payment",
+  "online transfer",
+  "mobile payment",
+  "mobile recurring",
+  "online mobile",
+  "bill payment",
+  "auto pay",
+  "direct deposit",
+  "ach payment",
+  "ach transfer",
+  "web payment",
+]);
+
 function looksPretty(value: string): boolean {
   if (!value) return false;
   if (isShouty(value)) return false;
+  const normalized = value.toLowerCase().split(/\s+/).filter(Boolean).join(" ");
+  if (GENERIC_MERCHANT_NAMES.has(normalized)) return false;
   if (/[a-z]/.test(value)) return true;
   return value.length <= 24 && !/\d/.test(value);
 }
