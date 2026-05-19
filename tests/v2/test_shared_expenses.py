@@ -381,9 +381,13 @@ class TestSharedMatcher:
 
         outstanding_sql = conn.fetchrow.call_args.args[0]
         # Both ends of the BETWEEN reference the lookback interval —
-        # before AND after the inflow date.
-        assert outstanding_sql.count("($3 || ' days')::interval") >= 2
-        assert "+ ($3 || ' days')::interval" in outstanding_sql
+        # before AND after the inflow date. ``make_interval(days => $3)``
+        # is used instead of the older ``($3 || ' days')::interval``
+        # because the string-concat form forces $3 to text and asyncpg
+        # rejects ints into text-inferred parameters (DataError that
+        # silently killed the matcher in production for a week).
+        assert outstanding_sql.count("make_interval(days => $3)") >= 2
+        assert "+ make_interval(days => $3)" in outstanding_sql
 
     @pytest.mark.asyncio
     async def test_no_inflows_clean_noop(self):
@@ -402,6 +406,7 @@ class TestSharedMatcher:
 
         assert counters == {
             "checked": 0, "matched": 0, "ambiguous": 0, "no_match": 0,
+            "decisions": [],
         }
 
     @pytest.mark.asyncio
@@ -422,11 +427,75 @@ class TestSharedMatcher:
 
         assert counters == {
             "checked": 0, "matched": 0, "ambiguous": 0, "no_match": 0,
+            "decisions": [],
         }
         # No fetch / no execute should have happened — strictly the
         # shared_id probe and bail out.
         conn.fetch.assert_not_called()
         conn.execute.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_unrouted_inflows_query_includes_internal_transfer(self):
+        """Real-world bug: a friend's Zelle frequently gets pre-classified
+        as ``internal_transfer`` (name-match on their first name, or
+        Plaid's pair-matcher hitting an unrelated same-amount outflow).
+        Scanning only ``income`` silently dropped those settlements
+        forever. The broadened class predicate is what saves them — pin
+        the SQL shape so a future "simplification" doesn't regress it."""
+        from web.transactions.shared_matcher import try_match_recent_inflows
+
+        conn = AsyncMock()
+        pool = make_mock_pool(conn)
+        conn.fetchval.return_value = 42
+        conn.fetch.return_value = []
+
+        with patch(
+            "web.transactions.shared_matcher.get_pool",
+            AsyncMock(return_value=pool),
+        ):
+            await try_match_recent_inflows()
+
+        # First .fetch() call is _list_unrouted_inflows
+        list_sql = conn.fetch.call_args_list[0].args[0]
+        assert "'income'" in list_sql
+        assert "'uncategorized'" in list_sql
+        assert "'internal_transfer'" in list_sql
+        # And the splits-guard — never overwrite a manually-managed row.
+        assert "NOT EXISTS" in list_sql
+        assert "transaction_splits" in list_sql
+
+    @pytest.mark.asyncio
+    async def test_only_inflow_id_scopes_scan_to_single_row(self):
+        """The manual debug endpoint passes ``only_inflow_id`` so the
+        admin can re-check a single Zelle that they expected to match.
+        Verify that filter is applied in Python (the listing query
+        still scans the full window, but the in-memory filter cuts the
+        decision loop down to one row)."""
+        from web.transactions.shared_matcher import try_match_recent_inflows
+
+        conn = AsyncMock()
+        pool = make_mock_pool(conn)
+        conn.fetchval.return_value = 42
+        conn.fetch.return_value = [
+            {"id": 5, "account_id": 7, "amount_cents": -9000,
+             "transaction_class": "income",
+             "effective_date": date(2026, 5, 14), "merchant_name": "A",
+             "category_id": None},
+            {"id": 6, "account_id": 7, "amount_cents": -5000,
+             "transaction_class": "income",
+             "effective_date": date(2026, 5, 14), "merchant_name": "B",
+             "category_id": None},
+        ]
+        conn.fetchrow.return_value = {"outstanding": 0}
+
+        with patch(
+            "web.transactions.shared_matcher.get_pool",
+            AsyncMock(return_value=pool),
+        ):
+            counters = await try_match_recent_inflows(only_inflow_id=5)
+
+        assert counters["checked"] == 1
+        assert [d["id"] for d in counters["decisions"]] == [5]
 
 
 # ---------------------------------------------------------------------------

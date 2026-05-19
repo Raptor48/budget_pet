@@ -723,6 +723,21 @@ function TransactionDetailsDialog({
     return m;
   }, [categories]);
 
+  // True if this transaction carries at least one Shared (receivable)
+  // split. For those rows the reports-side LATERAL carve-out nets the
+  // parent's amount to zero regardless of ``transaction_class``, so
+  // showing the Auto (income) / Internal-transfer class picker is just
+  // noise — the chosen class doesn't change any totals. Hiding the
+  // picker removes the "but it says income, am I being double-counted?"
+  // confusion that brought us here.
+  const hasReceivableSplit = useMemo(() => {
+    const splits = transaction?.splits ?? [];
+    return splits.some((s) => {
+      if (s.category_id == null) return false;
+      return categoryById.get(s.category_id)?.is_receivable === true;
+    });
+  }, [transaction, categoryById]);
+
   const authorizedDateText =
     transaction?.authorized_date && transaction.authorized_date !== transaction.date
       ? formatAuthorizedDateOnly(String(transaction.authorized_date))
@@ -1163,7 +1178,7 @@ function TransactionDetailsDialog({
                 </Tooltip>
               </TooltipProvider>
             ) : null}
-            {transaction && !isLoading && !isError && onSetClassOverride ? (
+            {transaction && !isLoading && !isError && onSetClassOverride && !hasReceivableSplit ? (
               <Select
                 value={transaction.manual_class_override ?? "auto"}
                 onValueChange={(value) => {
@@ -1419,6 +1434,44 @@ function SplitTransactionDialog({
     },
   });
 
+  /**
+   * Destructive: drop ALL persisted splits on this transaction so the
+   * row reverts to its parent category as the source of truth. We only
+   * surface this in the UI when the user actually has persisted splits
+   * to clear (see ``hasPersistedSplits`` below) — otherwise it's a
+   * no-op that would look broken. Confirmation is mandatory because
+   * any per-split metadata (counterparty, auto_matched_at) is wiped.
+   */
+  const clearSplitsMutation = useMutation({
+    mutationFn: () => transactionsApi.deleteSplits(txId!),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["transactions"] });
+      await queryClient.invalidateQueries({ queryKey: ["transaction-splits", txId] });
+      notify.success("Splits cleared");
+      onOpenChange(false);
+    },
+    onError: (e: Error) => {
+      setError(e.message || "Failed to clear splits");
+    },
+  });
+
+  const handleClearSplits = async () => {
+    if (txId == null) return;
+    const ok = await confirm({
+      title: "Clear splits?",
+      description:
+        "This transaction will revert to a single line under its parent " +
+        "category. Per-split notes, counterparties, and auto-match tags " +
+        "are lost. The transaction itself isn't deleted.",
+      confirmLabel: "Clear splits",
+      destructive: true,
+    });
+    if (!ok) return;
+    clearSplitsMutation.mutate();
+  };
+
+  const hasPersistedSplits = splits.length > 0;
+
   const total = transaction?.amount_cents ?? 0;
 
   /**
@@ -1670,7 +1723,32 @@ function SplitTransactionDialog({
         <div className="shrink-0 border-t border-border px-5 py-3">
           <div className="flex items-center justify-between gap-3">
             <p className="text-xs text-muted-foreground">{totalLabel}</p>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {/* Destructive "Clear splits" — only shown when the row
+                  actually has persisted splits to wipe. Hidden during
+                  Save to keep the footer tidy. */}
+              {hasPersistedSplits ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  onClick={handleClearSplits}
+                  disabled={
+                    isLoading ||
+                    setSplitsMutation.isPending ||
+                    clearSplitsMutation.isPending
+                  }
+                  title="Remove all splits and revert to the parent category"
+                >
+                  {clearSplitsMutation.isPending ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Trash2 className="size-4" />
+                  )}
+                  Clear splits
+                </Button>
+              ) : null}
               <Button type="button" variant="outline" size="sm" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
@@ -1678,7 +1756,12 @@ function SplitTransactionDialog({
                 type="button"
                 size="sm"
                 onClick={handleSave}
-                disabled={isLoading || setSplitsMutation.isPending || !transaction}
+                disabled={
+                  isLoading ||
+                  setSplitsMutation.isPending ||
+                  clearSplitsMutation.isPending ||
+                  !transaction
+                }
               >
                 {setSplitsMutation.isPending ? (
                   <>
