@@ -183,7 +183,13 @@ class RecurringRepository:
                     COALESCE(pc.name, c.name) AS primary_category_name,
                     COALESCE(pc.color, c.color) AS primary_category_color,
                     ma.display_name           AS merchant_alias,
-                    merchant_logos.logo_url   AS logo_url
+                    -- Two logo sources, tried in order:
+                    --   1. most-recent transaction with the same
+                    --      merchant_name (Plaid-licensed asset);
+                    --   2. merchant_logos table (Brandfetch fallback).
+                    -- Plaid's logo wins when present because it's a
+                    -- licensed brand asset; Brandfetch fills the gap.
+                    COALESCE(tx_logos.logo_url, ml.logo_url) AS logo_url
                 FROM recurring_streams rs
                 LEFT JOIN accounts a   ON a.id = rs.account_id
                 LEFT JOIN users u      ON u.id = a.user_id
@@ -204,8 +210,10 @@ class RecurringRepository:
                     WHERE merchant_name IS NOT NULL
                       AND logo_url      IS NOT NULL
                     ORDER BY merchant_name, date DESC NULLS LAST
-                ) merchant_logos
-                  ON merchant_logos.merchant_name = rs.merchant_name
+                ) tx_logos
+                  ON tx_logos.merchant_name = rs.merchant_name
+                LEFT JOIN merchant_logos ml
+                  ON ml.merchant_name = rs.merchant_name
                 {where}
                 """,
                 *params,

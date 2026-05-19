@@ -27,9 +27,12 @@ Design notes:
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import os
+import re
+from difflib import SequenceMatcher
 from io import BytesIO
 from typing import Optional
 from urllib.parse import quote
@@ -106,19 +109,47 @@ async def search(query: str) -> list[dict]:
     if not q:
         return []
     url = f"{_API_BASE}/search/{quote(q)}?c={cid}"
+    # One soft retry on 429 — Brandfetch's "Retry-After" header tells us
+    # exactly when the bucket refills (usually 1–3 seconds for the
+    # search endpoint). Anything else is a hard failure and we move on.
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT, headers=_HEADERS) as client:
-            resp = await client.get(url)
-            if resp.status_code != 200:
-                logger.info("brandfetch search %r → HTTP %s", q, resp.status_code)
-                return []
-            data = resp.json()
-            if not isinstance(data, list):
-                return []
-            return data
+            for attempt in range(2):
+                resp = await client.get(url)
+                if resp.status_code == 429 and attempt == 0:
+                    wait = _parse_retry_after(resp.headers.get("retry-after"), default=2.0)
+                    logger.info(
+                        "brandfetch search %r rate-limited, sleeping %.1fs",
+                        q,
+                        wait,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                if resp.status_code != 200:
+                    logger.info("brandfetch search %r → HTTP %s", q, resp.status_code)
+                    return []
+                data = resp.json()
+                if not isinstance(data, list):
+                    return []
+                return data
+            return []
     except Exception as exc:  # noqa: BLE001 — best-effort lookup, swallow
         logger.info("brandfetch search %r failed: %s", q, exc)
         return []
+
+
+def _parse_retry_after(header: Optional[str], *, default: float) -> float:
+    """Parse the Retry-After header. Supports the integer-seconds form
+    (RFC 7231 §7.1.3) — Brandfetch doesn't use the HTTP-date form, so
+    no need to handle it. Caps to 30s to keep a runaway backend from
+    stalling a sync indefinitely.
+    """
+    if not header:
+        return default
+    try:
+        return min(30.0, max(0.5, float(header.strip())))
+    except (TypeError, ValueError):
+        return default
 
 
 async def get_brand(domain: str) -> Optional[dict]:
@@ -148,7 +179,42 @@ async def get_brand(domain: str) -> Optional[dict]:
         return None
 
 
-def best_match(results: list[dict], min_quality: float = 0.5) -> Optional[dict]:
+_NORMALIZE_RE = re.compile(r"[^a-z0-9]+")
+
+
+def _normalize(text: str) -> str:
+    """Lowercase + strip everything non-alphanumeric. Used by the
+    name-similarity gate so '7thstreet' and '7thStreetTheatre' don't
+    match while '7thstreet' and '7th Street' do.
+    """
+    return _NORMALIZE_RE.sub("", (text or "").lower())
+
+
+def _name_similarity(query: str, candidate: dict) -> float:
+    """Maximum SequenceMatcher ratio between normalized ``query`` and
+    either the candidate's display name or the second-level domain
+    (e.g. ``boosty`` from ``boosty.to``). 1.0 means exact match;
+    typical real hits score 0.85+, false positives (substring of
+    something else) score below 0.7.
+    """
+    nq = _normalize(query)
+    if not nq:
+        return 0.0
+    nn = _normalize(candidate.get("name") or "")
+    domain = (candidate.get("domain") or "").split(".")[0]
+    nd = _normalize(domain)
+    name_ratio = SequenceMatcher(None, nq, nn).ratio() if nn else 0.0
+    domain_ratio = SequenceMatcher(None, nq, nd).ratio() if nd else 0.0
+    return max(name_ratio, domain_ratio)
+
+
+def best_match(
+    results: list[dict],
+    min_quality: float = 0.5,
+    *,
+    query: Optional[str] = None,
+    min_similarity: float = 0.7,
+) -> Optional[dict]:
     """Pick the highest-``qualityScore`` hit that clears ``min_quality``.
 
     Search results are pre-sorted by ``_score`` (relevance for the query)
@@ -156,12 +222,28 @@ def best_match(results: list[dict], min_quality: float = 0.5) -> Optional[dict]:
     keeps junk autocompletes out. We pick the most-complete brand among
     those that clear the threshold, falling back to ``None`` when nothing
     qualifies.
+
+    When ``query`` is provided, also require the candidate's name or
+    primary domain segment to be similar enough to the query (``≥
+    min_similarity``). This is what keeps a junk merchant like ``2BP``
+    from matching ``2B Played`` (qS 0.55 — passes quality, fails name
+    similarity at 0.55) while still admitting legitimate low-qS hits
+    like ``Boosty`` (qS 0.38, similarity 0.86).
+
+    When ``query`` is ``None`` the similarity gate is bypassed — that's
+    the institution-logo path, where we trust the caller to pass a
+    pre-vetted name (Plaid's official institution_name) and don't want
+    to second-guess the bank's own naming.
     """
     if not results:
         return None
     qualified = [r for r in results if (r.get("qualityScore") or 0) >= min_quality]
     if not qualified:
         return None
+    if query:
+        qualified = [r for r in qualified if _name_similarity(query, r) >= min_similarity]
+        if not qualified:
+            return None
     return max(qualified, key=lambda r: r.get("qualityScore") or 0)
 
 
