@@ -1104,6 +1104,34 @@ async def _migrate_transactions_display_title_backfill(conn) -> None:
         )
 
 
+async def _migrate_purge_generic_merchant_logos(conn) -> None:
+    """V2.5.2: drop Brandfetch entries cached against generic merchant names.
+
+    Same root cause as the display-title fix: Plaid hands us a generic
+    word like "Online" as merchant_name, the Brandfetch search confidently
+    resolves it to a real-but-unrelated brand (qS 0.96 → ``rs-online.com``
+    in the wild), and the bogus logo lands in every transaction sharing
+    that fake merchant_name. After this migration the read-time JOIN
+    against ``merchant_logos`` returns NULL for those names and the UI
+    falls back to its deterministic gradient avatar.
+
+    Going forward, ``MerchantLogosRepository.names_to_enrich`` filters
+    these out so the bad rows never come back. Idempotent + cheap (the
+    blocklist is ~20 names; the DELETE rarely touches more than a row
+    or two in practice).
+    """
+    from web.transactions.display import _GENERIC_MERCHANT_NAMES
+
+    await conn.execute(
+        """
+        DELETE FROM merchant_logos
+        WHERE LOWER(REGEXP_REPLACE(merchant_name, '\\s+', ' ', 'g'))
+              = ANY($1::text[])
+        """,
+        list(_GENERIC_MERCHANT_NAMES),
+    )
+
+
 async def _migrate_recompute_display_title_for_generic_merchants(conn) -> None:
     """V2.5.1: re-derive ``display_title`` for transactions whose stored
     title is a generic Plaid-leaked word.
@@ -1551,6 +1579,7 @@ async def run_v2_migrations(pool) -> None:
         await _migrate_merchant_logos(conn)
         await _migrate_transactions_display_title_backfill(conn)
         await _migrate_recompute_display_title_for_generic_merchants(conn)
+        await _migrate_purge_generic_merchant_logos(conn)
         await _migrate_transactions_transaction_class(conn)
         await _migrate_fix_internal_transfer_class_drift(conn)
         await _migrate_insights_persistence(conn)
