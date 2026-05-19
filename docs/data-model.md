@@ -175,7 +175,9 @@ Key-building priority (see `web/merchant_rules/keys.py`):
 | created_at | TIMESTAMPTZ | |
 
 ### merchant_aliases
-Family-wide **display rename** for a merchant. Layered on read via a LEFT JOIN — the underlying `transactions.display_title` and `recurring_streams.merchant_name` columns are never modified. Categorization (`merchant_category_rules`), merchant_key matching, math, and Plaid sync are **unaffected**. See [`docs/api.md#merchant-aliases-display-rename`](api.md#merchant-aliases-display-rename) for the HTTP surface.
+Family-wide **display rename** for a merchant, plus an optional user-provided **website**. Layered on read via a LEFT JOIN — the underlying `transactions.display_title` and `recurring_streams.merchant_name` columns are never modified. Categorization (`merchant_category_rules`), merchant_key matching, math, and Plaid sync are **unaffected**. See [`docs/api.md#merchant-overrides-rename--website--logo`](api.md#merchant-overrides-rename--website--logo) for the HTTP surface.
+
+The `website` column backs the "I know this merchant's site" UX in the rename popover: the backend resolves logo candidates from it (Brandfetch + faviconextractor + Google) and the user's pick is persisted to [`merchant_logos`](#merchant_logos) with `status='user_curated'`. `display_name` and `website` are independently nullable on update — `null` means "leave unchanged", `""` means "clear".
 
 The table reuses the same `merchant_key` algorithm as `merchant_category_rules` (`web/merchant_rules/keys.py`). Because Plaid's `/transactions/recurring/get` endpoint returns only `merchant_name` (no `merchant_entity_id`), `upsert_alias` writes **two rows** when both identifiers are available — `eid:<id>` and `name:<lower(name)>` — with the same `display_name`. This guarantees the rename matches both transaction rows (which usually have the entity id) and recurring stream rows (which never do).
 
@@ -184,8 +186,26 @@ The single source of truth for the read-side LEFT JOIN clause is `web/merchant_r
 | Column | Type | Notes |
 |---|---|---|
 | merchant_key | TEXT PK | Same key shape as `merchant_category_rules`. Two rows may exist for the same merchant — the `eid:` row plus the `name:` twin. |
-| display_name | TEXT NOT NULL | User-chosen rename, e.g. "Rent". CHECK ensures non-empty after trim. |
+| display_name | TEXT NOT NULL | User-chosen rename, e.g. "Rent". CHECK ensures non-empty after trim. On a logo/website-only edit with no prior alias, falls back to the merchant's own label so the NOT NULL holds. |
+| website | TEXT NULL | Optional user-provided merchant website; seeds the logo-candidate lookup. |
 | created_at, updated_at | TIMESTAMPTZ | `updated_at` bumps on each PUT. |
+
+### merchant_logos
+Read-time cache of resolved merchant logos, filling the ~43% of named merchants Plaid does not cover. Keyed on `merchant_name` and joined onto `transactions` / `recurring_streams` via a **case-insensitive scalar subquery** (`LOWER(merchant_name) = LOWER(key)`, backed by `idx_merchant_logos_lower_name`) so one lookup covers every casing variant and every past/future row of that merchant. The join's COALESCE always prefers Plaid's own `logo_url`; among `merchant_logos` rows a `user_curated` pick wins over an auto-resolved one. Populated by the enrichment subsystem ([`architecture.md#merchant-logo-enrichment`](architecture.md#merchant-logo-enrichment)) after each sync, and directly by the user via the rename/curate popover.
+
+The table stores the resolved **URL**, not image bytes — the browser hotlinks the CDN. (Bank/institution logos are different: those are base64 PNGs in `plaid_items.institution_logo`.)
+
+| Column | Type | Notes |
+|---|---|---|
+| merchant_name | TEXT PK | Natural key — stable per `merchant_entity_id`; never looked up without it. |
+| logo_url | TEXT NULL | Resolved logo URL. NULL on a recorded miss (`status='no_hit'`). |
+| brand_domain | TEXT NULL | Domain the logo was resolved from. |
+| quality_score | REAL NULL | Brandfetch match quality (curated/user picks use `1.0`). |
+| status | TEXT NOT NULL DEFAULT 'no_hit' CHECK (IN ('resolved','no_hit','low_quality','user_curated')) | `resolved` = auto-hit; `no_hit` = looked, found nothing (a "don't re-check yet" marker); `user_curated` = the user's pick, never auto-overwritten. |
+| miss_count | INTEGER NOT NULL DEFAULT 0 | Drives exponential backoff so dead lookups don't burn the rate budget each sync. Resolved/curated rows are never re-checked. |
+| refreshed_at | TIMESTAMPTZ NOT NULL DEFAULT NOW() | Last lookup time (backoff input). |
+
+> **Generic-name guard.** Plaid sometimes labels a merchant with a generic word ("Online", "Mobile"). Auto-enrichment skips these (a confident-but-wrong brand match would smear one logo across unrelated rows), and the startup purge migration deletes auto-resolved rows keyed on those names — but it explicitly **excludes `user_curated`**, so a logo the user deliberately pinned to a generic-named merchant survives redeploys.
 
 ### user_preferences
 | Column | Type | Notes |

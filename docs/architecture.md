@@ -56,7 +56,8 @@ web/
 ├── budgets/             — /api/budgets + progress calculation
 ├── investments/         — /api/investments/holdings
 ├── reports/             — /api/reports/* (cash flow, net worth, forecast, health)
-├── merchant_rules/      — /api/merchant-rules (categorization) + /api/merchant-aliases (display rename)
+├── merchant_rules/      — /api/merchant-rules (categorization) + /api/merchant-aliases (display rename + curated logo)
+├── enrichment/          — merchant logo resolution (Brandfetch/faviconextractor/Google) → merchant_logos cache
 ├── app_settings/        — /api/settings/app (autosync schedule); singleton app_settings table
 ├── audit/               — /api/audit feed + non-throwing `record()` helper (audit_log table)
 ├── bot_api/             — /api/bot/* REST mirror of Telegram bot features
@@ -78,8 +79,43 @@ plaid/scheduler.py (daily @ app_settings.autosync_hour_utc:minute_utc + manual P
     ├── liabilities/get       ──→ accounts table (APR, min_payment, overdue)
     ├── recurring/get         ──→ recurring_streams table
     ├── investments/holdings  ──→ securities + investment_holdings tables
-    └── snapshot_net_worth()  ──→ net_worth_snapshots table
+    ├── snapshot_net_worth()  ──→ net_worth_snapshots table
+    └── schedule_merchant_enrichment() ──→ merchant_logos (fire-and-forget, post-sync)
 ```
+
+## Merchant logo enrichment
+
+Plaid populates `transactions.logo_url` for ~57% of named merchants (its
+licensed brand set). The rest — local businesses, niche subscriptions,
+ACH descriptors — arrive with NULL logos. `web/enrichment/` fills the gap:
+
+- **`brandfetch.py`** — async httpx client for two Brandfetch APIs.
+  *Brand Search* (`/v2/search/{q}`, anonymous, needs only
+  `BRANDFETCH_CLIENT_ID`, free) maps a merchant name → ranked candidates;
+  *Brand API* (`/v2/brands/{domain}`, Bearer `BRANDFETCH_API_KEY`, metered
+  ~100/mo free) returns a full asset catalog. httpx (not aiohttp) is
+  required — Brandfetch's CloudFront WAF 403s aiohttp's TLS fingerprint.
+- **`known_services.py`** — curated `merchant_name → domain` map +
+  `is_bank_noise()` regexes. Brand Search alone is unreliable for top
+  services (it ranks "Zeller" above "Zelle"), so well-known names are
+  pinned to the right domain before falling back to search.
+- **`service.py`** — `enrich_merchants_via_brandfetch()` (two-tier: curated
+  domain → search, with a 0.7s throttle to respect the rate budget) and
+  `schedule_merchant_enrichment()` (fire-and-forget task fired after each
+  Plaid sync in `scheduler.py`).
+- **`repo.py`** — `MerchantLogosRepository`: `names_to_enrich()` candidate
+  query (skips generic names + already-`resolved`/`user_curated` rows),
+  `upsert_resolved()`, `mark_miss()`.
+- **`candidates.py`** — `resolve_logo_candidates(domain)` for the
+  user-driven picker: runs Brandfetch + faviconextractor + Google
+  s2/favicons in parallel and returns deduped `LogoCandidate` thumbnails.
+
+Results land in the `merchant_logos` cache (keyed on `merchant_name`, see
+[`data-model.md#merchant_logos`](data-model.md#merchant_logos)) and are
+joined onto `transactions` / `recurring_streams` at read time — one lookup
+fixes every past and future row of that merchant. The COALESCE always
+prefers Plaid's own `logo_url` when present; a `user_curated` pick beats
+any auto-resolved row.
 
 ## Autosync scheduler
 
