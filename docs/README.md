@@ -50,6 +50,12 @@ Required env vars (see `.env.template`):
 - `CORS_ORIGINS` — comma-separated browser origins for the Next.js
   frontend (e.g. `https://your-app.up.railway.app`). No production host
   is hardcoded.
+- `BRANDFETCH_CLIENT_ID` *(optional)* — enables merchant-logo enrichment
+  via Brandfetch Brand Search (free, anonymous). `BRANDFETCH_API_KEY`
+  *(optional)* additionally unlocks the metered Brand API for the
+  user-driven logo picker. Without either, logos fall back to Plaid's own
+  `logo_url` and the gradient avatar (see
+  `docs/architecture.md#merchant-logo-enrichment`).
 
 ## Installable app (PWA)
 

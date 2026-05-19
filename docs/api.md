@@ -64,13 +64,15 @@ Matching SQL coalesces `NULLIF(merchant_name, '')` onto `transactions.display_ti
 | POST | /api/merchant-rules/{id}/apply-existing | Apply saved rule to existing transactions (only `category_id` + `updated_at` on `transactions`; idempotent). |
 | DELETE | /api/merchant-rules/{id} | Delete rule |
 
-## Merchant Aliases (display rename)
+## Merchant Overrides (rename + website + logo)
 
-User-chosen rename for a Plaid-detected merchant — purely a presentation
+User overrides for a Plaid-detected merchant — purely a presentation
 overlay. Categorization, merchant_key matching, math, and Plaid sync are
-**unaffected**. Stored in the `merchant_aliases` table keyed on the same
-`merchant_key` as `merchant_category_rules` (see
-[`docs/data-model.md#merchant_aliases`](data-model.md#merchant_aliases)).
+**unaffected**. The rename + website live in the `merchant_aliases` table
+keyed on the same `merchant_key` as `merchant_category_rules`; a curated
+logo pick lands in `merchant_logos` with `status='user_curated'` (see
+[`docs/data-model.md#merchant_aliases`](data-model.md#merchant_aliases) and
+[`#merchant_logos`](data-model.md#merchant_logos)).
 
 When both `merchant_entity_id` and `merchant_name` are supplied, `PUT
 /api/merchant-aliases` writes **two rows** — `eid:<id>` and
@@ -79,13 +81,22 @@ When both `merchant_entity_id` and `merchant_name` are supplied, `PUT
 only `merchant_name` (no entity id), so without it the alias would
 silently fail to match recurring stream rows of the same merchant.
 
+`display_name`, `website`, and `chosen_logo_url` are **independently
+nullable** on update: `null` (or omitted) means "leave unchanged", `""`
+means "clear". This lets the popover push only what the user actually
+edited. The curated logo is keyed in `merchant_logos` on the same
+expression the read path uses — `merchant_name` when Plaid supplied it,
+else the original (pre-alias) display label — so the pick resolves for
+ACH/check rows that have no merchant_name.
+
 | Method | Path | Description |
 |---|---|---|
-| GET | /api/merchant-aliases | List every alias (`merchant_key`, `display_label`, `display_name`, timestamps). |
-| PUT | /api/merchant-aliases | Upsert. Body: `display_name` (non-empty) + at least one of `merchant_entity_id`, `merchant_name`, `merchant_label`. Writes both `eid:` and `name:` twin rows when both are present. Returns the **primary** row (the one matched first by `merchant_key()` precedence). |
-| POST | /api/merchant-aliases/delete | Remove. Body: `merchant_key` (single-key delete, e.g. from a Settings list) **or** `merchant_entity_id`+`merchant_name` (twin delete — clears both rows the upsert wrote). 204 on success, 404 if no rows matched. |
+| GET | /api/merchant-aliases | List every alias (`merchant_key`, `display_label`, `display_name`, `website`, timestamps). |
+| GET | /api/merchant-aliases/logo-candidates?domain= | Resolve ready-to-render logo URLs for a user-typed website (scheme/`www.`/path optional). Runs Brandfetch + faviconextractor + Google s2/favicons in parallel; returns `{ domain, candidates: [{url, source, label}] }`. Best-effort — sources that 404/time out drop out silently; an unknown domain yields an empty list (UI falls back to the gradient avatar). |
+| PUT | /api/merchant-aliases | Upsert. Identifier: at least one of `merchant_entity_id`, `merchant_name`, `merchant_label`. Payload: at least one of `display_name`, `website`, `chosen_logo_url` (`+ chosen_logo_domain`). Writes both `eid:` and `name:` twin rows when both identifiers are present; a non-empty `chosen_logo_url` upserts a `user_curated` `merchant_logos` row. Returns the **primary** alias row. |
+| POST | /api/merchant-aliases/delete | Remove. Body: `merchant_key` (single-key delete, e.g. from a Settings list) **or** `merchant_entity_id`+`merchant_name` (twin delete — clears both rows the upsert wrote). Also drops the merchant's `user_curated` logo. 204 on success, 404 if no rows matched. |
 
-Read-side application is centralized in `web/merchant_rules/aliases.py::alias_join_sql(table_alias)`. Every repo that returns merchant-bearing rows (transactions, recurring streams, top merchants) wraps its query with this `LEFT JOIN merchant_aliases ma ON ...` clause and `COALESCE(ma.display_name, t.display_title)` overrides the auto-normalized title in the response. The DB column `transactions.display_title` stays auto-normalized — the alias is layered on read so a rename instantly applies to **all** historical rows of that merchant without a backfill UPDATE.
+Read-side application is centralized in `web/merchant_rules/aliases.py::alias_join_sql(table_alias)`. Every repo that returns merchant-bearing rows (transactions, recurring streams, top merchants) wraps its query with this `LEFT JOIN merchant_aliases ma ON ...` clause and `COALESCE(ma.display_name, t.display_title)` overrides the auto-normalized title in the response. The DB column `transactions.display_title` stays auto-normalized — the alias is layered on read so a rename instantly applies to **all** historical rows of that merchant without a backfill UPDATE. The original (pre-alias) title is preserved on each row as `merchant_label` so the popover derives a stable `merchant_key` (and curated-logo key) on a second edit instead of drifting onto the aliased name.
 
 `MerchantSpend` rows from `/api/reports/merchants` carry a `is_aliased: bool` so the UI can label aggregated rows as renamed; aggregation groups by `COALESCE(ma.display_name, t.merchant_name)` so two Plaid merchants the user renamed to the same string aggregate into one row.
 
