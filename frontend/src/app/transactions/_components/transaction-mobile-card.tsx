@@ -38,7 +38,7 @@ function MobileMerchantAvatar({ tx }: { tx: Transaction }) {
   const showImg = Boolean(tx.logo_url) && !failed;
 
   return (
-    <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted text-[10px] font-semibold text-muted-foreground">
+    <div className="flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-[10px] font-semibold text-muted-foreground shadow-sm ring-1 ring-border/60">
       {showImg ? (
         <Image
           src={tx.logo_url!}

@@ -54,11 +54,21 @@ export function RenameMerchantPopover({ tx, className }: Props) {
 
   const eid = (tx.merchant_entity_id ?? "").trim();
   const name = (tx.merchant_name ?? "").trim();
+  // Key derivation must use the *original* (pre-alias) title — the
+  // server stashes it in `merchant_label` before overwriting
+  // `display_title` with the alias. Using the aliased title here would
+  // drift the merchant_key on a second edit (e.g. "Rover Rover ST" →
+  // "Rover" → key "name:rover" ≠ stored "name:rover rover st") and the
+  // upsert would create a fresh row instead of updating the existing
+  // one. Falls back to display_title for older responses without the field.
+  const rawLabel = (tx.merchant_label ?? tx.display_title ?? "").trim();
+  // For the *display* default (what we pre-fill the name input with) we
+  // want the aliased title so the user sees their current rename.
   const fallback = (tx.display_title ?? "").trim();
-  // The alias system needs *something* to key on — eid, name, or
-  // display_title. Hide the affordance when nothing is available
-  // (extremely rare; happens for fully manual rows with empty merchant).
-  const canAlias = Boolean(eid || name || fallback);
+  // The alias system needs *something* to key on — eid, name, or the
+  // raw label. Hide the affordance when nothing is available (extremely
+  // rare; happens for fully manual rows with empty merchant).
+  const canAlias = Boolean(eid || name || rawLabel);
 
   const currentAlias = (tx.merchant_alias ?? "").trim();
   const isAliased = currentAlias.length > 0;
@@ -100,7 +110,7 @@ export function RenameMerchantPopover({ tx, className }: Props) {
       merchantAliasesApi.upsert({
         merchant_entity_id: eid || null,
         merchant_name: name || null,
-        merchant_label: name ? null : fallback || null,
+        merchant_label: name ? null : rawLabel || null,
         // null means "leave unchanged" — only send fields the user actually
         // changed in this session.
         display_name: nameChanged ? nameDraft.trim() : undefined,
@@ -126,7 +136,7 @@ export function RenameMerchantPopover({ tx, className }: Props) {
       merchantAliasesApi.delete({
         merchant_entity_id: eid || null,
         merchant_name: name || null,
-        merchant_label: name ? null : fallback || null,
+        merchant_label: name ? null : rawLabel || null,
       }),
     onSuccess: () => {
       invalidate();

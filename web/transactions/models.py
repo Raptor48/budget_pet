@@ -106,6 +106,12 @@ class TransactionOut(BaseModel):
     display_title: Optional[str] = None
     # User-chosen rename for this merchant. NULL when no alias exists.
     merchant_alias: Optional[str] = None
+    # The *original* (pre-alias) display title. Equals ``display_title``
+    # when no alias is set; when an alias overrides ``display_title`` this
+    # still carries the auto-normalized value so the rename/curate popover
+    # can derive the correct alias ``merchant_key`` for rows without a
+    # ``merchant_name`` (see ``_apply_alias_inplace``).
+    merchant_label: Optional[str] = None
 
     class Config:
         from_attributes = True

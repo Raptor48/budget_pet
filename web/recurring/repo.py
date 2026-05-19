@@ -186,10 +186,22 @@ class RecurringRepository:
                     -- Two logo sources, tried in order:
                     --   1. most-recent transaction with the same
                     --      merchant_name (Plaid-licensed asset);
-                    --   2. merchant_logos table (Brandfetch fallback).
+                    --   2. merchant_logos cache (Brandfetch / user pick),
+                    --      via a case-insensitive scalar lookup that
+                    --      prefers a user_curated row and skips no_hit.
                     -- Plaid's logo wins when present because it's a
-                    -- licensed brand asset; Brandfetch fills the gap.
-                    COALESCE(tx_logos.logo_url, ml.logo_url) AS logo_url
+                    -- licensed brand asset; the cache fills the gap.
+                    COALESCE(
+                        tx_logos.logo_url,
+                        (
+                            SELECT _ml.logo_url
+                            FROM merchant_logos _ml
+                            WHERE LOWER(_ml.merchant_name) = LOWER(rs.merchant_name)
+                              AND _ml.logo_url IS NOT NULL
+                            ORDER BY (_ml.status = 'user_curated') DESC
+                            LIMIT 1
+                        )
+                    ) AS logo_url
                 FROM recurring_streams rs
                 LEFT JOIN accounts a   ON a.id = rs.account_id
                 LEFT JOIN users u      ON u.id = a.user_id
@@ -212,13 +224,6 @@ class RecurringRepository:
                     ORDER BY merchant_name, date DESC NULLS LAST
                 ) tx_logos
                   ON tx_logos.merchant_name = rs.merchant_name
-                -- Recurring streams keep ``rs.merchant_name`` populated
-                -- whenever Plaid had it on the source transactions, so
-                -- this JOIN matches the same cache key the transactions
-                -- repo writes under (no COALESCE with display_title
-                -- needed — recurring rows wouldn't have a useful one).
-                LEFT JOIN merchant_logos ml
-                  ON ml.merchant_name = rs.merchant_name
                 {where}
                 """,
                 *params,
