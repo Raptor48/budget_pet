@@ -767,6 +767,7 @@ class PlaidRepository:
                 carry_manual_class = None
                 carry_internal = False
                 carry_internal_manual = False
+                carry_manual_amount_override = False
                 pending_row_id = None
                 pending_row_amount = None
                 pending_ref = data.get("pending_transaction_id")
@@ -776,7 +777,8 @@ class PlaidRepository:
                         SELECT id, amount_cents, is_private, user_note,
                                category_id, manual_class_override,
                                is_internal_transfer,
-                               is_internal_transfer_manual
+                               is_internal_transfer_manual,
+                               manual_amount_override
                         FROM transactions
                         WHERE plaid_transaction_id = $1
                         """,
@@ -793,6 +795,22 @@ class PlaidRepository:
                         carry_internal_manual = bool(
                             pending_row["is_internal_transfer_manual"]
                         )
+                        carry_manual_amount_override = bool(
+                            pending_row["manual_amount_override"]
+                        )
+                        # The ON CONFLICT branch below honours
+                        # ``manual_amount_override`` to preserve the
+                        # admin-edited amount across in-place upserts,
+                        # but pending → posted is an INSERT of a brand
+                        # new ``plaid_transaction_id`` so the CONFLICT
+                        # path never fires. Force the carry here by
+                        # overwriting the incoming Plaid amount BEFORE
+                        # the INSERT. Same goes for the override flag
+                        # itself, propagated as a new INSERT column so
+                        # subsequent syncs against the posted twin's
+                        # plaid_transaction_id continue to preserve it.
+                        if carry_manual_amount_override:
+                            data["amount_cents"] = pending_row_amount
 
                 # A user-assigned category on the pending row always wins over
                 # Plaid's default categorisation for the posted twin; the
@@ -828,11 +846,11 @@ class PlaidRepository:
                         is_pending, source, display_title,
                         pending_transaction_id, is_private, user_note,
                         is_internal_transfer, is_internal_transfer_manual,
-                        manual_class_override
+                        manual_class_override, manual_amount_override
                     ) VALUES (
                         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
                         $16,$17,$18,$19,$20,$21,$22,$23,$24,$25,
-                        $26,$27,$28,$29,$30,$31
+                        $26,$27,$28,$29,$30,$31,$32
                     )
                     ON CONFLICT (plaid_transaction_id) DO UPDATE SET
                         account_id          = EXCLUDED.account_id,
@@ -908,6 +926,7 @@ class PlaidRepository:
                     is_internal_value,
                     carry_internal_manual,
                     carry_manual_class,
+                    carry_manual_amount_override,
                 )
                 imported += 1
 

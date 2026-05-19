@@ -1104,6 +1104,87 @@ async def _migrate_transactions_display_title_backfill(conn) -> None:
         )
 
 
+async def _migrate_recompute_display_title_for_generic_merchants(conn) -> None:
+    """V2.5.1: re-derive ``display_title`` for transactions whose stored
+    title is a generic Plaid-leaked word.
+
+    Plaid sometimes serves single-word merchant_name values like "Online"
+    or "Mobile" for transactions it failed to actually enrich (e.g. a
+    Bank of America credit-card autopay coming back as "Online" with
+    PFC "RENT_AND_UTILITIES_TELEPHONE"). The pre-V2.5.1 display logic
+    treated those as pretty merchants and stored them verbatim, leaving
+    the user staring at a useless "Online" row.
+
+    ``_looks_pretty`` now rejects those words, but every transaction
+    written before that fix still has the stale display_title in the
+    DB. This migration recomputes those rows once, in place. Subsequent
+    Plaid syncs will keep them correct on their own (the upsert
+    overwrites display_title with the freshly-computed value).
+
+    Same batching / safety-net pattern as the original backfill.
+    """
+    import json as _json
+
+    from web.transactions.display import (
+        _GENERIC_MERCHANT_NAMES,
+        normalize_transaction_title,
+    )
+
+    def _parse_cp(value):
+        if value is None or isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            try:
+                return _json.loads(value)
+            except Exception:
+                return None
+        return value
+
+    # Match LOWER(display_title) against the same set the runtime check
+    # uses — keeps the SQL filter cheap (no Python-side dance over every
+    # transaction row) and stays in sync with the blocklist automatically.
+    generic_lower = list(_GENERIC_MERCHANT_NAMES)
+    for _ in range(2000):
+        rows = await conn.fetch(
+            """
+            SELECT id, name, merchant_name, website, counterparties, display_title
+            FROM transactions
+            WHERE display_title IS NOT NULL
+              AND LOWER(REGEXP_REPLACE(display_title, '\\s+', ' ', 'g')) = ANY($1::text[])
+            ORDER BY id
+            LIMIT 1000
+            """,
+            generic_lower,
+        )
+        if not rows:
+            return
+        updates: list[tuple[int, str]] = []
+        for r in rows:
+            txn = {
+                "id": r["id"],
+                "name": r["name"],
+                "merchant_name": r["merchant_name"],
+                "website": r["website"],
+                "counterparties": _parse_cp(r["counterparties"]),
+            }
+            new_title = normalize_transaction_title(txn)
+            # Only write when the recomputed title actually differs — a
+            # row whose `name` is also generic (rare) might land on the
+            # same fallback and re-running the UPDATE would just churn
+            # updated_at for no reason.
+            if new_title != r["display_title"]:
+                updates.append((r["id"], new_title))
+        if updates:
+            await conn.executemany(
+                "UPDATE transactions SET display_title = $2 WHERE id = $1",
+                updates,
+            )
+        # If nothing changed in this batch, but rows matched the filter,
+        # there's no progress to be made — exit to avoid infinite loop.
+        if not updates:
+            return
+
+
 async def _migrate_categories_is_income(conn) -> None:
     """
     Add ``categories.is_income`` (user-controlled flag that defines what counts
@@ -1469,6 +1550,7 @@ async def run_v2_migrations(pool) -> None:
         await _migrate_merchant_aliases(conn)
         await _migrate_merchant_logos(conn)
         await _migrate_transactions_display_title_backfill(conn)
+        await _migrate_recompute_display_title_for_generic_merchants(conn)
         await _migrate_transactions_transaction_class(conn)
         await _migrate_fix_internal_transfer_class_drift(conn)
         await _migrate_insights_persistence(conn)

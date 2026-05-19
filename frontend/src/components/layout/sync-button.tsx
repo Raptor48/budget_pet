@@ -1,45 +1,59 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useIsMutating,
+  useMutation,
+  useMutationState,
+  useQuery,
+} from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
 import { Loader2, RefreshCw } from "lucide-react";
 import { plaidApi } from "@/lib/api";
-import { notify } from "@/lib/notify";
+import { SYNC_MUTATION_KEY } from "@/lib/sync-mutation-defaults";
 
 /**
- * Global Plaid-sync control. Lives in AppLayout so the mutation state
- * (Syncing… spinner) survives page navigation — historically the button
- * was scoped to the Dashboard component and the spinner vanished the
- * moment the user clicked away to Transactions, leaving them with no
- * feedback while the request was still in flight.
+ * Global Plaid-sync control. Lives in AppLayout (rendered per page),
+ * so the component itself unmounts on cross-page navigation — but the
+ * mutation state lives at the QueryClient level via
+ * ``setMutationDefaults`` (see ``lib/sync-mutation-defaults.ts``), so
+ * the in-flight sync survives the unmount, its result toast still
+ * fires on the new page, and a fresh SyncButton instance immediately
+ * reflects the in-progress state via ``useIsMutating``.
  *
- * Queries to invalidate match what every page's react-query cache uses;
- * coarse keys are fine here because a Plaid sync touches every surface.
+ * The local ``useMutation`` here exists only to expose ``mutate()`` —
+ * its callbacks are deliberately empty because the defaults already
+ * handle invalidation + toasts.
  */
 export function SyncButton() {
-  const queryClient = useQueryClient();
-
   const plaidItemsQuery = useQuery({
     queryKey: ["plaid-items"],
     queryFn: plaidApi.listItems,
     staleTime: 60_000,
   });
 
-  const syncMutation = useMutation({
-    mutationFn: () => plaidApi.sync(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["reports"] });
-      queryClient.invalidateQueries({ queryKey: ["budgets"] });
-      queryClient.invalidateQueries({ queryKey: ["transactions"] });
-      queryClient.invalidateQueries({ queryKey: ["recurring"] });
-      queryClient.invalidateQueries({ queryKey: ["plaid-items"] });
-      queryClient.invalidateQueries({ queryKey: ["accounts"] });
-      queryClient.invalidateQueries({ queryKey: ["insights"] });
-      notify.success("Sync complete.");
-    },
-    onError: (err) =>
-      notify.error(err instanceof Error ? err.message : "Sync failed."),
-  });
+  // No mutationFn or callbacks here — both come from the defaults
+  // registered in Providers, so we don't risk drift between the
+  // "trigger" surface and the "what happens" surface.
+  const mutation = useMutation({ mutationKey: [...SYNC_MUTATION_KEY] });
+
+  // Reflects the GLOBAL state of any sync mutation in flight, including
+  // one fired from a previous (now-unmounted) SyncButton instance.
+  // ``useIsMutating`` walks the QueryClient cache, not local state, so
+  // remounting after navigation sees the same value.
+  const inFlight = useIsMutating({ mutationKey: [...SYNC_MUTATION_KEY] }) > 0;
+
+  // Suppress double-click while pending — useIsMutating is the source of
+  // truth, mutation.isPending is per-instance and may be stale on remount.
+  const handleClick = () => {
+    if (inFlight) return;
+    mutation.mutate();
+  };
+
+  // Defensive: subscribe to the mutation status so React re-renders this
+  // component when the global state flips. useIsMutating already does this
+  // for the count, but useMutationState makes the dependency explicit and
+  // future-proofs against the count-only API ever being optimized away.
+  useMutationState({ filters: { mutationKey: [...SYNC_MUTATION_KEY] } });
 
   const plaidItems = plaidItemsQuery.data ?? [];
   const lastSyncedAt = plaidItems
@@ -63,18 +77,18 @@ export function SyncButton() {
       )}
       <button
         type="button"
-        onClick={() => syncMutation.mutate()}
-        disabled={syncMutation.isPending}
+        onClick={handleClick}
+        disabled={inFlight}
         aria-label="Sync now"
         className="inline-flex h-7 items-center gap-1 rounded-md border border-border/60 bg-card px-2 text-xs font-medium text-foreground transition-colors hover:border-border hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {syncMutation.isPending ? (
+        {inFlight ? (
           <Loader2 className="size-3 animate-spin" aria-hidden />
         ) : (
           <RefreshCw className="size-3" aria-hidden />
         )}
         <span className="hidden sm:inline">
-          {syncMutation.isPending ? "Syncing…" : "Sync now"}
+          {inFlight ? "Syncing…" : "Sync now"}
         </span>
       </button>
     </div>
