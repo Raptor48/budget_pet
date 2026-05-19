@@ -786,6 +786,56 @@ async def _migrate_merchant_logos(conn) -> None:
     )
 
 
+async def _migrate_merchant_aliases_website(conn) -> None:
+    """V2.5.x: per-merchant user-provided website URL.
+
+    Backs the "I know the website for this merchant" UX in the rename-
+    merchant popover. When set, the backend resolves logo candidates
+    (Brandfetch + faviconextractor + Google s2/favicons) and the user
+    picks one — the chosen URL lands in ``merchant_logos`` with
+    ``status='user_curated'``.
+
+    Stored alongside ``display_name`` rather than in its own table
+    because they're the same UX concept: "the user knows better than
+    Plaid/Brandfetch for this merchant". One row per merchant_key,
+    either column nullable so the user can set just one.
+
+    Idempotent. Pure ALTER, no data movement.
+    """
+    await _ddl(
+        conn,
+        "ALTER TABLE merchant_aliases "
+        "ADD COLUMN IF NOT EXISTS website TEXT",
+    )
+
+
+async def _migrate_merchant_logos_user_curated(conn) -> None:
+    """V2.5.x: extend ``merchant_logos.status`` to include ``user_curated``.
+
+    The existing CHECK constraint accepted only Brandfetch-pipeline
+    statuses (``resolved``, ``no_hit``, ``low_quality``). User-curated
+    picks need their own status so the read-path can distinguish
+    them (and so ``names_to_enrich`` can skip them — a user pick is
+    sticky and never re-enriched by the auto pipeline).
+
+    Drop + recreate the CHECK constraint with the wider set. Idempotent
+    via the standard `IF EXISTS` / `IF NOT EXISTS` constraint guards.
+    """
+    # PostgreSQL doesn't have ALTER CONSTRAINT for CHECK redefinition,
+    # so the dance is DROP + ADD with the new clause.
+    await _ddl(
+        conn,
+        "ALTER TABLE merchant_logos "
+        "DROP CONSTRAINT IF EXISTS merchant_logos_status_check",
+    )
+    await _ddl(
+        conn,
+        "ALTER TABLE merchant_logos "
+        "ADD CONSTRAINT merchant_logos_status_check "
+        "CHECK (status IN ('resolved', 'no_hit', 'low_quality', 'user_curated'))",
+    )
+
+
 async def _migrate_recurring_user_status(conn) -> None:
     """V2.3: user-managed lifecycle for recurring streams.
 
@@ -1576,7 +1626,9 @@ async def run_v2_migrations(pool) -> None:
         await _migrate_recurring_unsubscribed_state(conn)
         await _migrate_recurring_first_detected_alerted(conn)
         await _migrate_merchant_aliases(conn)
+        await _migrate_merchant_aliases_website(conn)
         await _migrate_merchant_logos(conn)
+        await _migrate_merchant_logos_user_curated(conn)
         await _migrate_transactions_display_title_backfill(conn)
         await _migrate_recompute_display_title_for_generic_merchants(conn)
         await _migrate_purge_generic_merchant_logos(conn)

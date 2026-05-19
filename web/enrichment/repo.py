@@ -60,11 +60,15 @@ class MerchantLogosRepository:
                 FROM candidates c
                 LEFT JOIN merchant_logos ml ON ml.merchant_name = c.merchant_name
                 WHERE ml.merchant_name IS NULL
-                   OR (ml.status <> 'resolved'
+                   OR (
+                       -- user_curated is sticky: a user pick never
+                       -- gets re-evaluated by the auto pipeline.
+                       ml.status NOT IN ('resolved', 'user_curated')
                        AND ml.refreshed_at < NOW() - LEAST(
                            INTERVAL '30 days',
                            POWER(2, ml.miss_count)::int * INTERVAL '1 day'
-                       ))
+                       )
+                   )
                 ORDER BY c.merchant_name
                 LIMIT $1
                 """,

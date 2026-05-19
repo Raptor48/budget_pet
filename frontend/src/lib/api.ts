@@ -37,6 +37,7 @@ import type {
   TransactionFilters,
   TransactionSplit,
   ManualCashTransactionCreate,
+  LogoCandidatesResponse,
   MerchantAlias,
   MerchantRule,
   MerchantRuleApplyResult,
@@ -241,12 +242,25 @@ export const merchantRulesApi = {
 export const merchantAliasesApi = {
   list: (): Promise<MerchantAlias[]> => apiRequest('/api/merchant-aliases'),
 
+  /**
+   * Create/replace the user-override row for a merchant. Each of
+   * ``display_name`` / ``website`` / ``chosen_logo_url`` is independent:
+   * pass ``undefined`` (omit) to leave a field unchanged, ``""`` to
+   * clear it. Backend merges the partial payload onto whatever exists.
+   *
+   * At least one of the payload fields must be supplied AND at least
+   * one of the identifier trio (entity_id / name / label). The
+   * backend returns 422 otherwise.
+   */
   upsert: (data: {
-    display_name: string;
     merchant_entity_id?: string | null;
     merchant_name?: string | null;
     /** Fallback for transactions without a Plaid merchant (ACH / checks). */
     merchant_label?: string | null;
+    display_name?: string | null;
+    website?: string | null;
+    chosen_logo_url?: string | null;
+    chosen_logo_domain?: string | null;
   }): Promise<MerchantAlias> =>
     apiRequest('/api/merchant-aliases', {
       method: 'PUT',
@@ -255,7 +269,7 @@ export const merchantAliasesApi = {
 
   /** Delete by merchant_entity_id + merchant_name (clears both eid: and name:
    * twin rows the upsert wrote). Pass merchant_key directly to delete a
-   * single key. */
+   * single key. Also drops any user_curated logo for the same merchant. */
   delete: (data: {
     merchant_key?: string | null;
     merchant_entity_id?: string | null;
@@ -266,6 +280,14 @@ export const merchantAliasesApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+
+  /** Fetch logo thumbnail options for the picker. Always returns a
+   * response object (possibly with an empty list when nothing
+   * resolved). Backend silently drops sources that 404 or time out. */
+  logoCandidates: (domain: string): Promise<LogoCandidatesResponse> =>
+    apiRequest(
+      `/api/merchant-aliases/logo-candidates?domain=${encodeURIComponent(domain)}`,
+    ),
 };
 
 // ---------------------------------------------------------------------------
