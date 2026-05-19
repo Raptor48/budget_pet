@@ -1,4 +1,9 @@
-import { formatPlaidTxnAmountForDisplay, isPlaidTxnInflowCents, isPlaidTxnOutflowCents } from "@/lib/plaid-transaction-amount";
+import {
+  formatPlaidTxnAmountForDisplay,
+  formatPlaidTxnAmountUnsigned,
+  isPlaidTxnInflowCents,
+  isPlaidTxnOutflowCents,
+} from "@/lib/plaid-transaction-amount";
 import { cn } from "@/lib/utils";
 
 export type PlaidTxnAmountSize = "sm" | "base" | "inherit";
@@ -31,7 +36,16 @@ export function PlaidTxnAmount({
   size = "inherit",
   tone = "flow",
 }: PlaidTxnAmountProps) {
-  const label = formatPlaidTxnAmountForDisplay(cents, currency);
+  // tone="flow" carries direction through color (rose / emerald), so the
+  // sign character would be redundant and visually noisy. Other tones keep
+  // the signed prefix because they have no other direction cue.
+  const label =
+    tone === "flow"
+      ? formatPlaidTxnAmountUnsigned(cents, currency)
+      : formatPlaidTxnAmountForDisplay(cents, currency);
+  // title attribute always shows the signed form so a quick hover still
+  // surfaces direction unambiguously.
+  const fullLabel = formatPlaidTxnAmountForDisplay(cents, currency);
 
   const toneClass =
     tone === "muted"
@@ -45,7 +59,7 @@ export function PlaidTxnAmount({
           );
 
   return (
-    <span className={cn("tabular-nums", sizeClass[size], toneClass, className)} title={label}>
+    <span className={cn("tabular-nums", sizeClass[size], toneClass, className)} title={fullLabel}>
       {label}
     </span>
   );

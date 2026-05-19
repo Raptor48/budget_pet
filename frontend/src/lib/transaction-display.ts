@@ -105,9 +105,35 @@ function coerceStr(value: unknown): string {
 
 function looksPretty(value: string): boolean {
   if (!value) return false;
+  if (isShouty(value)) return false;
   if (/[a-z]/.test(value)) return true;
   return value.length <= 24 && !/\d/.test(value);
 }
+
+/**
+ * "Shouty" = the visible letters are predominantly uppercase. Catches strings
+ * like "ONLINE/MOBILE PAYMENT CONF llm152fi" where the all-caps bank-noise
+ * dominates but a lowercase ID-suffix would otherwise trip the simpler
+ * `/[a-z]/` test. 70% threshold is the empirical sweet spot — picks up
+ * "BK OF AMER VISA ONLINE PMT" (100% upper) and the above (4-letter lowercase
+ * tail out of 28+ uppercase letters → still shouty) without flagging
+ * "Apple Pay 2".
+ */
+function isShouty(text: string): boolean {
+  const letters = text.replace(/[^A-Za-z]/g, "");
+  if (letters.length < 4) return false;
+  const upperCount = letters.replace(/[^A-Z]/g, "").length;
+  return upperCount / letters.length >= 0.7;
+}
+
+/**
+ * Trailing token that looks like a bank-generated confirmation/reference ID:
+ * lowercase letters mixed with a digit, 6+ chars, no spaces. Matches
+ * "llm152fi" at the end of "ONLINE/MOBILE PAYMENT CONF llm152fi". Conservative
+ * on purpose — only fires when the token has both letters and a digit, so a
+ * legitimate trailing word ("2024") or short name ("Apple") survives.
+ */
+const TRAILING_LOWER_ID_RE = /\s+(?=[a-z0-9]*\d)(?=[a-z0-9]*[a-z])[a-z0-9]{6,}\s*$/;
 
 function fromCounterparties(parties: CounterpartyLike[] | null | undefined): string | null {
   if (!parties || parties.length === 0) return null;
@@ -184,13 +210,14 @@ function cleanRawName(raw: string): string {
   }
   text = text.replace(META_RE, " ");
   text = text.replace(LONG_ID_RE, " ");
+  text = text.replace(TRAILING_LOWER_ID_RE, "");
   text = text.replace(MULTISPACE_RE, " ").trim();
   text = text.replace(TRAILING_NUM_RE, "");
   text = text.replace(LEADING_PUNCT_RE, "");
   text = text.replace(TRAILING_PUNCT_RE, "");
   text = text.replace(MULTISPACE_RE, " ").trim();
   if (!text) return "";
-  if (!/[a-z]/.test(text)) text = smartTitle(text);
+  if (isShouty(text)) text = smartTitle(text);
   return text;
 }
 

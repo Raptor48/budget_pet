@@ -3,8 +3,8 @@
 import { useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { formatDistanceToNow } from "date-fns";
+import { useQuery } from "@tanstack/react-query";
+import { format, parseISO } from "date-fns";
 import { AppLayout } from "@/components/layout/app-layout";
 import { CategoryDonutWidget } from "@/components/charts/category-donut-chart";
 import { FinancialHealthCompactCard } from "@/components/reports/financial-health-hero-card";
@@ -26,12 +26,13 @@ import {
   reportsApi,
   transactionsApi,
 } from "@/lib/api";
-import { notify } from "@/lib/notify";
-import { Loader2, RefreshCw, TrendingDown, TrendingUp } from "lucide-react";
+import { TrendingDown, TrendingUp } from "lucide-react";
 import { PlaidTxnAmount } from "@/components/ui/plaid-txn-amount";
-import type { ForecastEntry, Transaction } from "@/types/v2";
+import type { ForecastEntry, RecurringStream, Transaction } from "@/types/v2";
 import { cn } from "@/lib/utils";
 import { composeInsightsBadge, pickTeaser } from "@/lib/insights-teaser";
+import { streamTitle } from "@/app/recurring/_components/recurring-helpers";
+import { normalizeTransactionTitle } from "@/lib/transaction-display";
 
 /** Plain currency (balances, aggregates — not Plaid signed transaction lines). */
 function formatUsd(cents: number): string {
@@ -47,8 +48,37 @@ function currentMonthIso(): string {
   return new Date().toISOString().slice(0, 7);
 }
 
+/** Render an ISO date as "May 20" — the dashboard's month context already
+ *  makes the year obvious, so YYYY-MM-DD is wasted ink in list rows. */
+function formatDayLabel(iso: string): string {
+  try {
+    return format(parseISO(iso), "MMM d");
+  } catch {
+    return iso;
+  }
+}
+
+/** Plaid surfaces recurring frequencies as UPPERCASE ("MONTHLY", "WEEKLY").
+ *  Title case reads more naturally in list rows. */
+function formatFrequency(freq: string | null | undefined): string {
+  if (!freq) return "Recurring";
+  return freq.charAt(0).toUpperCase() + freq.slice(1).toLowerCase();
+}
+
 function getDisplayName(tx: Transaction): string {
-  return tx.merchant_name?.trim() || tx.name?.trim() || "Transaction";
+  return normalizeTransactionTitle(tx);
+}
+
+/** Forecast entries come from the recurring endpoint without `display_title`,
+ *  but they share the merchant_name + description fields. Route them through
+ *  the same normalizer the Transactions page uses so list rows never show raw
+ *  bank descriptors. */
+function getForecastName(entry: ForecastEntry): string {
+  return normalizeTransactionTitle({
+    merchant_name: entry.merchant_name,
+    name: entry.description,
+    description: entry.description,
+  });
 }
 
 function getInitials(name: string): string {
@@ -60,6 +90,33 @@ function getInitials(name: string): string {
     return parts[0].slice(0, 2).toUpperCase();
   }
   return (parts[0]?.[0] ?? "?").toUpperCase();
+}
+
+/** Deterministic 8-color gradient picker — same algorithm the Transactions
+ *  modal uses, ported here so all three dashboard list tiles render the same
+ *  merchant with the same color across reloads. */
+// Mirrors the muted palette in recurring-helpers.tsx: 500 → 700 with /70-/75
+// alpha so the avatar reads as a tinted background block rather than a
+// saturated chip. Keep these three copies in sync (dashboard / transactions
+// list / transactions mobile-card) until someone factors a shared module.
+const MERCHANT_GRADIENTS = [
+  "from-rose-500/70 to-pink-700/75",
+  "from-orange-500/70 to-amber-700/75",
+  "from-yellow-500/70 to-lime-700/75",
+  "from-emerald-500/70 to-teal-700/75",
+  "from-cyan-500/70 to-sky-700/75",
+  "from-blue-500/70 to-indigo-700/75",
+  "from-violet-500/70 to-fuchsia-700/75",
+  "from-fuchsia-500/70 to-rose-700/75",
+] as const;
+
+function pickGradient(seed: string): string {
+  let hash = 0;
+  const s = seed.toLowerCase().replace(/[^a-z0-9]/g, "") || "?";
+  for (let i = 0; i < s.length; i++) {
+    hash = (hash * 31 + s.charCodeAt(i)) | 0;
+  }
+  return MERCHANT_GRADIENTS[Math.abs(hash) % MERCHANT_GRADIENTS.length];
 }
 
 function sortForecastUpcoming(entries: ForecastEntry[]): ForecastEntry[] {
@@ -124,11 +181,11 @@ function DeltaLine({
   return (
     <p
       className={cn(
-        "flex items-center gap-1 text-[11px] font-medium leading-none",
+        "flex items-center gap-1.5 text-sm font-semibold leading-none",
         tone,
       )}
     >
-      {cents !== 0 ? <Icon className="size-3" aria-hidden /> : null}
+      {cents !== 0 ? <Icon className="size-3.5" aria-hidden /> : null}
       <span className="tabular-nums">
         {sign}
         {new Intl.NumberFormat("en-US", {
@@ -138,36 +195,55 @@ function DeltaLine({
           maximumFractionDigits: 0,
         }).format(abs / 100)}
       </span>
-      <span className="text-muted-foreground/80 font-normal">vs {monthShort}</span>
+      <span className="text-muted-foreground/80 text-xs font-normal">vs {monthShort}</span>
     </p>
   );
 }
 
-function MerchantAvatar({ tx }: { tx: Transaction }) {
-  const name = getDisplayName(tx);
+/** Avatar for a dashboard list row. Plaid logo wins when present; otherwise
+ *  falls back to a deterministic gradient circle with the merchant initials.
+ *  `seed` lets the caller stabilize the gradient color across reloads (e.g.
+ *  `merchant_entity_id` for transactions, `stream_id` for recurring rows).
+ *  Defaults to `name` so callers without a stable key still get a consistent
+ *  color per merchant. */
+function MerchantAvatar({
+  name,
+  logoUrl,
+  seed,
+  size = 32,
+}: {
+  name: string;
+  logoUrl?: string | null;
+  seed?: string;
+  size?: number;
+}) {
   const [failed, setFailed] = useState(false);
-  const logo = tx.logo_url?.trim();
-
+  const logo = logoUrl?.trim();
   if (logo && !failed) {
     return (
       <Image
         src={logo}
         alt=""
-        width={40}
-        height={40}
-        className="size-10 shrink-0 rounded-full object-cover"
+        width={size}
+        height={size}
+        className="shrink-0 rounded-full object-cover"
+        style={{ width: size, height: size }}
         onError={() => setFailed(true)}
         unoptimized
       />
     );
   }
-
+  const gradient = pickGradient(seed || name);
   return (
     <div
-      className="flex size-10 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground"
+      className={cn(
+        "flex shrink-0 items-center justify-center rounded-full bg-gradient-to-br text-xs font-semibold text-white shadow-sm",
+        gradient,
+      )}
+      style={{ width: size, height: size }}
       aria-hidden
     >
-      {getInitials(name)}
+      <span className="leading-none drop-shadow-sm">{getInitials(name)}</span>
     </div>
   );
 }
@@ -189,8 +265,6 @@ function DashboardContent() {
   const [priceChangesExpanded, setPriceChangesExpanded] = useState(false);
   const [txExpanded, setTxExpanded] = useState(false);
   const [budgetExpanded, setBudgetExpanded] = useState(false);
-
-  const queryClient = useQueryClient();
 
   const netWorthQuery = useQuery({
     queryKey: ["reports", "net-worth"],
@@ -271,40 +345,13 @@ function DashboardContent() {
     staleTime: 60_000,
   });
 
-  const syncMutation = useMutation({
-    mutationFn: () => plaidApi.sync(),
-    onSuccess: () => {
-      // Pull every data surface the sync just touched — net worth, cash
-      // flow (current + prev), budgets, transactions, recurring, plaid
-      // items themselves. Coarse invalidations are fine on the Dashboard.
-      queryClient.invalidateQueries({ queryKey: ["reports"] });
-      queryClient.invalidateQueries({ queryKey: ["budgets"] });
-      queryClient.invalidateQueries({ queryKey: ["transactions"] });
-      queryClient.invalidateQueries({ queryKey: ["recurring"] });
-      queryClient.invalidateQueries({ queryKey: ["plaid-items"] });
-      notify.success("Sync complete.");
-    },
-    onError: (err) =>
-      notify.error(err instanceof Error ? err.message : "Sync failed."),
-  });
-
   const netWorth = netWorthQuery.data;
   const cashFlow = cashFlowQuery.data;
   const cashFlowPrev = cashFlowPrevQuery.data;
   const health = healthQuery.data;
+  // Still needed for TodaysActionsSection (item_login_required surfacing);
+  // the sync button + last-synced timestamp moved to AppLayout.
   const plaidItems = plaidItemsQuery.data ?? [];
-
-  // Pull the most recent successful sync across every connected item; UI
-  // shows "Last synced N ago" in the breadcrumb. Falls back to "—" before
-  // first sync.
-  const lastSyncedAt = plaidItems
-    .map((i) => i.last_synced_at)
-    .filter((d): d is string => Boolean(d))
-    .sort()
-    .pop();
-  const lastSyncedRelative = lastSyncedAt
-    ? formatDistanceToNow(new Date(lastSyncedAt), { addSuffix: true })
-    : null;
 
   // MoM deltas — surfaced only when we have a prior data point to compare
   // against; otherwise the line is hidden so we don't render "+0 vs Mar"
@@ -353,40 +400,14 @@ function DashboardContent() {
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Slim breadcrumb-style header: month label on the left, last-sync
-          timestamp + Sync now button on the right. Sidebar already tells
-          the user they're on the Dashboard, so the H1+subtitle stack from
-          before was wasted vertical. */}
-      <div className="flex flex-wrap items-center justify-between gap-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300">
+      {/* Slim breadcrumb-style header. The global top bar (AppLayout)
+          carries Last-synced + Sync now, so this just anchors the page
+          context. The sidebar already says we're on the Dashboard, so the
+          H1+subtitle stack from before was wasted vertical. */}
+      <div className="flex flex-wrap items-center gap-3 motion-safe:animate-in motion-safe:fade-in motion-safe:duration-300">
         <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
           Overview · <span className="text-foreground">{currentMonthLabel}</span>
         </p>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          {lastSyncedRelative ? (
-            <span className="leading-none">
-              Last synced{" "}
-              <span className="font-medium text-foreground">{lastSyncedRelative}</span>
-            </span>
-          ) : (
-            <span className="leading-none italic">Not synced yet</span>
-          )}
-          <button
-            type="button"
-            onClick={() => syncMutation.mutate()}
-            disabled={syncMutation.isPending}
-            aria-label="Sync now"
-            className="inline-flex h-7 items-center gap-1 rounded-md border border-border/60 bg-card px-2 text-xs font-medium text-foreground transition-colors hover:border-border hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {syncMutation.isPending ? (
-              <Loader2 className="size-3 animate-spin" aria-hidden />
-            ) : (
-              <RefreshCw className="size-3" aria-hidden />
-            )}
-            <span className="hidden sm:inline">
-              {syncMutation.isPending ? "Syncing…" : "Sync now"}
-            </span>
-          </button>
-        </div>
       </div>
 
       {/* Inline plate replaces the global full-width banner from before.
@@ -397,11 +418,11 @@ function DashboardContent() {
           Each card aims for the same visual weight (~150px tall): a headline number,
           one secondary line of context, and at most one accent. */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Net worth</CardTitle>
+        <Card className="gap-3">
+          <CardHeader className="pb-3 border-b">
+            <CardTitle className="text-base font-bold text-foreground">Net worth</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-1">
+          <CardContent className="flex flex-1 flex-col gap-2">
             {netWorthQuery.isLoading ? (
               <SectionSkeleton className="h-16 w-full" />
             ) : netWorthQuery.isError ? (
@@ -416,34 +437,36 @@ function DashboardContent() {
                 >
                   {formatUsd(netWorth.net_worth_cents)}
                 </p>
-                <DeltaLine
-                  cents={netWorthDelta}
-                  monthShort={prevMonthShort}
-                  goodWhenPositive
-                />
-                <p className="text-muted-foreground text-xs leading-snug pt-0.5">
-                  Liquid <span className="tabular-nums font-medium text-foreground">{formatUsd(netWorth.liquid_cents)}</span>
-                  {netWorth.investment_cents > 0 ? (
-                    <>
-                      {" · "}Invest{" "}
-                      <span className="tabular-nums font-medium text-foreground">
-                        {formatUsd(netWorth.investment_cents)}
-                      </span>
-                    </>
-                  ) : null}
-                  {" · "}Debt{" "}
-                  <span className="tabular-nums font-medium text-foreground">{formatUsd(netWorth.debt_cents)}</span>
-                </p>
+                <div className="mt-auto space-y-1.5">
+                  <DeltaLine
+                    cents={netWorthDelta}
+                    monthShort={prevMonthShort}
+                    goodWhenPositive
+                  />
+                  <p className="text-muted-foreground text-[11px] leading-snug">
+                    Liquid <span className="tabular-nums font-medium text-foreground/90">{formatUsd(netWorth.liquid_cents)}</span>
+                    {netWorth.investment_cents > 0 ? (
+                      <>
+                        {" · "}Invest{" "}
+                        <span className="tabular-nums font-medium text-foreground/90">
+                          {formatUsd(netWorth.investment_cents)}
+                        </span>
+                      </>
+                    ) : null}
+                    {" · "}Debt{" "}
+                    <span className="tabular-nums font-medium text-foreground/90">{formatUsd(netWorth.debt_cents)}</span>
+                  </p>
+                </div>
               </>
             ) : null}
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Cash flow this month</CardTitle>
+        <Card className="gap-3">
+          <CardHeader className="pb-3 border-b">
+            <CardTitle className="text-base font-bold text-foreground">Cash flow this month</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-1">
+          <CardContent className="flex flex-1 flex-col gap-2">
             {cashFlowQuery.isLoading ? (
               <SectionSkeleton className="h-16 w-full" />
             ) : cashFlowQuery.isError ? (
@@ -460,21 +483,23 @@ function DashboardContent() {
                 >
                   {formatUsd(cashFlow.net_cents)}
                 </p>
-                <DeltaLine
-                  cents={cashFlowNetDelta}
-                  monthShort={prevMonthShort}
-                  goodWhenPositive
-                />
-                <p className="text-muted-foreground text-xs leading-snug pt-0.5">
-                  Income{" "}
-                  <span className="tabular-nums font-medium text-emerald-600 dark:text-emerald-400">
-                    {formatUsd(cashFlow.income_cents)}
-                  </span>
-                  {" · "}Expenses{" "}
-                  <span className="tabular-nums font-medium text-rose-600 dark:text-rose-400">
-                    {formatUsd(cashFlow.expenses_cents)}
-                  </span>
-                </p>
+                <div className="mt-auto space-y-1.5">
+                  <DeltaLine
+                    cents={cashFlowNetDelta}
+                    monthShort={prevMonthShort}
+                    goodWhenPositive
+                  />
+                  <p className="text-muted-foreground text-[11px] leading-snug">
+                    Income{" "}
+                    <span className="tabular-nums font-medium text-emerald-600 dark:text-emerald-400">
+                      {formatUsd(cashFlow.income_cents)}
+                    </span>
+                    {" · "}Expenses{" "}
+                    <span className="tabular-nums font-medium text-rose-600 dark:text-rose-400">
+                      {formatUsd(cashFlow.expenses_cents)}
+                    </span>
+                  </p>
+                </div>
               </>
             ) : null}
           </CardContent>
@@ -502,14 +527,9 @@ function DashboardContent() {
             : "View all insights";
           return (
             <Link href={cardHref} className="group block outline-none">
-              <Card
-                className={cn(
-                  "h-full border-primary/20 transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-lg",
-                  insightsTeaser?.severity === "warn" && "border-amber-500/60",
-                )}
-              >
-                <CardHeader className="pb-2">
-                  <CardTitle className="flex items-center justify-between gap-2 text-sm font-medium text-muted-foreground">
+              <Card className="h-full gap-3 transition-[box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:shadow-lg">
+                <CardHeader className="pb-3 border-b">
+                  <CardTitle className="flex items-center justify-between gap-2 text-base font-bold text-foreground">
                     Insights
                     <Badge
                       variant={
@@ -521,11 +541,11 @@ function DashboardContent() {
                     </Badge>
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-2">
+                <CardContent className="flex flex-1 flex-col gap-2">
                   <p className="line-clamp-3 text-sm leading-snug text-foreground">
                     {insightsTeaser?.summary ?? "Trends, health, and spending stories."}
                   </p>
-                  <p className="text-primary text-xs font-medium transition-transform group-hover:underline group-hover:translate-x-0.5">
+                  <p className="mt-auto text-primary text-xs font-medium transition-transform group-hover:underline group-hover:translate-x-0.5">
                     {ctaLabel} →
                   </p>
                 </CardContent>
@@ -548,10 +568,10 @@ function DashboardContent() {
 
       {/* Row 2 — Spending pie (2/3) + Budget compact (1/3) */}
       <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-4 space-y-0">
+        <Card className="lg:col-span-2 gap-3">
+          <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-4 space-y-0 pb-3 border-b">
             <div>
-              <CardTitle className="flex items-center gap-2">
+              <CardTitle className="flex items-center gap-2 text-base font-bold text-foreground">
                 <span>Spending by category</span>
                 <Link
                   href="/reports"
@@ -574,10 +594,10 @@ function DashboardContent() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 pb-3">
+        <Card className="gap-3">
+          <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0 pb-3 border-b">
             <div>
-              <CardTitle className="text-sm font-semibold">Budget envelopes</CardTitle>
+              <CardTitle className="text-base font-bold text-foreground">Budget envelopes</CardTitle>
               <CardDescription className="text-xs">Top by utilization</CardDescription>
             </div>
             <Link href="/settings/budgets" className="text-primary text-xs font-medium hover:underline shrink-0">
@@ -635,10 +655,10 @@ function DashboardContent() {
       {/* Row 3 — 3 compact cards: Forecast · Price Changes · Recent */}
       <div className="grid gap-4 md:grid-cols-3">
         {/* Forecast */}
-        <Card>
-          <CardHeader className="pb-2">
+        <Card className="gap-3">
+          <CardHeader className="pb-3 border-b">
             <Link href="/recurring" className="outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">
-              <CardTitle className="text-sm font-semibold hover:underline">Cash flow forecast</CardTitle>
+              <CardTitle className="text-base font-bold text-foreground hover:underline">Cash flow forecast</CardTitle>
               <CardDescription className="text-xs">Upcoming bills — 30 days</CardDescription>
             </Link>
           </CardHeader>
@@ -652,20 +672,24 @@ function DashboardContent() {
             ) : (
               <div>
                 <ul className="divide-y">
-                  {visibleForecast.map((entry) => (
-                    <li key={`${entry.stream_id}-${entry.date}-${entry.description}`}>
-                      <Link
-                        href={`/recurring?stream=${entry.stream_id}`}
-                        className="flex items-center justify-between gap-2 px-4 py-1.5 text-xs transition-colors hover:bg-muted/50"
-                      >
-                        <div className="min-w-0">
-                          <p className="truncate font-medium">{entry.description}</p>
-                          <p className="text-muted-foreground tabular-nums">{entry.date}</p>
-                        </div>
-                        <PlaidTxnAmount cents={entry.amount_cents} size="sm" tone="flow" className="shrink-0 font-medium" />
-                      </Link>
-                    </li>
-                  ))}
+                  {visibleForecast.map((entry) => {
+                    const name = getForecastName(entry);
+                    return (
+                      <li key={`${entry.stream_id}-${entry.date}-${entry.description}`}>
+                        <Link
+                          href={`/recurring?stream=${entry.stream_id}`}
+                          className="flex items-center gap-2 px-4 py-1.5 text-xs transition-colors hover:bg-muted/50"
+                        >
+                          <MerchantAvatar name={name} seed={`stream-${entry.stream_id}`} />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate font-medium">{name}</p>
+                            <p className="text-muted-foreground">{formatDayLabel(entry.date)}</p>
+                          </div>
+                          <PlaidTxnAmount cents={entry.amount_cents} size="sm" tone="flow" className="shrink-0 font-medium" />
+                        </Link>
+                      </li>
+                    );
+                  })}
                 </ul>
                 {forecastSorted.length > COMPACT_DEFAULT && (
                   <button
@@ -682,10 +706,10 @@ function DashboardContent() {
         </Card>
 
         {/* Price change alerts */}
-        <Card>
-          <CardHeader className="pb-2">
+        <Card className="gap-3">
+          <CardHeader className="pb-3 border-b">
             <Link href="/recurring" className="outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">
-              <CardTitle className="text-sm font-semibold hover:underline">Price change alerts</CardTitle>
+              <CardTitle className="text-base font-bold text-foreground hover:underline">Price change alerts</CardTitle>
               <CardDescription className="text-xs">Subscriptions with recent changes</CardDescription>
             </Link>
           </CardHeader>
@@ -699,19 +723,19 @@ function DashboardContent() {
             ) : (
               <div>
                 <ul className="divide-y">
-                  {visiblePriceChanges.map((stream) => {
+                  {visiblePriceChanges.map((stream: RecurringStream) => {
                     const pct = stream.price_change_pct ?? "0";
+                    const name = streamTitle(stream);
                     return (
                       <li key={stream.id}>
                         <Link
                           href={`/recurring?stream=${stream.id}`}
-                          className="flex items-center justify-between gap-2 px-4 py-1.5 text-xs transition-colors hover:bg-muted/50"
+                          className="flex items-center gap-2 px-4 py-1.5 text-xs transition-colors hover:bg-muted/50"
                         >
-                          <div className="min-w-0">
-                            <p className="truncate font-medium">
-                              {stream.user_label || stream.merchant_name || stream.description}
-                            </p>
-                            <p className="text-muted-foreground">{stream.frequency ?? "Recurring"}</p>
+                          <MerchantAvatar name={name} seed={`stream-${stream.id}`} />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate font-medium">{name}</p>
+                            <p className="text-muted-foreground">{formatFrequency(stream.frequency)}</p>
                           </div>
                           <Badge variant="destructive" className="shrink-0 text-[10px] px-1.5 py-0">
                             +{pct}%
@@ -736,10 +760,10 @@ function DashboardContent() {
         </Card>
 
         {/* Recent transactions */}
-        <Card>
-          <CardHeader className="pb-2">
+        <Card className="gap-3">
+          <CardHeader className="pb-3 border-b">
             <Link href="/transactions" className="outline-none focus-visible:ring-2 focus-visible:ring-ring rounded">
-              <CardTitle className="text-sm font-semibold hover:underline">Recent transactions</CardTitle>
+              <CardTitle className="text-base font-bold text-foreground hover:underline">Recent transactions</CardTitle>
               <CardDescription className="text-xs">Latest activity</CardDescription>
             </Link>
           </CardHeader>
@@ -761,10 +785,14 @@ function DashboardContent() {
                           href={`/transactions?highlight=${tx.id}`}
                           className="flex items-center gap-2 px-4 py-1.5 text-xs transition-colors hover:bg-muted/50"
                         >
-                          <MerchantAvatar tx={tx} />
+                          <MerchantAvatar
+                            name={getDisplayName(tx)}
+                            logoUrl={tx.logo_url}
+                            seed={tx.merchant_entity_id ?? undefined}
+                          />
                           <div className="min-w-0 flex-1">
                             <p className="truncate font-medium">{getDisplayName(tx)}</p>
-                            <p className="text-muted-foreground tabular-nums">{when}</p>
+                            <p className="text-muted-foreground">{formatDayLabel(when)}</p>
                           </div>
                           <PlaidTxnAmount cents={tx.amount_cents} size="sm" tone="flow" className="shrink-0 font-medium" />
                         </Link>
