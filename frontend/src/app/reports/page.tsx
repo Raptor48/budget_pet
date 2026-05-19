@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
@@ -130,15 +130,40 @@ export default function Reports() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
+  // Tracks whether a View Transition is currently in flight. We skip the
+  // transition entirely on rapid re-clicks (just sync-set the state) so a
+  // new transition never aborts an in-progress one — which both eliminates
+  // the AbortError cascade and prevents the half-finished cross-fade flicker.
+  const vtActiveRef = useRef(false);
   const handleTabChange = useCallback((value: string) => {
     if (!isReportTab(value)) return;
     // Use the View Transitions API for a smooth cross-fade between tab
     // panels when the browser supports it. Falls back to a plain
     // synchronous state update everywhere else.
     const doc = typeof document !== "undefined" ? document : null;
-    const startVT = (doc as unknown as { startViewTransition?: (cb: () => void) => void } | null)?.startViewTransition;
-    if (typeof startVT === "function") {
-      startVT.call(doc, () => setTab(value));
+    type ViewTransitionLike = {
+      finished?: Promise<unknown>;
+      ready?: Promise<unknown>;
+      updateCallbackDone?: Promise<unknown>;
+    };
+    const startVT = (
+      doc as unknown as {
+        startViewTransition?: (cb: () => void) => ViewTransitionLike;
+      } | null
+    )?.startViewTransition;
+    if (typeof startVT === "function" && !vtActiveRef.current) {
+      vtActiveRef.current = true;
+      const transition = startVT.call(doc, () => setTab(value));
+      // Per spec: when a transition is superseded, BOTH `.ready` and
+      // `.finished` reject with AbortError; `.updateCallbackDone` may also
+      // reject if the callback throws. Attach silent catches to every
+      // promise the spec exposes so nothing reaches Next's dev overlay.
+      const swallow = () => {};
+      transition?.ready?.catch(swallow);
+      transition?.updateCallbackDone?.catch(swallow);
+      transition?.finished?.catch(swallow).finally(() => {
+        vtActiveRef.current = false;
+      });
     } else {
       setTab(value);
     }

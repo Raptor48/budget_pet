@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { CashFlowMonth } from "@/types/v2";
 
@@ -117,14 +117,17 @@ export function CashFlowHistoryChart({
   const [hoveredMonth, setHoveredMonth] = useState<string | null>(null);
   // Entrance animation: start with height 0, flip to real values after mount
   // so the CSS transition has something to interpolate.
+  //
+  // Strict-mode-safe: don't gate this on a useRef "first render" flag. Refs
+  // persist across React's dev-only double-mount, so the second effect run
+  // would see the ref already flipped and skip the rAF — leaving `mounted`
+  // permanently false and the bars at 0%. The plain rAF + cleanup pattern
+  // is idempotent: strict-mode cleanup cancels the first rAF, the second
+  // mount schedules a fresh one.
   const [mounted, setMounted] = useState(false);
-  const firstRender = useRef(true);
   useEffect(() => {
-    if (firstRender.current) {
-      firstRender.current = false;
-      const id = window.requestAnimationFrame(() => setMounted(true));
-      return () => window.cancelAnimationFrame(id);
-    }
+    const id = window.requestAnimationFrame(() => setMounted(true));
+    return () => window.cancelAnimationFrame(id);
   }, []);
 
   if (!sorted.length) {

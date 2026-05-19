@@ -56,13 +56,13 @@ export function FinancialHealthCompactCard({
   isError?: boolean;
 }) {
   return (
-    <Card className="overflow-hidden">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-muted-foreground">
+    <Card className="overflow-hidden gap-3">
+      <CardHeader className="pb-3 border-b">
+        <CardTitle className="text-base font-bold text-foreground">
           Financial health
         </CardTitle>
       </CardHeader>
-      <CardContent className="pb-4">
+      <CardContent className="flex flex-1 flex-col pb-4">
         {isLoading ? (
           <div className="h-16 w-full animate-pulse rounded bg-muted" aria-hidden />
         ) : isError ? (
