@@ -72,26 +72,44 @@ async def _shared_category_id(conn) -> Optional[int]:
 async def _list_unrouted_inflows(
     conn, *, shared_category_id: int, lookback_days: int
 ) -> List[Dict[str, Any]]:
-    """Inflow transactions in the window that are NOT yet Shared.
+    """Inflow transactions in the window that are NOT yet Shared and
+    have no manually-managed splits.
 
-    Class predicate is ``income`` because Zelle / Venmo / cash refunds
-    all land as income before they're auto-matched. We deliberately do
-    NOT scan transactions whose category is already Shared (skipping
-    already-matched rows = the idempotency guarantee).
+    Class predicate spans ``income``, ``uncategorized`` AND
+    ``internal_transfer`` — a friend's Zelle frequently lands as
+    ``internal_transfer`` when their name pattern-matches the family's
+    transfer-name list, or when Plaid's pair-matcher happens to find a
+    same-amount outflow within its own window. Scanning only ``income``
+    silently dropped those settlements. The safety rails (exact-cents
+    match + exactly-one-outstanding-receivable rule + symmetric N-day
+    window) prevent false positives in the broader pool.
+
+    We deliberately do NOT scan:
+      * Rows whose category is already Shared (idempotency: skip
+        already-matched).
+      * Rows that already have splits — those are user-managed; the
+        matcher must never overwrite a manual decision.
+      * ``expense`` rows — money going out can't be a settlement.
     """
     rows = await conn.fetch(
         """
         SELECT t.id,
                t.account_id,
                t.amount_cents,
+               t.transaction_class,
                COALESCE(t.authorized_date, t.date) AS effective_date,
-               t.merchant_name
+               t.merchant_name,
+               t.category_id
         FROM transactions t
-        WHERE t.transaction_class = 'income'
+        WHERE t.transaction_class IN ('income', 'uncategorized', 'internal_transfer')
           AND t.amount_cents < 0
           AND COALESCE(t.authorized_date, t.date)
-              >= (CURRENT_DATE - ($1 || ' days')::interval)
+              >= (CURRENT_DATE - make_interval(days => $1))
           AND COALESCE(t.category_id, 0) <> $2
+          AND NOT EXISTS (
+              SELECT 1 FROM transaction_splits ts
+              WHERE ts.parent_transaction_id = t.id
+          )
         ORDER BY effective_date DESC, t.id DESC
         """,
         int(lookback_days),
@@ -130,8 +148,8 @@ async def _outstanding_count_at(
             WHERE c.is_receivable = TRUE
               AND ts.amount_cents = $1
               AND COALESCE(t.authorized_date, t.date)
-                  BETWEEN ($2::date - ($3 || ' days')::interval)
-                      AND ($2::date + ($3 || ' days')::interval)
+                  BETWEEN ($2::date - make_interval(days => $3))
+                      AND ($2::date + make_interval(days => $3))
         ),
         already_matched_inflows AS (
             SELECT COUNT(*) AS n
@@ -141,8 +159,8 @@ async def _outstanding_count_at(
               AND t.amount_cents = -$1
               AND t.id <> $4
               AND COALESCE(t.authorized_date, t.date)
-                  BETWEEN ($2::date - ($3 || ' days')::interval)
-                      AND ($2::date + ($3 || ' days')::interval)
+                  BETWEEN ($2::date - make_interval(days => $3))
+                      AND ($2::date + make_interval(days => $3))
         )
         SELECT
             (SELECT n FROM outflow_splits)
@@ -181,8 +199,8 @@ async def _matched_counterparty(
           AND ts.amount_cents = $1
           AND ts.counterparty IS NOT NULL
           AND COALESCE(t.authorized_date, t.date)
-              BETWEEN ($2::date - ($3 || ' days')::interval)
-                  AND ($2::date + ($3 || ' days')::interval)
+              BETWEEN ($2::date - make_interval(days => $3))
+                  AND ($2::date + make_interval(days => $3))
         """,
         int(amount_cents_abs),
         effective_date,
@@ -256,17 +274,38 @@ async def _assign_to_shared(
         )
 
 
-async def try_match_recent_inflows(*, lookback_days: Optional[int] = None) -> Dict[str, int]:
-    """One pass of the auto-matcher. Returns counters for telemetry.
+async def try_match_recent_inflows(
+    *,
+    lookback_days: Optional[int] = None,
+    only_inflow_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """One pass of the auto-matcher. Returns counters + per-row decisions.
 
     Counters:
       * ``checked``    — unrouted inflows scanned
       * ``matched``    — newly assigned to the Shared category
       * ``ambiguous``  — outstanding count ≥ 2; user must disambiguate
       * ``no_match``   — no outstanding receivable at that amount in window
+
+    Diagnostics:
+      * ``decisions`` — list of ``{id, amount_cents, effective_date,
+        transaction_class, outstanding, decision}`` so callers (admin UI,
+        ad-hoc curl) can see WHY a specific row was/wasn't picked. This
+        is the second-most-asked debugging question after "did the
+        matcher even run".
+
+    Args:
+        only_inflow_id: when set, scope the scan to a single inflow row.
+            The row still has to satisfy the unrouted-inflow filters
+            (in-window, no splits, not already Shared) to be evaluated.
+            Used by the manual debug endpoint to re-check one specific
+            Zelle that the user expected to match.
     """
     window = lookback_days if lookback_days is not None else _window_days()
-    counters = {"checked": 0, "matched": 0, "ambiguous": 0, "no_match": 0}
+    counters: Dict[str, Any] = {
+        "checked": 0, "matched": 0, "ambiguous": 0, "no_match": 0,
+        "decisions": [],
+    }
     pool = await get_pool()
     async with pool.acquire() as conn:
         shared_id = await _shared_category_id(conn)
@@ -278,6 +317,8 @@ async def try_match_recent_inflows(*, lookback_days: Optional[int] = None) -> Di
         inflows = await _list_unrouted_inflows(
             conn, shared_category_id=shared_id, lookback_days=window
         )
+        if only_inflow_id is not None:
+            inflows = [r for r in inflows if int(r["id"]) == int(only_inflow_id)]
         for inflow in inflows:
             counters["checked"] += 1
             amount_abs = abs(int(inflow["amount_cents"]))
@@ -288,6 +329,7 @@ async def try_match_recent_inflows(*, lookback_days: Optional[int] = None) -> Di
                 lookback_days=window,
                 exclude_inflow_id=int(inflow["id"]),
             )
+            decision: str
             if outstanding == 1:
                 counterparty = await _matched_counterparty(
                     conn,
@@ -302,14 +344,31 @@ async def try_match_recent_inflows(*, lookback_days: Optional[int] = None) -> Di
                     counterparty=counterparty,
                 )
                 counters["matched"] += 1
+                decision = "matched"
             elif outstanding > 1:
                 counters["ambiguous"] += 1
+                decision = "ambiguous"
             else:
                 counters["no_match"] += 1
+                decision = "no_match"
+            counters["decisions"].append({
+                "id": int(inflow["id"]),
+                "amount_cents": int(inflow["amount_cents"]),
+                "effective_date": str(inflow["effective_date"]),
+                "transaction_class": inflow.get("transaction_class"),
+                "outstanding": int(outstanding),
+                "decision": decision,
+            })
+            logger.info(
+                "Shared matcher decision: id=%d amount=%d class=%s "
+                "outstanding=%d → %s",
+                int(inflow["id"]), int(inflow["amount_cents"]),
+                inflow.get("transaction_class"), outstanding, decision,
+            )
     logger.info(
-        "Shared auto-matcher: checked=%d matched=%d ambiguous=%d no_match=%d (window=%dd)",
+        "Shared auto-matcher: checked=%d matched=%d ambiguous=%d no_match=%d (window=%dd, only_inflow_id=%s)",
         counters["checked"], counters["matched"],
-        counters["ambiguous"], counters["no_match"], window,
+        counters["ambiguous"], counters["no_match"], window, only_inflow_id,
     )
     return counters
 
