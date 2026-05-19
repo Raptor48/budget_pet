@@ -81,11 +81,16 @@ class MerchantLogosRepository:
                       <> ALL($2::text[])
                   AND (
                     ml.merchant_name IS NULL
-                    OR (ml.status <> 'resolved'
+                    OR (
+                        -- 'resolved' is sticky for the auto pipeline;
+                        -- 'user_curated' is sticky forever (a manual
+                        -- pick is never overwritten by auto-enrich).
+                        ml.status NOT IN ('resolved', 'user_curated')
                         AND ml.refreshed_at < NOW() - LEAST(
                             INTERVAL '30 days',
                             POWER(2, ml.miss_count)::int * INTERVAL '1 day'
-                        ))
+                        )
+                    )
                   )
                 ORDER BY c.merchant_key
                 LIMIT $1
