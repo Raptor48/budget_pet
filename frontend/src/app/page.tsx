@@ -680,7 +680,7 @@ function DashboardContent() {
                           href={`/recurring?stream=${entry.stream_id}`}
                           className="flex items-center gap-2 px-4 py-1.5 text-xs transition-colors hover:bg-muted/50"
                         >
-                          <MerchantAvatar name={name} seed={`stream-${entry.stream_id}`} />
+                          <MerchantAvatar name={name} logoUrl={entry.logo_url} seed={`stream-${entry.stream_id}`} />
                           <div className="min-w-0 flex-1">
                             <p className="truncate font-medium">{name}</p>
                             <p className="text-muted-foreground">{formatDayLabel(entry.date)}</p>
@@ -732,7 +732,7 @@ function DashboardContent() {
                           href={`/recurring?stream=${stream.id}`}
                           className="flex items-center gap-2 px-4 py-1.5 text-xs transition-colors hover:bg-muted/50"
                         >
-                          <MerchantAvatar name={name} seed={`stream-${stream.id}`} />
+                          <MerchantAvatar name={name} logoUrl={stream.logo_url} seed={`stream-${stream.id}`} />
                           <div className="min-w-0 flex-1">
                             <p className="truncate font-medium">{name}</p>
                             <p className="text-muted-foreground">{formatFrequency(stream.frequency)}</p>
