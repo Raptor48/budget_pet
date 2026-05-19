@@ -79,7 +79,8 @@ class MerchantAliasesRepository:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT merchant_key, display_name, created_at, updated_at
+                SELECT merchant_key, display_name, website,
+                       created_at, updated_at
                 FROM merchant_aliases
                 ORDER BY display_name
                 """,
@@ -97,28 +98,58 @@ class MerchantAliasesRepository:
         merchant_entity_id: Optional[str],
         merchant_name: Optional[str],
         fallback_display: Optional[str],
-        display_name: str,
+        display_name: Optional[str] = None,
+        website: Optional[str] = None,
+        chosen_logo_url: Optional[str] = None,
+        chosen_logo_domain: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Set / replace the alias for the merchant identified by the given
-        Plaid attributes. Raises ``ValueError`` if no key can be derived.
+        """Set / replace the user override row for the merchant identified
+        by the given Plaid attributes. Raises ``ValueError`` if no key can
+        be derived.
 
-        If **both** ``merchant_entity_id`` and ``merchant_name`` are supplied
-        we write **two** rows — ``eid:<id>`` and ``name:<lower(name)>`` — with
-        the same ``display_name``. This is important because Plaid's recurring
-        endpoint (``/transactions/recurring/get``) returns ``merchant_name``
-        only — no ``merchant_entity_id``. Without the redundant ``name:`` row
-        the alias would silently fail to match recurring stream rows of the
-        same merchant. The name-keyed row is also a safety net for any
-        statement-line variant where Plaid drops the entity id.
+        Both ``display_name`` (rename) and ``website`` are optional; the
+        caller can update one without touching the other by passing only
+        the field it cares about. ``None`` means "leave whatever's there
+        unchanged"; the empty string ``""`` means "clear this field".
 
-        The "preferred" key (the one matched first by ``merchant_key()``,
-        i.e. ``eid:`` when present, else ``name:``) is the one returned in
-        the response so the UI can use it as the canonical identifier for
-        delete / update.
+        If **both** ``merchant_entity_id`` and ``merchant_name`` are
+        supplied we write **two** rows — ``eid:<id>`` and ``name:<lower(name)>``
+        — sharing the same values. This is important because Plaid's
+        recurring endpoint returns ``merchant_name`` only — no
+        ``merchant_entity_id``. The name-keyed row is also a safety net
+        for any statement-line variant where Plaid drops the entity id.
+
+        When ``chosen_logo_url`` is provided, also upsert a corresponding
+        row in ``merchant_logos`` with ``status='user_curated'`` so the
+        read-time JOIN immediately renders the user's pick. We key
+        ``merchant_logos`` on the user-facing merchant identifier
+        (``merchant_name`` or the fallback display title) — the same
+        expression the transactions repo's COALESCE join uses, so the
+        two stay in lock-step.
+
+        Returns the "preferred" alias row (eid-keyed when both keys
+        exist, else name-keyed).
         """
-        cleaned = (display_name or "").strip()
-        if not cleaned:
-            raise ValueError("display_name cannot be empty")
+        # Normalise inputs. Empty string is meaningful ("clear"); None
+        # means "leave unchanged". We accept both via the same NULLIF
+        # trick on the SQL side via the carry-current-value branch.
+        display_clean: Optional[str] = None
+        if display_name is not None:
+            display_clean = display_name.strip()
+        website_clean: Optional[str] = None
+        if website is not None:
+            website_clean = website.strip() or None  # empty → NULL
+
+        if (
+            display_name is None
+            and website is None
+            and chosen_logo_url is None
+        ):
+            raise ValueError(
+                "Provide at least one of display_name, website, "
+                "or chosen_logo_url"
+            )
+
         primary_key = build_merchant_key(
             merchant_entity_id, merchant_name, fallback_display
         )
@@ -130,31 +161,110 @@ class MerchantAliasesRepository:
         eid = (merchant_entity_id or "").strip()
         nm = (merchant_name or "").strip()
         if eid and nm:
-            # primary is "eid:..."; also write "name:..." as a fallback alias.
             secondary_key = f"name:{nm.lower()}"
         keys_to_write = [primary_key]
         if secondary_key and secondary_key != primary_key:
             keys_to_write.append(secondary_key)
+
+        # The display_name column is NOT NULL with a non-empty CHECK in
+        # the schema, so we can't write a row that only carries a
+        # website without a name. For website-only edits, we read the
+        # existing display_name from the primary key and keep it.
         pool = await self._pool()
         async with pool.acquire() as conn:
             async with conn.transaction():
+                # Pre-read the existing primary row so we can carry
+                # whichever field the caller didn't supply. This also
+                # means a 'website-only' edit on a merchant that doesn't
+                # have an alias yet must supply a display_name — we
+                # surface that as the same ValueError as before.
+                existing = await conn.fetchrow(
+                    "SELECT display_name, website FROM merchant_aliases "
+                    "WHERE merchant_key = $1",
+                    primary_key,
+                )
+                merged_display = (
+                    display_clean
+                    if display_name is not None
+                    else (existing["display_name"] if existing else None)
+                )
+                if not merged_display:
+                    raise ValueError(
+                        "display_name is required to create a merchant override"
+                    )
+                merged_website = (
+                    website_clean
+                    if website is not None
+                    else (existing["website"] if existing else None)
+                )
+
                 primary_row = None
                 for k in keys_to_write:
                     row = await conn.fetchrow(
                         """
-                        INSERT INTO merchant_aliases (merchant_key, display_name)
-                        VALUES ($1, $2)
+                        INSERT INTO merchant_aliases (merchant_key, display_name, website)
+                        VALUES ($1, $2, $3)
                         ON CONFLICT (merchant_key) DO UPDATE
                             SET display_name = EXCLUDED.display_name,
+                                website      = EXCLUDED.website,
                                 updated_at   = NOW()
-                        RETURNING merchant_key, display_name, created_at, updated_at
+                        RETURNING merchant_key, display_name, website,
+                                  created_at, updated_at
                         """,
                         k,
-                        cleaned,
+                        merged_display,
+                        merged_website,
                     )
                     if k == primary_key:
                         primary_row = row
-        assert primary_row is not None  # primary_key is always written first
+
+                # Persist the logo pick (or clear an existing one) so
+                # the read-time JOIN immediately reflects the user's
+                # decision. Three cases:
+                #
+                #   1. chosen_logo_url is non-empty → upsert user_curated
+                #   2. caller cleared the website (website=="") → drop
+                #      the user_curated row so auto-enrichment can take
+                #      over again on the next sync
+                #   3. neither → leave logo state untouched
+                #
+                # The key for merchant_logos is the same expression the
+                # transactions read-path JOINs on: merchant_name (when
+                # Plaid provides it) else the display title fallback.
+                logo_key = nm or (fallback_display or "").strip()
+                if chosen_logo_url and logo_key:
+                    await conn.execute(
+                        """
+                        INSERT INTO merchant_logos
+                            (merchant_name, logo_url, brand_domain,
+                             quality_score, status, miss_count,
+                             refreshed_at)
+                        VALUES ($1, $2, $3, 1.0,
+                                'user_curated', 0, NOW())
+                        ON CONFLICT (merchant_name) DO UPDATE SET
+                            logo_url      = EXCLUDED.logo_url,
+                            brand_domain  = EXCLUDED.brand_domain,
+                            quality_score = 1.0,
+                            status        = 'user_curated',
+                            miss_count    = 0,
+                            refreshed_at  = NOW()
+                        """,
+                        logo_key,
+                        chosen_logo_url,
+                        chosen_logo_domain or merged_website or "",
+                    )
+                elif website == "" and logo_key:
+                    # Explicit clear: only drop the user_curated row;
+                    # leave any prior auto-resolved entry alone (there
+                    # rarely is one when a user override existed, but
+                    # the principle is "only touch what the user owns").
+                    await conn.execute(
+                        "DELETE FROM merchant_logos "
+                        "WHERE merchant_name = $1 AND status = 'user_curated'",
+                        logo_key,
+                    )
+
+        assert primary_row is not None
         d = dict(primary_row)
         d["display_label"] = display_merchant_label(d["merchant_key"])
         return d
@@ -171,6 +281,11 @@ class MerchantAliasesRepository:
         from the Settings list) **or** the Plaid attribute trio (twin-row
         delete — clears both ``eid:`` and ``name:`` rows written by
         ``upsert_alias``). Returns True if at least one row was removed.
+
+        Also clears any ``user_curated`` row in ``merchant_logos`` for
+        the same merchant — removing an alias is the user saying "drop
+        my overrides for this merchant", which includes their picked
+        logo. Auto-enrichment will re-evaluate on the next sync.
         """
         keys: List[str] = []
         if merchant_key:
@@ -200,6 +315,18 @@ class MerchantAliasesRepository:
                     )
                     if result != "DELETE 0":
                         deleted += 1
+                # Drop the user_curated logo entry too — the logo key
+                # is merchant_name (preferred) or the display fallback,
+                # matching the upsert path above.
+                logo_key = (merchant_name or "").strip() or (
+                    fallback_display or ""
+                ).strip()
+                if logo_key:
+                    await conn.execute(
+                        "DELETE FROM merchant_logos "
+                        "WHERE merchant_name = $1 AND status = 'user_curated'",
+                        logo_key,
+                    )
         return deleted > 0
 
     async def get_by_key(self, merchant_key: str) -> Optional[Dict[str, Any]]:
@@ -207,7 +334,8 @@ class MerchantAliasesRepository:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT merchant_key, display_name, created_at, updated_at
+                SELECT merchant_key, display_name, website,
+                       created_at, updated_at
                 FROM merchant_aliases
                 WHERE merchant_key = $1
                 """,

@@ -609,8 +609,26 @@ export interface MerchantAlias {
   display_label: string;
   /** Chosen rename (e.g. "Rent"). */
   display_name: string;
+  /** User-provided official website for this merchant. When set, the
+   * read-time JOIN renders a curated logo (picked from the Brandfetch /
+   * faviconextractor / Google candidates) instead of the auto-resolved
+   * one. NULL when the user hasn't supplied a website. */
+  website?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+}
+
+/** Single thumbnail option returned by ``GET /api/merchant-aliases/logo-candidates``.
+ * The frontend renders these as a grid of selectable thumbnails. */
+export interface LogoCandidate {
+  url: string;
+  source: "brandfetch" | "faviconextractor" | "google";
+  label: string;
+}
+
+export interface LogoCandidatesResponse {
+  domain: string;
+  candidates: LogoCandidate[];
 }
 
 export interface NetWorthSnapshot {
