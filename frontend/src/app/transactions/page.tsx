@@ -723,6 +723,21 @@ function TransactionDetailsDialog({
     return m;
   }, [categories]);
 
+  // True if this transaction carries at least one Shared (receivable)
+  // split. For those rows the reports-side LATERAL carve-out nets the
+  // parent's amount to zero regardless of ``transaction_class``, so
+  // showing the Auto (income) / Internal-transfer class picker is just
+  // noise — the chosen class doesn't change any totals. Hiding the
+  // picker removes the "but it says income, am I being double-counted?"
+  // confusion that brought us here.
+  const hasReceivableSplit = useMemo(() => {
+    const splits = transaction?.splits ?? [];
+    return splits.some((s) => {
+      if (s.category_id == null) return false;
+      return categoryById.get(s.category_id)?.is_receivable === true;
+    });
+  }, [transaction, categoryById]);
+
   const authorizedDateText =
     transaction?.authorized_date && transaction.authorized_date !== transaction.date
       ? formatAuthorizedDateOnly(String(transaction.authorized_date))
@@ -1163,7 +1178,7 @@ function TransactionDetailsDialog({
                 </Tooltip>
               </TooltipProvider>
             ) : null}
-            {transaction && !isLoading && !isError && onSetClassOverride ? (
+            {transaction && !isLoading && !isError && onSetClassOverride && !hasReceivableSplit ? (
               <Select
                 value={transaction.manual_class_override ?? "auto"}
                 onValueChange={(value) => {
