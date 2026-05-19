@@ -91,15 +91,20 @@ export function accountTag(stream: RecurringStream): string {
 // Merchant avatar (gradient fallback, deterministic by merchant key)
 // ---------------------------------------------------------------------------
 
+// Toned-down palette: each gradient slides 500 → 700 (darker tail) with
+// alpha to let the row background show through. The avatar reads as a
+// muted color block instead of a saturated badge — keeps deterministic
+// per-merchant identity without competing with status chips and price
+// alerts in the same row.
 const MERCHANT_GRADIENTS = [
-  "from-rose-500 to-pink-500",
-  "from-orange-500 to-amber-500",
-  "from-yellow-500 to-lime-500",
-  "from-emerald-500 to-teal-500",
-  "from-cyan-500 to-sky-500",
-  "from-blue-500 to-indigo-500",
-  "from-violet-500 to-fuchsia-500",
-  "from-fuchsia-500 to-rose-500",
+  "from-rose-500/70 to-pink-700/75",
+  "from-orange-500/70 to-amber-700/75",
+  "from-yellow-500/70 to-lime-700/75",
+  "from-emerald-500/70 to-teal-700/75",
+  "from-cyan-500/70 to-sky-700/75",
+  "from-blue-500/70 to-indigo-700/75",
+  "from-violet-500/70 to-fuchsia-700/75",
+  "from-fuchsia-500/70 to-rose-700/75",
 ] as const;
 
 function pickGradient(seed: string): string {
@@ -188,16 +193,16 @@ export function UserStatusPill({
   className?: string;
 }) {
   if (status === "active") return null;
-  const map = {
-    paused:
-      "border-amber-500/50 bg-amber-500/10 text-amber-800 dark:text-amber-200",
-    // `unsubscribed` is a pending-verification state — sky/blue reads as
-    // "in flight" rather than the terminal grey of `cancelled`.
-    unsubscribed:
-      "border-sky-500/50 bg-sky-500/10 text-sky-700 dark:text-sky-200",
-    cancelled:
-      "border-muted-foreground/40 bg-muted text-muted-foreground",
-  } as const;
+  // Single muted chip shape across all three states; the only color cue is
+  // a small leading dot. Keeps lifecycle distinguishable at a glance without
+  // letting three different chip backgrounds compete with price-change
+  // colors and merchant-avatar gradients in the same row.
+  const dotColor =
+    status === "paused"
+      ? "bg-amber-500"
+      : status === "unsubscribed"
+        ? "bg-sky-500"
+        : null; // cancelled: terminal state, no color dot — fully muted reads as "done"
   const label =
     status === "paused"
       ? "Paused"
@@ -207,11 +212,13 @@ export function UserStatusPill({
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide",
-        map[status],
+        "inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground",
         className,
       )}
     >
+      {dotColor ? (
+        <span className={cn("size-1.5 rounded-full", dotColor)} aria-hidden />
+      ) : null}
       {label}
     </span>
   );

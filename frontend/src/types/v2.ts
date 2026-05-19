@@ -456,6 +456,11 @@ export interface RecurringStream {
   /** User-chosen merchant rename. Recurring rows from Plaid have no
    * merchant_entity_id so the alias is matched by ``name:<lower(merchant_name)>``. */
   merchant_alias?: string | null;
+  /** Plaid merchant logo URL, joined from the most recent matching
+   * `transactions.logo_url`. Plaid's recurring endpoint doesn't include
+   * logos directly. NULL when no transaction with this merchant has a
+   * logo (cash-only or manual streams). */
+  logo_url?: string | null;
 }
 
 // ---------------------------------------------------------------------------

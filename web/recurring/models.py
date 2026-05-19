@@ -73,6 +73,10 @@ class RecurringStreamOut(BaseModel):
     # display_title at read time. Keyed by the merchant_name path because
     # Plaid's recurring endpoint does not surface merchant_entity_id.
     merchant_alias: Optional[str] = None
+    # Plaid merchant logo for the same merchant_name, pulled from the most
+    # recent matching transaction. Plaid's recurring endpoint does not
+    # return logos directly. Joined in `list_streams`.
+    logo_url: Optional[str] = None
 
     class Config:
         from_attributes = True

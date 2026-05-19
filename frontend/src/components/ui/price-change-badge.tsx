@@ -45,12 +45,16 @@ export function PriceChangeBadge({
   const up = pct > 0;
   const Icon = up ? TrendingUp : TrendingDown;
 
-  const toneClass =
+  // Muted chip frame (neutral border + bg) keeps the chip from competing
+  // with other colored elements in the row. The tone goes into the icon
+  // and percentage text only — that's enough signal to read direction at
+  // a glance, without painting a third saturated chip into the line.
+  const accentClass =
     tone === "good"
-      ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+      ? "text-emerald-600 dark:text-emerald-400"
       : tone === "warn"
-        ? "border-orange-500/60 bg-orange-500/15 text-orange-800 dark:text-orange-200"
-        : "border-border bg-muted text-muted-foreground";
+        ? "text-orange-600 dark:text-orange-400"
+        : "text-muted-foreground";
 
   const prefix = tone === "good" ? "Saved" : tone === "warn" ? "Heads up" : "Change";
   const verb = up ? "up" : "down";
@@ -58,19 +62,25 @@ export function PriceChangeBadge({
   return (
     <Badge
       variant="outline"
-      className={cn("gap-1 whitespace-nowrap", toneClass, className)}
+      className={cn(
+        "gap-1 whitespace-nowrap border-border/60 bg-muted/40 text-muted-foreground",
+        className,
+      )}
       title={`Last charge ${verb} ${Math.abs(pct).toFixed(1)}% vs average`}
     >
-      <Icon className="size-3" aria-hidden />
+      <Icon className={cn("size-3", accentClass)} aria-hidden />
       {compact ? (
-        <span>
+        <span className={cn("tabular-nums font-medium", accentClass)}>
           {up ? "+" : "−"}
           {Math.abs(rounded)}%
         </span>
       ) : (
         <span>
-          {prefix} {up ? "+" : "−"}
-          {Math.abs(rounded)}%
+          <span className="text-muted-foreground">{prefix} </span>
+          <span className={cn("tabular-nums font-medium", accentClass)}>
+            {up ? "+" : "−"}
+            {Math.abs(rounded)}%
+          </span>
         </span>
       )}
     </Badge>
