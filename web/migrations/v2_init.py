@@ -1178,13 +1178,21 @@ async def _migrate_purge_generic_merchant_logos(conn) -> None:
     these out so the bad rows never come back. Idempotent + cheap (the
     blocklist is ~20 names; the DELETE rarely touches more than a row
     or two in practice).
+
+    ``status <> 'user_curated'`` is load-bearing: a user can deliberately
+    curate a logo for a merchant whose Plaid ``merchant_name`` happens to
+    be a generic word (e.g. a Bank of America card autopay that Plaid
+    labels "Online"). That pick lives in ``merchant_logos`` keyed on the
+    generic name, and purging it on every redeploy silently wipes the
+    user's choice. Only auto-resolved rows are fair game here.
     """
     from web.transactions.display import _GENERIC_MERCHANT_NAMES
 
     await conn.execute(
         """
         DELETE FROM merchant_logos
-        WHERE LOWER(REGEXP_REPLACE(merchant_name, '\\s+', ' ', 'g'))
+        WHERE status <> 'user_curated'
+          AND LOWER(REGEXP_REPLACE(merchant_name, '\\s+', ' ', 'g'))
               = ANY($1::text[])
         """,
         list(_GENERIC_MERCHANT_NAMES),
